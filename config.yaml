@@ -1,0 +1,134 @@
+arxiv_categories:
+  - cs.LG
+  - cs.AI
+  - stat.ML
+  - cs.CL
+  - cs.CV
+  - cs.AR
+
+interests:
+  primary:
+    - "KV cache scaling laws, KV cache compression, attention efficiency, paged attention"
+    - "GPU memory wall, memory-efficient training, activation checkpointing, gradient checkpointing"
+    - "Memory and storage as first-class citizens in AI model architecture, storage hierarchy for LLMs"
+    - "Memory-augmented neural networks, external memory architectures, retrieval-augmented generation"
+    - "Optimizer research, Adam variants, AdamW, learning rate scheduling, per-layer scaling"
+    - "Natural gradient methods, Fisher information matrix, second-order optimization"
+    - "Transformer architecture innovations, mixture of experts, sparse attention, low-rank approximation"
+    - "Open source AI tooling, training frameworks, distributed training"
+  secondary:
+    - "ROCm AMD GPU training, HIP, GPU kernel optimization"
+    - "DLRM recommendation systems, embedding tables, large-scale recommendation"
+    - "Harmonic analysis connections to deep learning, Fourier features, spectral methods"
+
+keyword_boosts:
+  high:
+    - KV cache
+    - KV cache scaling
+    - memory wall
+    - GPU memory
+    - memory-efficient
+    - activation checkpointing
+    - Adam
+    - AdamW
+    - Fisher information
+    - natural gradient
+    - learning rate schedule
+    - per-layer
+    - low-rank
+    - attention mechanism
+  medium:
+    - memory-augmented
+    - paged attention
+    - offloading
+    - storage hierarchy
+    - transformer
+    - mixture of experts
+    - sparse attention
+    - gradient checkpointing
+    - retrieval-augmented
+    - external memory
+    - distributed training
+  low:
+    - ROCm
+    - AMD GPU
+    - HIP
+    - DLRM
+    - embedding table
+    - recommendation system
+    - Fourier
+    - spectral
+    - harmonic analysis
+
+scoring:
+  hf_daily_boost: 0.15
+  citation_velocity_boost: 0.10
+  keyword_boost_high: 0.12
+  keyword_boost_medium: 0.06
+  keyword_boost_low: 0.03
+  secondary_interest_weight: 0.5
+  podcast_penalty: 0.90
+  top_n: 20
+
+embedding_model: all-MiniLM-L6-v2
+
+semantic_scholar:
+  api_url: https://api.semanticscholar.org/graph/v1
+  # api_key: optional, set env var S2_API_KEY
+
+elevenlabs:
+  model: eleven_multilingual_v2
+  voices:
+    host:
+      name: mcgrof uno
+      voice_id: oTOJ3soGzir2ldiaDSNs
+    guest:
+      name: Female AI
+      voice_id: HBQuDIqftrmAQQAHSWnF
+  quality: high
+
+image_generation:
+  enabled: true
+  model: gpt-image-1
+  size: "1024x1024"
+  quality: high
+  style_prompt: >
+    Create a dark-themed scientific infographic with accent colors.
+    Use a deep dark background. Include abstract geometric shapes,
+    neural network motifs, or data flow diagrams that relate to the
+    research topic. Modern, clean, minimalist aesthetic.
+    No text or words in the image.
+
+podcast:
+  audio_dir: podcasts
+  instructions: >
+    You are two AI researchers discussing a new paper. The host introduces the paper
+    and its key contributions. The guest provides technical analysis and discusses
+    implications for the field, especially regarding memory and storage in AI systems.
+    Keep the discussion accessible but technically accurate. Highlight practical
+    takeaways and open questions.
+  multi_paper_instructions: >
+    You are two AI researchers discussing {num_papers} papers together. Start by
+    identifying the common themes and connections across all papers. Explain why
+    these papers are interesting when considered together — what shared trends,
+    complementary approaches, or tensions do they reveal? Then discuss each paper's
+    specific contribution, always tying it back to the overarching themes. Keep
+    the discussion accessible but technically accurate. End with a synthesis of
+    where this area of research is heading based on these papers.
+
+spotify:
+  anchor_rss: https://anchor.fm/s/1080af308/podcast/rss
+  audio_base_url: ""  # URL prefix where audio files are hosted
+  feed_file: podcasts/feed.xml
+  show:
+    title: "AI Research Paper Podcast"
+    description: >
+      AI-generated podcast discussing the latest research papers in machine
+      learning, AI systems, memory architectures, and optimization.
+    author: mcgrof
+    email: ""
+    language: en
+    category: Technology
+    image_url: ""
+    link: ""
+    explicit: "no"
