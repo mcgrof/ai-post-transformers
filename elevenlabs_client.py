@@ -118,7 +118,7 @@ def _llm_json(client, model, prompt, temperature=0.4, max_tokens=16000):
 def _topic_classification_pass(text, covered_topics, config):
     """Identify key topics in the paper and flag which are new to the podcast."""
     client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
 
     covered_list = ", ".join(sorted(covered_topics)) if covered_topics else "(none yet)"
 
@@ -189,7 +189,7 @@ def _find_shared_authors(authors, conn):
 def _background_research_pass(text, new_topics, config):
     """For new topics, find surveys, foundational papers, and comparisons."""
     client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
 
     topics_str = "\n".join([f"- {t['name']}: {t['relevance']}" for t in new_topics])
 
@@ -260,7 +260,7 @@ Paper being discussed (for context):
 def _concept_analysis_pass(text, background_context, config):
     """Identify concepts needing explanation and critical questions, informed by background."""
     client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
 
     bg_text = ""
     if background_context:
@@ -343,7 +343,7 @@ def _local_adversarial_search(text, analysis, config):
     import os
 
     client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
 
     # Load ALL prior episodes: new pipeline DB + legacy Anchor feed
     from db import get_connection, init_db, list_podcasts
@@ -524,7 +524,7 @@ def _adversarial_search_pass(text, analysis, config):
     import time
 
     client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
 
     # Step 1: Ask LLM to identify searchable claims and components
     print("[Podcast] Pass 2.5: Adversarial context search...", file=sys.stderr)
@@ -698,7 +698,7 @@ def generate_podcast_script(text, config, covered_topics=None):
     client = _get_openai_client()
     podcast_config = config.get("podcast", {})
     max_words = podcast_config.get("max_words", 3000)
-    model = podcast_config.get("llm_model", "gpt-4o")
+    model = podcast_config.get("llm_model", "gpt-4.1-mini")
 
     if covered_topics is None:
         covered_topics = set()

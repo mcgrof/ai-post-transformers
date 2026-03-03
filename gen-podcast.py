@@ -7,6 +7,8 @@ Multiple PDFs produce a combined episode that identifies common themes.
 Examples:
     gen-podcast.py URL [URL ...]                              # from URLs
     gen-podcast.py URL [URL ...] --goal "focus on X"          # with goal
+    gen-podcast.py URL --goal-file goal.txt                   # goal from file
+    gen-podcast.py URL --goal-file g.txt --description-file d.txt
     gen-podcast.py --input-papers papers.txt                  # from file
     gen-podcast.py --input-papers papers.txt --goal "focus"   # file + goal
     gen-podcast.py digest                                     # daily digest
@@ -149,6 +151,12 @@ def _read_urls_from_file(filepath):
     return urls
 
 
+def _read_text_file(filepath):
+    """Read and return stripped text content from a file."""
+    with open(filepath) as f:
+        return f.read().strip()
+
+
 SUBCOMMANDS = {"digest", "podcast", "spotify-upload"}
 
 
@@ -161,6 +169,7 @@ def main():
 modes:
   URL [URL ...]                        generate podcast from PDF URLs
   URL [URL ...] --goal "focus on X"    with a focus topic
+  URL --goal-file goal.txt             goal from file (keeps record)
   --input-papers FILE                  read URLs from a file
   digest                               run the daily paper digest
   podcast [--paper ARXIV_ID]           generate podcast from a DB paper
@@ -183,8 +192,16 @@ modes:
         help="focus topic injected into podcast instructions",
     )
     parser.add_argument(
+        "--goal-file", metavar="FILE",
+        help="read goal text from a file (mutually exclusive with --goal)",
+    )
+    parser.add_argument(
         "--description", metavar="TEXT",
         help="custom description guidance for the episode summary",
+    )
+    parser.add_argument(
+        "--description-file", metavar="FILE",
+        help="read description guidance from a file (mutually exclusive with --description)",
     )
     parser.add_argument(
         "--paper", metavar="ARXIV_ID",
@@ -208,6 +225,16 @@ modes:
     )
 
     args = parser.parse_args()
+
+    # Resolve --goal-file / --description-file (file takes precedence, error if both)
+    if args.goal and args.goal_file:
+        parser.error("--goal and --goal-file are mutually exclusive")
+    if args.description and args.description_file:
+        parser.error("--description and --description-file are mutually exclusive")
+    if args.goal_file:
+        args.goal = _read_text_file(args.goal_file)
+    if args.description_file:
+        args.description = _read_text_file(args.description_file)
 
     # Mutual exclusivity check
     if args.list_podcasts and args.list_generated_podcasts:
@@ -278,7 +305,9 @@ def _publish_latest(config):
     from db import get_connection, init_db, list_podcasts
     from r2_upload import publish_episode, upload_feed
     from rss import generate_feed
+    import glob
     import os
+    import shutil
 
     conn = get_connection()
     init_db(conn)
@@ -303,6 +332,18 @@ def _publish_latest(config):
 
     for k, v in urls.items():
         print(f"[Publish] {k}: {v}", file=sys.stderr)
+
+    # Copy episode files to public/YYYY/MM/
+    pub_date = latest.get("publish_date", "")
+    if pub_date:
+        year, month = pub_date.split("-")[:2]
+        public_dir = Path(__file__).parent / "public" / year / month
+        public_dir.mkdir(parents=True, exist_ok=True)
+        stem = os.path.splitext(audio)[0]
+        for src in glob.glob(f"{stem}.*"):
+            dst = public_dir / os.path.basename(src)
+            shutil.copy2(src, dst)
+            print(f"[Publish] Copied → {dst}", file=sys.stderr)
 
     # Regenerate and upload RSS feed
     feed_path = generate_feed(config)

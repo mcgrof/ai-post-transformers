@@ -4,4 +4,7 @@ __pycache__/
 papers.db
 output/
 podcasts/
+drafts/
+public/
+inputs/
 .claude/

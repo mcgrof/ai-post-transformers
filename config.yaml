@@ -93,14 +93,15 @@ image_generation:
     with vibrant accent colors (cyan, electric blue, orange). Clean modern typography.
     Professional tech-forward aesthetic.
 podcast:
-  audio_dir: podcasts
+  audio_dir: drafts
   max_words: 3800
   max_words_multi: 4500
   min_minutes: 15
   max_minutes: 23
   multi_paper_minutes: 30
-  llm_model: gpt-4o
-  analysis_model: gpt-4o
+  # default tier: gpt-4o (switched to gpt-4.1-mini for cost + rate limits)
+  llm_model: gpt-4.1-mini
+  analysis_model: gpt-4.1-mini
   hosts:
     a:
       name: Hal Turing

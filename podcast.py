@@ -1,8 +1,10 @@
 """Podcast generation workflow using ElevenLabs Studio API."""
 
+import hashlib
 import json
 import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +21,74 @@ from pdf_utils import download_and_extract
 from rss import generate_feed
 
 
+def _make_episode_stem(title, date_str, urls=None):
+    """Build unique filename stem: {date}-{slug}-{hash6}."""
+    slug = unicodedata.normalize("NFKD", title)
+    slug = re.sub(r"[^\w\s-]", "", slug).strip().lower()
+    slug = re.sub(r"[-\s]+", "-", slug)[:40].rstrip("-")
+    slug = re.sub(r"^episode-", "", slug)
+    hash_input = f"{title}|{date_str}|{','.join(sorted(urls or []))}"
+    hash6 = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
+    return f"{date_str}-{slug}-{hash6}"
+
+
+def _get_output_dir(date_str):
+    """Return drafts/YYYY/MM/ directory, creating if needed."""
+    year, month = date_str.split("-")[:2]
+    output_dir = Path(__file__).parent / "drafts" / year / month
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _save_generation_inputs(title, date_str, urls, goal=None,
+                            description_guidance=None):
+    """Save podcast generation inputs to a versioned directory.
+
+    Creates inputs/YYYY/MM/DD/{slug}-v{N}-{hash6}/ with:
+      - urls.txt, goal.txt, description.txt
+
+    Returns:
+        Path to the created inputs directory.
+    """
+    year, month, day = date_str.split("-")[:3]
+    base_dir = Path(__file__).parent / "inputs" / year / month / day
+
+    # Build slug (same logic as _make_episode_stem but shorter for dir name)
+    slug = unicodedata.normalize("NFKD", title)
+    slug = re.sub(r"[^\w\s-]", "", slug).strip().lower()
+    slug = re.sub(r"[-\s]+", "-", slug)[:30].rstrip("-")
+    slug = re.sub(r"^episode-", "", slug)
+
+    hash_input = f"{title}|{date_str}|{','.join(sorted(urls or []))}"
+    hash6 = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
+
+    # Find next version number
+    version = 1
+    if base_dir.exists():
+        for d in base_dir.iterdir():
+            if d.is_dir() and d.name.startswith(f"{slug}-v"):
+                try:
+                    # Parse version from e.g. "slug-v3-abc123"
+                    parts = d.name[len(slug) + 2:].split("-", 1)
+                    v = int(parts[0])
+                    version = max(version, v + 1)
+                except (ValueError, IndexError):
+                    pass
+
+    inputs_dir = base_dir / f"{slug}-v{version}-{hash6}"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write input files
+    (inputs_dir / "urls.txt").write_text("\n".join(urls) + "\n")
+    if goal:
+        (inputs_dir / "goal.txt").write_text(goal + "\n")
+    if description_guidance:
+        (inputs_dir / "description.txt").write_text(description_guidance + "\n")
+
+    print(f"[Podcast] Inputs saved → {inputs_dir}", file=sys.stderr)
+    return inputs_dir
+
+
 def _generate_summary(script, config, guidance=None):
     """Generate an episode summary from the podcast script transcript.
 
@@ -31,7 +101,7 @@ def _generate_summary(script, config, guidance=None):
     import os
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    model = config.get("podcast", {}).get("llm_model", "gpt-4o")
+    model = config.get("podcast", {}).get("llm_model", "gpt-4.1-mini")
 
     # Build transcript from script
     transcript = "\n".join([
@@ -280,10 +350,9 @@ def generate_podcast(config, arxiv_id=None):
 
     # Output path
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    output_dir = Path(__file__).parent / "podcasts"
-    output_dir.mkdir(exist_ok=True)
-    safe_id = paper["arxiv_id"].replace("/", "_")
-    audio_file = output_dir / f"{date_str}_{safe_id}.mp3"
+    output_dir = _get_output_dir(date_str)
+    stem = _make_episode_stem(f"Episode: {paper['title']}", date_str)
+    audio_file = output_dir / f"{stem}.mp3"
 
     # Get previously covered topics for context
     covered_topics = get_covered_topics(conn)
@@ -568,24 +637,21 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     print(f"[Podcast] Generating podcast from {num_papers} paper(s) "
           f"({len(source_text)} chars total)", file=sys.stderr)
 
+    # Title (needed for filename stem)
+    if num_papers == 1:
+        title = f"Episode: {urls[0]}"
+    else:
+        title = f"Episode: {num_papers} papers combined"
+
     # Output path
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    output_dir = Path(__file__).parent / "podcasts"
-    output_dir.mkdir(exist_ok=True)
-    # Use arxiv ID from first URL if available, otherwise counter to avoid collisions
-    import re as _re
-    first_url = urls[0] if urls else ""
-    arxiv_match = _re.search(r'(\d{4}\.\d{4,5})', first_url)
-    if arxiv_match:
-        slug = arxiv_match.group(1)
-    else:
-        slug = f"urls_{num_papers}"
-    audio_file = output_dir / f"{date_str}_{slug}.mp3"
-    # If file exists, append a counter
-    counter = 2
-    while audio_file.exists():
-        audio_file = output_dir / f"{date_str}_{slug}_v{counter}.mp3"
-        counter += 1
+    output_dir = _get_output_dir(date_str)
+    stem = _make_episode_stem(title, date_str, urls=urls)
+    audio_file = output_dir / f"{stem}.mp3"
+
+    # Save generation inputs for reproducibility
+    _save_generation_inputs(title, date_str, urls, goal=goal,
+                            description_guidance=description_guidance)
 
     # Get previously covered topics
     conn = get_connection()
@@ -617,11 +683,6 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     # Record new topics
     if topic_names:
         add_covered_topics(conn, topic_names)
-
-    if num_papers == 1:
-        title = f"Episode: {urls[0]}"
-    else:
-        title = f"Episode: {num_papers} papers combined"
 
     # Generate episode summary from transcript
     print("[Podcast] Generating episode summary...", file=sys.stderr)
