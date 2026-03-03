@@ -1,0 +1,113 @@
+"""Cloudflare R2 upload utilities for podcast publishing."""
+
+import os
+import sys
+
+import boto3
+
+
+def get_r2_client():
+    """Create an S3-compatible client for Cloudflare R2."""
+    return boto3.client(
+        "s3",
+        endpoint_url=os.environ["AWS_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+
+
+def upload_file(client, local_path, r2_key, content_type=None, bucket=None):
+    """Upload a file to R2.
+
+    Args:
+        client: boto3 S3 client.
+        local_path: Path to the local file.
+        r2_key: Object key in R2 (e.g., 'episodes/my-episode.mp3').
+        content_type: MIME type override.
+        bucket: Bucket name (defaults to R2_BUCKET env var).
+
+    Returns:
+        The public URL of the uploaded file.
+    """
+    bucket = bucket or os.environ.get("R2_BUCKET", "ai-post-transformers")
+    base_url = os.environ.get("PODCAST_BASE_URL", "https://podcast.do-not-panic.com")
+
+    extra_args = {}
+    if content_type:
+        extra_args["ContentType"] = content_type
+
+    # Auto-detect content type
+    if not content_type:
+        ext = os.path.splitext(local_path)[1].lower()
+        ct_map = {
+            ".mp3": "audio/mpeg",
+            ".ogg": "audio/ogg",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".srt": "text/plain",
+            ".txt": "text/plain",
+            ".xml": "application/xml",
+            ".json": "application/json",
+        }
+        if ext in ct_map:
+            extra_args["ContentType"] = ct_map[ext]
+
+    file_size = os.path.getsize(local_path)
+    print(f"[R2] Uploading {r2_key} ({file_size / 1024 / 1024:.1f} MB)...",
+          file=sys.stderr)
+
+    client.upload_file(local_path, bucket, r2_key, ExtraArgs=extra_args)
+
+    url = f"{base_url.rstrip('/')}/{r2_key}"
+    print(f"[R2] → {url}", file=sys.stderr)
+    return url
+
+
+def publish_episode(audio_file, image_file=None, srt_file=None):
+    """Upload all episode artifacts to R2.
+
+    Args:
+        audio_file: Path to the MP3 file.
+        image_file: Path to the PNG cover art (optional).
+        srt_file: Path to the SRT transcript (optional).
+
+    Returns:
+        Dict of uploaded URLs keyed by type.
+    """
+    client = get_r2_client()
+    urls = {}
+
+    basename = os.path.splitext(os.path.basename(audio_file))[0]
+
+    # Upload audio
+    urls["audio"] = upload_file(
+        client, audio_file, f"episodes/{os.path.basename(audio_file)}"
+    )
+
+    # Upload cover art
+    if image_file and os.path.exists(image_file):
+        urls["image"] = upload_file(
+            client, image_file, f"episodes/{os.path.basename(image_file)}"
+        )
+
+    # Upload transcript
+    if srt_file and os.path.exists(srt_file):
+        urls["transcript"] = upload_file(
+            client, srt_file, f"episodes/{os.path.basename(srt_file)}"
+        )
+
+    return urls
+
+
+def upload_feed(feed_file):
+    """Upload the RSS feed XML to R2 root.
+
+    Args:
+        feed_file: Path to the local feed.xml.
+
+    Returns:
+        Public URL of the feed.
+    """
+    client = get_r2_client()
+    return upload_file(client, feed_file, "feed.xml", content_type="application/xml")

@@ -115,8 +115,14 @@ def _add_episode(channel, episode, audio_base_url):
         description = "\n".join(desc_parts)
     ET.SubElement(item, "description").text = description
 
-    # GUID from elevenlabs_project_id (unique per episode)
-    guid_text = episode.get("elevenlabs_project_id") or str(episode.get("id", ""))
+    # GUID: use audio filename as unique identifier (elevenlabs_project_id is often generic)
+    import hashlib
+    audio_file = episode.get("audio_file", "")
+    ep_id = str(episode.get("id", ""))
+    # Generate a stable UUID-like GUID from audio filename or episode ID
+    guid_source = audio_file if audio_file else ep_id
+    guid_hash = hashlib.sha256(guid_source.encode()).hexdigest()[:32]
+    guid_text = f"{guid_hash[:8]}-{guid_hash[8:12]}-{guid_hash[12:16]}-{guid_hash[16:20]}-{guid_hash[20:32]}"
     guid = ET.SubElement(item, "guid", isPermaLink="false")
     guid.text = guid_text
 
@@ -150,12 +156,56 @@ def _add_episode(channel, episode, audio_base_url):
             image_url = image_filename
         ET.SubElement(item, "{%s}image" % ITUNES_NS, href=image_url)
 
+    # Transcript (SRT file — Podcast Index namespace)
+    if audio_file:
+        srt_path = os.path.splitext(audio_file)[0] + ".srt"
+        if os.path.exists(srt_path):
+            srt_filename = os.path.basename(srt_path)
+            if audio_base_url:
+                srt_url = audio_base_url.rstrip("/") + "/" + srt_filename
+            else:
+                srt_url = srt_filename
+            PODCAST_NS = "https://podcastindex.org/namespace/1.0"
+            ET.SubElement(item, "{%s}transcript" % PODCAST_NS, {
+                "url": srt_url,
+                "type": "application/srt",
+                "language": "en",
+            })
+
+
+def _load_anchor_items(config):
+    """Load legacy episodes from the cached Anchor RSS feed.
+
+    Returns a list of XML <item> elements from the old feed, excluding
+    any episodes that exist in the local DB (matched by title).
+
+    Args:
+        config: Full application config dict.
+    """
+    anchor_feed = Path(__file__).parent / "podcasts" / "anchor_feed.xml"
+    if not anchor_feed.exists():
+        # Try to download it
+        anchor_url = config.get("spotify", {}).get("anchor_rss", "")
+        if anchor_url:
+            import urllib.request
+            print(f"[RSS] Downloading legacy feed from {anchor_url}...", file=sys.stderr)
+            urllib.request.urlretrieve(anchor_url, str(anchor_feed))
+        else:
+            return []
+
+    try:
+        tree = ET.parse(str(anchor_feed))
+        return tree.findall(".//item")
+    except ET.ParseError as e:
+        print(f"[RSS] Warning: Failed to parse anchor feed: {e}", file=sys.stderr)
+        return []
+
 
 def generate_feed(config):
-    """Generate an RSS 2.0 podcast feed from the database.
+    """Generate an RSS 2.0 podcast feed merging legacy Anchor episodes with new ones.
 
-    Queries all podcast episodes via list_podcasts(), builds a full RSS feed
-    with iTunes namespace tags, and writes it to the configured feed_file.
+    Legacy episodes keep their original Anchor-hosted audio URLs.
+    New episodes (from local DB) use R2-hosted URLs.
 
     Args:
         config: Full application config dict.
@@ -168,21 +218,58 @@ def generate_feed(config):
         print("[RSS] Warning: spotify.audio_base_url is empty — enclosure URLs "
               "will be relative filenames only.", file=sys.stderr)
 
-    # Register namespace so output uses itunes: prefix (not ns0:)
+    # Register namespaces so output uses proper prefixes
     ET.register_namespace("itunes", ITUNES_NS)
+    ET.register_namespace("podcast", "https://podcastindex.org/namespace/1.0")
+    ET.register_namespace("atom", "http://www.w3.org/2005/Atom")
+    ET.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
+    ET.register_namespace("content", "http://purl.org/rss/1.0/modules/content/")
 
     # Build channel
     rss, channel = _build_channel(config)
 
-    # Query episodes from DB
+    # Load legacy Anchor episodes
+    anchor_items = _load_anchor_items(config)
+
+    # Get local DB episode titles to avoid duplicates
     conn = get_connection()
     init_db(conn)
-    episodes = list_podcasts(conn)
+    local_episodes = list_podcasts(conn)
     conn.close()
 
-    # Add episodes
-    for ep in episodes:
+    # Build set of titles from local episodes that should replace Anchor versions
+    # (e.g., the Cognizant episode exists both on Anchor and locally)
+    local_titles = set()
+    for ep in local_episodes:
+        title = ep.get("title", "").replace("Episode: ", "")
+        local_titles.add(title.strip().lower())
+
+    # Add new local episodes first (newest at top)
+    new_count = 0
+    for ep in local_episodes:
         _add_episode(channel, ep, audio_base_url)
+        new_count += 1
+
+    # Build set of Anchor GUIDs to exclude (replaced by new pipeline)
+    replaced_guids = set(
+        spotify.get("replaced_anchor_guids", [])
+    )
+
+    # Then add legacy Anchor episodes (skipping replaced ones)
+    legacy_count = 0
+    for item in anchor_items:
+        # Skip by GUID if explicitly replaced
+        guid_elem = item.find("guid")
+        guid = guid_elem.text.strip() if guid_elem is not None and guid_elem.text else ""
+        if guid in replaced_guids:
+            continue
+        # Skip by title match
+        title_elem = item.find("title")
+        title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
+        if title.lower() in local_titles:
+            continue
+        channel.append(item)
+        legacy_count += 1
 
     # Write feed
     feed_path = Path(__file__).parent / feed_file
@@ -192,6 +279,8 @@ def generate_feed(config):
     ET.indent(tree, space="  ")
     tree.write(str(feed_path), xml_declaration=True, encoding="UTF-8")
 
-    print(f"[RSS] Feed written to {feed_path} ({len(episodes)} episodes)",
+    total = new_count + legacy_count
+    print(f"[RSS] Feed written to {feed_path} "
+          f"({new_count} new + {legacy_count} legacy = {total} total episodes)",
           file=sys.stderr)
     return str(feed_path)

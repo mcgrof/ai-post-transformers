@@ -183,8 +183,16 @@ modes:
         help="focus topic injected into podcast instructions",
     )
     parser.add_argument(
+        "--description", metavar="TEXT",
+        help="custom description guidance for the episode summary",
+    )
+    parser.add_argument(
         "--paper", metavar="ARXIV_ID",
         help="arXiv paper ID (used with the 'podcast' subcommand)",
+    )
+    parser.add_argument(
+        "--publish", action="store_true",
+        help="upload episode to R2 and regenerate RSS feed after generation",
     )
     parser.add_argument(
         "--list-podcasts", action="store_true",
@@ -254,7 +262,53 @@ modes:
             print("Error: No URLs provided.", file=sys.stderr)
             sys.exit(1)
         from podcast import generate_podcast_from_urls
-        generate_podcast_from_urls(urls, config, goal=args.goal)
+        generate_podcast_from_urls(urls, config, goal=args.goal, description_guidance=args.description)
+
+    # Publish is now a separate step — user must approve first
+    if args.publish:
+        _publish_latest(config)
+
+    if args.args and args.args[0] == "publish":
+        _publish_latest(config)
+        return
+
+
+def _publish_latest(config):
+    """Upload the latest episode to R2 and regenerate the RSS feed."""
+    from db import get_connection, init_db, list_podcasts
+    from r2_upload import publish_episode, upload_feed
+    from rss import generate_feed
+    import os
+
+    conn = get_connection()
+    init_db(conn)
+    episodes = list_podcasts(conn)
+    conn.close()
+
+    if not episodes:
+        print("No episodes to publish.", file=sys.stderr)
+        return
+
+    latest = episodes[0]  # list_podcasts returns newest first
+    audio = latest.get("audio_file", "")
+    if not audio or not os.path.exists(audio):
+        print(f"Audio file not found: {audio}", file=sys.stderr)
+        return
+
+    image = latest.get("image_file")
+    srt = os.path.splitext(audio)[0] + ".srt" if audio else None
+
+    print(f"\n[Publish] Uploading: {latest.get('title', 'Untitled')}", file=sys.stderr)
+    urls = publish_episode(audio, image_file=image, srt_file=srt)
+
+    for k, v in urls.items():
+        print(f"[Publish] {k}: {v}", file=sys.stderr)
+
+    # Regenerate and upload RSS feed
+    feed_path = generate_feed(config)
+    feed_url = upload_feed(feed_path)
+    print(f"[Publish] Feed: {feed_url}", file=sys.stderr)
+    print(f"\n✅ Published!", file=sys.stderr)
 
 
 if __name__ == "__main__":

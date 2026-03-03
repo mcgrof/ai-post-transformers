@@ -45,7 +45,6 @@ def generate_episode_image(prompt, output_path, model="gpt-image-1",
             "n": 1,
             "size": size,
             "quality": quality,
-            "response_format": "b64_json",
         },
         timeout=120,
     )

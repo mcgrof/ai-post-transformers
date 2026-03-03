@@ -54,6 +54,25 @@ def init_db(conn):
             FOREIGN KEY (arxiv_id) REFERENCES papers(arxiv_id)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS covered_topics (
+            topic TEXT PRIMARY KEY,
+            first_covered TEXT NOT NULL,
+            episode_count INTEGER DEFAULT 1
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fun_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            source TEXT,
+            collected_at TEXT NOT NULL,
+            used_at TEXT,
+            used_in_episode TEXT,
+            status TEXT NOT NULL DEFAULT 'unused'
+        )
+    """)
     # Migration: add source_urls column if it doesn't exist yet
     try:
         conn.execute("ALTER TABLE podcasts ADD COLUMN source_urls TEXT")
@@ -174,6 +193,90 @@ def link_podcast_paper(conn, podcast_id, arxiv_id):
 def get_podcast_arxiv_ids(conn):
     rows = conn.execute("SELECT DISTINCT arxiv_id FROM podcast_papers").fetchall()
     return {row["arxiv_id"] for row in rows}
+
+
+def get_covered_topics(conn):
+    rows = conn.execute("SELECT topic FROM covered_topics").fetchall()
+    return {row["topic"] for row in rows}
+
+
+def add_covered_topics(conn, topics):
+    for t in topics:
+        conn.execute("""
+            INSERT INTO covered_topics (topic, first_covered, episode_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(topic) DO UPDATE SET episode_count = episode_count + 1
+        """, (t, datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+
+
+def get_unused_fun_facts(conn, limit=10, category=None):
+    """Get unused fun facts, optionally filtered by category."""
+    if category:
+        rows = conn.execute(
+            "SELECT * FROM fun_facts WHERE status = 'unused' AND category = ? "
+            "ORDER BY collected_at DESC LIMIT ?", (category, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM fun_facts WHERE status = 'unused' "
+            "ORDER BY collected_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_facts_used(conn, fact_ids, episode_title=""):
+    """Mark fun facts as used."""
+    for fid in fact_ids:
+        conn.execute(
+            "UPDATE fun_facts SET status = 'used', used_at = ?, used_in_episode = ? "
+            "WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), episode_title, fid)
+        )
+    conn.commit()
+
+
+def add_fun_facts(conn, facts):
+    """Add new fun facts. Each fact is a dict with: fact, category, source."""
+    for f in facts:
+        # Check for duplicates
+        existing = conn.execute(
+            "SELECT 1 FROM fun_facts WHERE fact = ?", (f["fact"],)
+        ).fetchone()
+        if existing:
+            continue
+        conn.execute(
+            "INSERT INTO fun_facts (fact, category, source, collected_at) "
+            "VALUES (?, ?, ?, ?)",
+            (f["fact"], f.get("category", "general"), f.get("source", ""),
+             datetime.now(timezone.utc).isoformat())
+        )
+    conn.commit()
+
+
+def get_episode_count(conn):
+    """Get total number of podcast episodes."""
+    row = conn.execute("SELECT COUNT(*) FROM podcasts").fetchone()
+    return row[0] if row else 0
+
+
+def prune_used_fun_facts(conn, keep_days=7):
+    """Delete used fun facts older than keep_days. Keeps the DB lean."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+    result = conn.execute(
+        "DELETE FROM fun_facts WHERE status = 'used' AND used_at < ?", (cutoff,)
+    )
+    deleted = result.rowcount
+    conn.commit()
+    return deleted
+
+
+def get_fun_facts_stats(conn):
+    """Get counts of used/unused fun facts."""
+    unused = conn.execute("SELECT COUNT(*) FROM fun_facts WHERE status='unused'").fetchone()[0]
+    used = conn.execute("SELECT COUNT(*) FROM fun_facts WHERE status='used'").fetchone()[0]
+    return {"unused": unused, "used": used, "total": unused + used}
 
 
 def list_podcasts(conn):

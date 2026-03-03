@@ -11,12 +11,64 @@ import feedparser
 from db import (
     get_connection, init_db, get_podcast_arxiv_ids,
     insert_podcast, update_podcast, link_podcast_paper, list_podcasts,
-    get_today_papers,
+    get_today_papers, get_covered_topics, add_covered_topics,
 )
-from elevenlabs_client import create_podcast, finalize_podcast
+from elevenlabs_client import create_podcast, finalize_podcast, save_transcript, generate_srt
 from image_gen import generate_episode_image
 from pdf_utils import download_and_extract
 from rss import generate_feed
+
+
+def _generate_summary(script, config, guidance=None):
+    """Generate an episode summary from the podcast script transcript.
+
+    Args:
+        script: List of script segment dicts with 'speaker' and 'text'.
+        config: Config dict with podcast.llm_model.
+        guidance: Optional custom guidance for the summary style/content.
+    """
+    from openai import OpenAI
+    import os
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    model = config.get("podcast", {}).get("llm_model", "gpt-4o")
+
+    # Build transcript from script
+    transcript = "\n".join([
+        f"{'Hal Turing' if s['speaker'] == 'A' else 'Dr. Ada Shannon'}: {s['text']}"
+        for s in script[:40]  # First 40 segments should cover the key content
+    ])
+
+    if guidance:
+        prompt = f"""Write a podcast episode description based on this transcript.
+
+CUSTOM GUIDANCE (follow this closely for tone, structure, and content):
+{guidance}
+
+Write 3 paragraphs. Be specific about the content discussed. Write in third person.
+
+Transcript:
+{transcript[:6000]}
+
+Output ONLY the description text, no quotes or labels."""
+    else:
+        prompt = f"""Write a concise podcast episode summary (3-5 sentences) based on this transcript.
+Focus on: what topics are covered, key findings or arguments discussed, and why a listener
+would find it interesting. Write in third person ("This episode explores...").
+Do NOT mention the podcast name or the host names. Be specific about the content — no generic filler.
+
+Transcript:
+{transcript[:6000]}
+
+Output ONLY the summary text, no quotes or labels."""
+
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=600,
+    )
+    return resp.choices[0].message.content.strip()
 
 
 def _format_source_citation(papers_info):
@@ -123,25 +175,41 @@ Link: {url}"""
     return text
 
 
-def _build_image_prompt(config, title, abstract_or_summary):
-    """Build a prompt for episode image generation.
+def _build_image_prompt(config, title, description):
+    """Build a prompt for episode infographic image generation.
 
     Args:
         config: Full application config dict.
         title: Paper or episode title.
-        abstract_or_summary: Abstract text or extracted summary.
+        description: Episode description (summary text).
 
     Returns:
         Combined prompt string.
     """
     img_config = config.get("image_generation", {})
     style = img_config.get("style_prompt", "").strip()
-    context = f"Research topic: {title}"
-    if abstract_or_summary:
-        context += f"\n\n{abstract_or_summary[:500]}"
-    if style:
-        return f"{style}\n\n{context}"
-    return context
+
+    # Extract key stats/points from description for infographic
+    prompt = f"""{style}
+
+Create a DARK-THEMED INFOGRAPHIC for a podcast episode cover image.
+
+Episode: {title}
+
+Content to visualize:
+{description[:800]}
+
+DESIGN REQUIREMENTS:
+- Dark background (deep navy/charcoal/black) with vibrant accent colors (cyan, orange, electric blue)
+- Do NOT include the podcast name or host names — they are already implied
+- Include 3-5 KEY STATS or FINDINGS as short text callouts with icons/symbols
+- Use clean data visualization elements (simple charts, percentage rings, arrows)
+- Modern minimalist infographic style — NOT cluttered
+- Text must be LEGIBLE and SPELLED CORRECTLY
+- 1024x1024 square format suitable for podcast feed
+- Professional, tech-forward aesthetic"""
+
+    return prompt
 
 
 def _generate_episode_image(config, episode_title, abstract_or_summary,
@@ -210,16 +278,43 @@ def generate_podcast(config, arxiv_id=None):
     # Prepare text
     text = _prepare_podcast_text(paper)
 
-    # Create podcast via ElevenLabs
-    tmpdir, list_file, segments = create_podcast(text, config)
+    # Output path
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    output_dir = Path(__file__).parent / "podcasts"
+    output_dir.mkdir(exist_ok=True)
+    safe_id = paper["arxiv_id"].replace("/", "_")
+    audio_file = output_dir / f"{date_str}_{safe_id}.mp3"
+
+    # Get previously covered topics for context
+    covered_topics = get_covered_topics(conn)
+
+    # Create podcast via ElevenLabs TTS (multi-pass pipeline)
+    tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
+        text, config, covered_topics
+    )
     finalize_podcast(tmpdir, list_file, str(audio_file))
 
-    # Generate episode cover image
-    image_file = _generate_episode_image(
-        config, paper["title"], paper.get("abstract", ""), str(audio_file)
-    )
+    # Save transcript and SRT subtitles
+    hosts = config.get("podcast", {}).get("hosts", {})
+    host_names = {
+        "A": hosts.get("a", {}).get("name", "Hal Turing"),
+        "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
+    }
+    transcript_file = audio_file.with_suffix(".txt")
+    srt_file = audio_file.with_suffix(".srt")
+    save_transcript(script, str(transcript_file), host_names)
+    generate_srt(script, segments, str(srt_file), host_names=host_names)
 
-    # Build description with source citation
+    # Save script JSON for future use
+    script_file = audio_file.with_suffix(".json")
+    with open(script_file, "w") as f:
+        json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
+
+    # Record new topics as covered
+    if topic_names:
+        add_covered_topics(conn, topic_names)
+
+    # Build description with source citations (primary paper + all referenced works)
     authors = paper.get("authors", [])
     if isinstance(authors, str):
         authors = json.loads(authors)
@@ -229,7 +324,37 @@ def generate_podcast(config, arxiv_id=None):
         "published": paper.get("published", ""),
         "url": paper.get("arxiv_url", ""),
     }
-    description = _format_source_citation([paper_info])
+
+    # Generate episode summary from transcript
+    print("[Podcast] Generating episode summary...", file=sys.stderr)
+    summary = _generate_summary(script, config)
+
+    # Format description: summary + numbered sources with URLs
+    desc_lines = [summary, "", "Sources:"]
+    src_num = 1
+    desc_lines.append(f"  {src_num}. {paper_info['title']} — {', '.join(authors) if authors else '?'}, {paper_info.get('published', '?')[:4]}")
+    if paper_info.get("url"):
+        desc_lines.append(f"     {paper_info['url']}")
+    src_num += 1
+
+    if sources:
+        for s in sources:
+            title_str = s.get('title', '?')
+            authors_str = s.get('authors', '?')
+            year_str = s.get('year', '?')
+            url_str = s.get('url', '')
+            if not url_str:
+                url_str = f"https://scholar.google.com/scholar?q={title_str.replace(' ', '+')}"
+            desc_lines.append(f"  {src_num}. {title_str} — {authors_str}, {year_str}")
+            desc_lines.append(f"     {url_str}")
+            src_num += 1
+
+    description = "\n".join(desc_lines)
+
+    # Generate episode cover image (uses description for infographic content)
+    image_file = _generate_episode_image(
+        config, paper["title"], summary, str(audio_file)
+    )
 
     # Record in database
     title = f"Episode: {paper['title']}"
@@ -237,7 +362,7 @@ def generate_podcast(config, arxiv_id=None):
         conn,
         title=title,
         publish_date=date_str,
-        elevenlabs_project_id=project_id,
+        elevenlabs_project_id="tts-local",
         audio_file=str(audio_file),
         description=description,
         image_file=image_file,
@@ -245,12 +370,14 @@ def generate_podcast(config, arxiv_id=None):
     link_podcast_paper(conn, podcast_id, paper["arxiv_id"])
     conn.close()
 
-    generate_feed(config)
-
     print(f"\nPodcast generated successfully!", file=sys.stderr)
     print(f"  Title: {title}", file=sys.stderr)
     print(f"  Audio: {audio_file}", file=sys.stderr)
     print(f"  Paper: {paper['arxiv_url']}", file=sys.stderr)
+    if sources:
+        print(f"  Sources referenced: {len(sources)}", file=sys.stderr)
+        for s in sources:
+            print(f"    - {s.get('title', '?')} ({s.get('year', '?')})", file=sys.stderr)
 
 
 def show_generated_podcast_list(top=None):
@@ -397,7 +524,7 @@ def _get_multi_paper_instructions(config, num_papers, goal=None):
     return instructions
 
 
-def generate_podcast_from_urls(urls, config, goal=None):
+def generate_podcast_from_urls(urls, config, goal=None, description_guidance=None):
     """Generate a podcast episode from one or more PDF URLs.
 
     Args:
@@ -441,39 +568,95 @@ def generate_podcast_from_urls(urls, config, goal=None):
     print(f"[Podcast] Generating podcast from {num_papers} paper(s) "
           f"({len(source_text)} chars total)", file=sys.stderr)
 
-    # Create podcast via ElevenLabs
-    tmpdir, list_file, segments = create_podcast(source_text, config)
-    finalize_podcast(tmpdir, list_file, str(audio_file))
+    # Output path
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    output_dir = Path(__file__).parent / "podcasts"
+    output_dir.mkdir(exist_ok=True)
+    # Use arxiv ID from first URL if available, otherwise counter to avoid collisions
+    import re as _re
+    first_url = urls[0] if urls else ""
+    arxiv_match = _re.search(r'(\d{4}\.\d{4,5})', first_url)
+    if arxiv_match:
+        slug = arxiv_match.group(1)
+    else:
+        slug = f"urls_{num_papers}"
+    audio_file = output_dir / f"{date_str}_{slug}.mp3"
+    # If file exists, append a counter
+    counter = 2
+    while audio_file.exists():
+        audio_file = output_dir / f"{date_str}_{slug}_v{counter}.mp3"
+        counter += 1
 
-    # Record in database
+    # Get previously covered topics
     conn = get_connection()
     init_db(conn)
+    covered_topics = get_covered_topics(conn)
+
+    # Create podcast via ElevenLabs (multi-pass pipeline)
+    tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
+        source_text, config, covered_topics
+    )
+    finalize_podcast(tmpdir, list_file, str(audio_file))
+
+    # Save transcript and SRT subtitles
+    hosts = config.get("podcast", {}).get("hosts", {})
+    host_names = {
+        "A": hosts.get("a", {}).get("name", "Hal Turing"),
+        "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
+    }
+    transcript_file = audio_file.with_suffix(".txt")
+    srt_file = audio_file.with_suffix(".srt")
+    save_transcript(script, str(transcript_file), host_names)
+    generate_srt(script, segments, str(srt_file), host_names=host_names)
+
+    # Save script JSON
+    script_file = audio_file.with_suffix(".json")
+    with open(script_file, "w") as f:
+        json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
+
+    # Record new topics
+    if topic_names:
+        add_covered_topics(conn, topic_names)
 
     if num_papers == 1:
         title = f"Episode: {urls[0]}"
     else:
         title = f"Episode: {num_papers} papers combined"
 
-    # Generate episode cover image
-    # Build summary from extracted text for image prompt context
-    if num_papers == 1:
-        image_summary = papers_text[0][1][:500]
-    else:
-        per_paper = 500 // num_papers
-        image_summary = " ".join(text[:per_paper] for _, text in papers_text)
-    image_file = _generate_episode_image(
-        config, title, image_summary, str(audio_file)
-    )
+    # Generate episode summary from transcript
+    print("[Podcast] Generating episode summary...", file=sys.stderr)
+    summary = _generate_summary(script, config, guidance=description_guidance)
 
-    # Build description with source citations from URLs
-    papers_info = [{"url": url} for url, _ in papers_text]
-    description = _format_source_citation(papers_info)
+    # Build description: summary + numbered sources with URLs
+    desc_lines = [summary, "", "Sources:"]
+    src_num = 1
+    for url in urls:
+        desc_lines.append(f"  {src_num}. {url}")
+        src_num += 1
+    if sources:
+        for s in sources:
+            title_str = s.get('title', '?')
+            authors_str = s.get('authors', '?')
+            year_str = s.get('year', '?')
+            url_str = s.get('url', '')
+            if not url_str:
+                # Try to construct a search URL for papers without direct links
+                url_str = f"https://scholar.google.com/scholar?q={title_str.replace(' ', '+')}"
+            desc_lines.append(f"  {src_num}. {title_str} — {authors_str}, {year_str}")
+            desc_lines.append(f"     {url_str}")
+            src_num += 1
+    description = "\n".join(desc_lines)
+
+    # Generate episode cover image (uses summary for infographic content)
+    image_file = _generate_episode_image(
+        config, title, summary, str(audio_file)
+    )
 
     podcast_id = insert_podcast(
         conn,
         title=title,
         publish_date=date_str,
-        elevenlabs_project_id=project_id,
+        elevenlabs_project_id="tts-local",
         audio_file=str(audio_file),
         source_urls=json.dumps(urls),
         description=description,
@@ -481,10 +664,10 @@ def generate_podcast_from_urls(urls, config, goal=None):
     )
     conn.close()
 
-    generate_feed(config)
-
     print(f"\nPodcast generated successfully!", file=sys.stderr)
     print(f"  Title: {title}", file=sys.stderr)
     print(f"  Audio: {audio_file}", file=sys.stderr)
     for url in urls:
         print(f"  Source: {url}", file=sys.stderr)
+    if sources:
+        print(f"  References: {len(sources)}", file=sys.stderr)

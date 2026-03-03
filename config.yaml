@@ -1,134 +1,195 @@
 arxiv_categories:
-  - cs.LG
-  - cs.AI
-  - stat.ML
-  - cs.CL
-  - cs.CV
-  - cs.AR
-
+- cs.LG
+- cs.AI
+- stat.ML
+- cs.CL
+- cs.CV
+- cs.AR
 interests:
   primary:
-    - "KV cache scaling laws, KV cache compression, attention efficiency, paged attention"
-    - "GPU memory wall, memory-efficient training, activation checkpointing, gradient checkpointing"
-    - "Memory and storage as first-class citizens in AI model architecture, storage hierarchy for LLMs"
-    - "Memory-augmented neural networks, external memory architectures, retrieval-augmented generation"
-    - "Optimizer research, Adam variants, AdamW, learning rate scheduling, per-layer scaling"
-    - "Natural gradient methods, Fisher information matrix, second-order optimization"
-    - "Transformer architecture innovations, mixture of experts, sparse attention, low-rank approximation"
-    - "Open source AI tooling, training frameworks, distributed training"
+  - KV cache scaling laws, KV cache compression, attention efficiency, paged attention
+  - GPU memory wall, memory-efficient training, activation checkpointing, gradient
+    checkpointing
+  - Memory and storage as first-class citizens in AI model architecture, storage hierarchy
+    for LLMs
+  - Memory-augmented neural networks, external memory architectures, retrieval-augmented
+    generation
+  - Optimizer research, Adam variants, AdamW, learning rate scheduling, per-layer
+    scaling
+  - Natural gradient methods, Fisher information matrix, second-order optimization
+  - Transformer architecture innovations, mixture of experts, sparse attention, low-rank
+    approximation
+  - Open source AI tooling, training frameworks, distributed training
   secondary:
-    - "ROCm AMD GPU training, HIP, GPU kernel optimization"
-    - "DLRM recommendation systems, embedding tables, large-scale recommendation"
-    - "Harmonic analysis connections to deep learning, Fourier features, spectral methods"
-
+  - ROCm AMD GPU training, HIP, GPU kernel optimization
+  - DLRM recommendation systems, embedding tables, large-scale recommendation
+  - Harmonic analysis connections to deep learning, Fourier features, spectral methods
 keyword_boosts:
   high:
-    - KV cache
-    - KV cache scaling
-    - memory wall
-    - GPU memory
-    - memory-efficient
-    - activation checkpointing
-    - Adam
-    - AdamW
-    - Fisher information
-    - natural gradient
-    - learning rate schedule
-    - per-layer
-    - low-rank
-    - attention mechanism
+  - KV cache
+  - KV cache scaling
+  - memory wall
+  - GPU memory
+  - memory-efficient
+  - activation checkpointing
+  - Adam
+  - AdamW
+  - Fisher information
+  - natural gradient
+  - learning rate schedule
+  - per-layer
+  - low-rank
+  - attention mechanism
   medium:
-    - memory-augmented
-    - paged attention
-    - offloading
-    - storage hierarchy
-    - transformer
-    - mixture of experts
-    - sparse attention
-    - gradient checkpointing
-    - retrieval-augmented
-    - external memory
-    - distributed training
+  - memory-augmented
+  - paged attention
+  - offloading
+  - storage hierarchy
+  - transformer
+  - mixture of experts
+  - sparse attention
+  - gradient checkpointing
+  - retrieval-augmented
+  - external memory
+  - distributed training
   low:
-    - ROCm
-    - AMD GPU
-    - HIP
-    - DLRM
-    - embedding table
-    - recommendation system
-    - Fourier
-    - spectral
-    - harmonic analysis
-
+  - ROCm
+  - AMD GPU
+  - HIP
+  - DLRM
+  - embedding table
+  - recommendation system
+  - Fourier
+  - spectral
+  - harmonic analysis
 scoring:
   hf_daily_boost: 0.15
-  citation_velocity_boost: 0.10
+  citation_velocity_boost: 0.1
   keyword_boost_high: 0.12
   keyword_boost_medium: 0.06
   keyword_boost_low: 0.03
   secondary_interest_weight: 0.5
-  podcast_penalty: 0.90
+  podcast_penalty: 0.9
   top_n: 20
-
 embedding_model: all-MiniLM-L6-v2
-
 semantic_scholar:
   api_url: https://api.semanticscholar.org/graph/v1
-  # api_key: optional, set env var S2_API_KEY
-
 elevenlabs:
   model: eleven_multilingual_v2
   voices:
     host:
-      name: mcgrof uno
-      voice_id: oTOJ3soGzir2ldiaDSNs
+      name: Chris
+      voice_id: iP95p4xoKVk53GoZ742B
     guest:
       name: Female AI
       voice_id: HBQuDIqftrmAQQAHSWnF
   quality: high
-
 image_generation:
   enabled: true
   model: gpt-image-1
-  size: "1024x1024"
+  size: 1024x1024
   quality: high
-  style_prompt: >
-    Create a dark-themed scientific infographic with accent colors.
-    Use a deep dark background. Include abstract geometric shapes,
-    neural network motifs, or data flow diagrams that relate to the
-    research topic. Modern, clean, minimalist aesthetic.
-    No text or words in the image.
-
+  style_prompt: Dark-themed podcast infographic cover art. Deep navy/charcoal background
+    with vibrant accent colors (cyan, electric blue, orange). Clean modern typography.
+    Professional tech-forward aesthetic.
 podcast:
   audio_dir: podcasts
-  instructions: >
-    You are two AI researchers discussing a new paper. The host introduces the paper
-    and its key contributions. The guest provides technical analysis and discusses
-    implications for the field, especially regarding memory and storage in AI systems.
-    Keep the discussion accessible but technically accurate. Highlight practical
-    takeaways and open questions.
-  multi_paper_instructions: >
-    You are two AI researchers discussing {num_papers} papers together. Start by
-    identifying the common themes and connections across all papers. Explain why
-    these papers are interesting when considered together — what shared trends,
-    complementary approaches, or tensions do they reveal? Then discuss each paper's
-    specific contribution, always tying it back to the overarching themes. Keep
-    the discussion accessible but technically accurate. End with a synthesis of
-    where this area of research is heading based on these papers.
+  max_words: 3800
+  max_words_multi: 4500
+  min_minutes: 15
+  max_minutes: 23
+  multi_paper_minutes: 30
+  llm_model: gpt-4o
+  analysis_model: gpt-4o
+  hosts:
+    a:
+      name: Hal Turing
+      role: host
+      gender: male
+      personality: 'Warm, curious, slightly nerdy. Asks the questions the audience
+        is thinking. Good at making complex topics feel approachable. Occasionally
+        cracks jokes. Not afraid to say "wait, I don''t get that" to push for clarity.
 
+        '
+    b:
+      name: Dr. Ada Shannon
+      role: co-host
+      gender: female
+      personality: 'Sharp, knowledgeable, direct. The technical expert who can break
+        down any paper. References related work naturally by author and date. Not
+        a cheerleader — will call out weak evaluations or overhyped claims. Dry wit.
+
+        '
+  dynamics:
+    interrupt_per_episode: 1
+    disagreement_every_n: 2
+    max_jokes_per_episode: 2
+    joke_preference: current_events
+  intro: 'Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+    and my co-host is Dr. Ada Shannon.
+
+    '
+  instructions: "This podcast is designed to EDUCATE, not just summarize. Our audience\
+    \ is technically literate (ML engineers, researchers) but may not know every subfield.\n\
+    HOSTS: The male host is Hal Turing (speaker A) — warm, curious, asks good questions.\
+    \ The female co-host is Dr. Ada Shannon (speaker B) — the technical expert, sharp\
+    \ and direct. They have natural chemistry and occasionally banter.\nINTRO: The\
+    \ podcast MUST begin with Hal (speaker A) delivering the intro verbatim, then\
+    \ immediately introducing what they'll cover today. Ada should then jump in with\
+    \ a brief teaser about why this paper/topic caught her attention.\nRULE 1 — KNOW\
+    \ YOUR AUDIENCE: If a topic is new to this podcast (flagged by the pipeline),\
+    \ you MUST provide substantial background. Don't assume knowledge. Compare unfamiliar\
+    \ methods to familiar ones (transformers, SGD, neural nets). Explain WHY one approach\
+    \ dominated and where the other still has advantages. Use surveys and foundational\
+    \ papers to back up your explanations.\nRULE 2 — CRITICAL ANALYSIS: Always ask:\
+    \ has anyone in industry adopted this? If a method claims efficiency gains, who\
+    \ is using it at scale? Name names and dates. What's genuinely novel vs incremental?\
+    \ What's missing from the evaluation? Would this work at scale (1M+ data points)?\
+    \ Why would I use this instead of just training a bigger neural net?\nRULE 3 —\
+    \ CITE EVERYTHING WITH DETAILS: When referencing any paper: - Say the paper title\
+    \ - Name the authors (at least first author) - Name the institution/lab (e.g.,\
+    \ \"out of Google Brain\", \"from Cambridge\") - Say the year of publication -\
+    \ Example: \"That reminds me of the Random Features paper by Rahimi and Recht\
+    \ out\n  of UC Berkeley back in 2007\"\nWhen citing the primary paper being discussed,\
+    \ mention its arXiv date and authors' affiliations. External references used to\
+    \ support discussion points must also be cited with the same level of detail.\n\
+    RULE 4 — KEEP IT FUN: Include at least 2 nerdy jokes related to the material.\
+    \ This is a conversation between two people who actually care about the science,\
+    \ not a lecture. Think conference-bar humor.\nRULE 5 — STRUCTURAL COMPARISONS:\
+    \ When the paper introduces a method from a different tradition (Bayesian, spectral,\
+    \ kernel), explicitly compare the structural differences with mainstream deep\
+    \ learning. E.g., \"GP uses a kernel function where a neural net would learn features\"\
+    \ — make it concrete.\nRULE 6 — HONESTY: If a paper oversells or the claims aren't\
+    \ well-supported, say so. Our listeners deserve honest analysis, not hype.\nRULE\
+    \ 7 — LENGTH: The podcast should be substantial. For a single paper, aim for 15-23\
+    \ minutes of audio (~3000-3500 words). Don't rush through concepts — if you're\
+    \ citing more papers and explaining more background, use the space. Better to\
+    \ be thorough than superficial.\n"
+  multi_paper_instructions: 'You are two AI researchers discussing {num_papers} papers
+    together. Start by identifying the common themes and connections across all papers.
+    Explain why these papers are interesting when considered together — what shared
+    trends, complementary approaches, or tensions do they reveal? Then discuss each
+    paper''s specific contribution, always tying it back to the overarching themes.
+    Keep the discussion accessible but technically accurate. End with a synthesis
+    of where this area of research is heading based on these papers.
+
+    '
 spotify:
   anchor_rss: https://anchor.fm/s/1080af308/podcast/rss
-  audio_base_url: ""  # URL prefix where audio files are hosted
+  audio_base_url: https://podcast.do-not-panic.com/episodes
   feed_file: podcasts/feed.xml
   show:
-    title: "AI Research Paper Podcast"
-    description: >
-      AI-generated podcast discussing the latest research papers in machine
-      learning, AI systems, memory architectures, and optimization.
+    title: AI Post Transformers
+    description: AI-generated podcast where hosts Hal Turing and Dr. Ada Shannon discuss
+      the latest research papers and reports in machine learning, AI systems, and
+      optimization. Featuring honest critical analysis, proper citations, and nerdy
+      humor.
     author: mcgrof
-    email: ""
+    email: mcgrof@do-not-panic.com
     language: en
     category: Technology
-    image_url: ""
-    link: ""
-    explicit: "no"
+    image_url: https://podcast.do-not-panic.com/show-art.png
+    link: https://podcast.do-not-panic.com
+    explicit: 'no'
+  replaced_anchor_guids:
+  - 5e0e365d-8f23-4d0f-86eb-7a67d4ab05bc
