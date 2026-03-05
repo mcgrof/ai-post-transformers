@@ -1,5 +1,6 @@
 """SQLite cache for paper deduplication, storage, and podcast tracking."""
 
+import re
 import sqlite3
 import json
 from datetime import datetime, timezone
@@ -193,6 +194,29 @@ def link_podcast_paper(conn, podcast_id, arxiv_id):
 def get_podcast_arxiv_ids(conn):
     rows = conn.execute("SELECT DISTINCT arxiv_id FROM podcast_papers").fetchall()
     return {row["arxiv_id"] for row in rows}
+
+
+def get_all_episode_arxiv_ids(conn):
+    """Get arXiv IDs from both podcast_papers and podcasts.source_urls.
+
+    The podcast_papers junction table only covers digest-sourced episodes.
+    URL-based episodes store paper URLs in the source_urls JSON column.
+    This function unions both sources for complete dedup.
+    """
+    ids = get_podcast_arxiv_ids(conn)
+    rows = conn.execute(
+        "SELECT source_urls FROM podcasts "
+        "WHERE source_urls IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        try:
+            for url in json.loads(row["source_urls"]):
+                m = re.search(r'(\d{4}\.\d{4,5})', url)
+                if m:
+                    ids.add(m.group(1))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return ids
 
 
 def get_covered_topics(conn):

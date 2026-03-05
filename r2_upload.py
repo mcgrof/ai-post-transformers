@@ -6,6 +6,16 @@ import sys
 import boto3
 
 
+def _isatty():
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+
+def _c(code, text):
+    if not _isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
 def get_r2_client():
     """Create an S3-compatible client for Cloudflare R2."""
     return boto3.client(
@@ -54,18 +64,28 @@ def upload_file(client, local_path, r2_key, content_type=None, bucket=None):
             extra_args["ContentType"] = ct_map[ext]
 
     file_size = os.path.getsize(local_path)
-    print(f"[R2] Uploading {r2_key} ({file_size / 1024 / 1024:.1f} MB)...",
-          file=sys.stderr)
+    size_str = f"{file_size / 1024 / 1024:.1f} MB"
+    print(f"{_c('36', '[R2]')} Uploading {_c('1', r2_key)} "
+          f"{_c('2', f'({size_str})')}...", file=sys.stderr)
 
     client.upload_file(local_path, bucket, r2_key, ExtraArgs=extra_args)
 
     url = f"{base_url.rstrip('/')}/{r2_key}"
-    print(f"[R2] → {url}", file=sys.stderr)
+    print(f"{_c('36', '[R2]')} {_c('32', '→')} {_c('2', url)}",
+          file=sys.stderr)
     return url
+
+
+def _episode_r2_prefix(filename):
+    """R2 key prefix for episode files. All episodes live flat under episodes/."""
+    return "episodes"
 
 
 def publish_episode(audio_file, image_file=None, srt_file=None):
     """Upload all episode artifacts to R2.
+
+    Files are organized under episodes/YYYY/MM/ based on the
+    episode date embedded in the filename.
 
     Args:
         audio_file: Path to the MP3 file.
@@ -78,23 +98,26 @@ def publish_episode(audio_file, image_file=None, srt_file=None):
     client = get_r2_client()
     urls = {}
 
-    basename = os.path.splitext(os.path.basename(audio_file))[0]
+    audio_basename = os.path.basename(audio_file)
+    prefix = _episode_r2_prefix(audio_basename)
 
     # Upload audio
     urls["audio"] = upload_file(
-        client, audio_file, f"episodes/{os.path.basename(audio_file)}"
+        client, audio_file, f"{prefix}/{audio_basename}"
     )
 
     # Upload cover art
     if image_file and os.path.exists(image_file):
         urls["image"] = upload_file(
-            client, image_file, f"episodes/{os.path.basename(image_file)}"
+            client, image_file,
+            f"{prefix}/{os.path.basename(image_file)}"
         )
 
     # Upload transcript
     if srt_file and os.path.exists(srt_file):
         urls["transcript"] = upload_file(
-            client, srt_file, f"episodes/{os.path.basename(srt_file)}"
+            client, srt_file,
+            f"{prefix}/{os.path.basename(srt_file)}"
         )
 
     return urls

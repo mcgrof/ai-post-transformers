@@ -1,7 +1,8 @@
 .venv/
 __pycache__/
 *.pyc
-papers.db
+*.db
+queue.yaml
 output/
 podcasts/
 drafts/

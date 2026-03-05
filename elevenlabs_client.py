@@ -13,6 +13,8 @@ import time
 import requests
 import json
 
+from llm_backend import get_llm_backend, llm_call
+
 BASE_URL = "https://api.elevenlabs.io/v1"
 
 
@@ -44,81 +46,13 @@ def tts_segment(text, voice_id, output_path):
     return output_path
 
 
-def _get_openai_client():
-    """Get an OpenAI client with API key from env or codex auth."""
-    import openai
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        try:
-            with open(os.path.expanduser("~/.codex/auth.json")) as f:
-                api_key = json.load(f).get("OPENAI_API_KEY")
-        except Exception:
-            pass
-    if not api_key:
-        raise RuntimeError("Set OPENAI_API_KEY for script generation")
-    return openai.OpenAI(api_key=api_key)
-
-
-def _llm_json(client, model, prompt, temperature=0.4, max_tokens=16000):
-    """Call LLM and parse JSON response."""
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    result = resp.choices[0].message.content.strip()
-    result = re.sub(r"^```json\n?|```$", "", result, flags=re.MULTILINE).strip()
-    try:
-        return json.loads(result)
-    except json.JSONDecodeError as orig_err:
-        print(f"[Podcast] Warning: JSON parse error, attempting repair...", file=sys.stderr)
-        fixed = result
-        # Remove trailing commas
-        fixed = re.sub(r',\s*([}\]])', r'\1', fixed)
-        # Fix unescaped quotes inside strings (common GPT issue)
-        # Replace unescaped newlines in strings
-        fixed = fixed.replace('\n', '\\n')
-        # Try as-is
-        try:
-            return json.loads(fixed)
-        except json.JSONDecodeError:
-            pass
-        # Try to extract just the JSON array (script parts return arrays)
-        array_match = re.search(r'\[.*\]', fixed, re.DOTALL)
-        if array_match:
-            try:
-                return json.loads(array_match.group())
-            except json.JSONDecodeError:
-                pass
-        # Try adding closing brackets for truncated output
-        for suffix in ['"}]', '"]', ']', '}}', '}']:
-            try:
-                return json.loads(fixed + suffix)
-            except json.JSONDecodeError:
-                continue
-        # Last resort: retry the LLM call once
-        print(f"[Podcast] Warning: JSON repair failed, retrying LLM call...", file=sys.stderr)
-        resp2 = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt + "\n\nIMPORTANT: Output valid JSON only. No markdown, no trailing text."}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        result2 = resp2.choices[0].message.content.strip()
-        result2 = re.sub(r"^```json\n?|```$", "", result2, flags=re.MULTILINE).strip()
-        result2 = re.sub(r',\s*([}\]])', r'\1', result2)
-        return json.loads(result2)
-
-
 # ---------------------------------------------------------------------------
 # Pass 0: Topic Classification
 # ---------------------------------------------------------------------------
 
-def _topic_classification_pass(text, covered_topics, config):
+def _topic_classification_pass(text, covered_topics, config, backend):
     """Identify key topics in the paper and flag which are new to the podcast."""
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     covered_list = ", ".join(sorted(covered_topics)) if covered_topics else "(none yet)"
 
@@ -148,7 +82,7 @@ Only output JSON.
 Paper content:
 {text[:6000]}"""
 
-    return _llm_json(client, model, prompt)
+    return llm_call(backend, model, prompt)
 
 
 def _find_shared_authors(authors, conn):
@@ -186,10 +120,9 @@ def _find_shared_authors(authors, conn):
 # Pass 1: Background Research for New Topics
 # ---------------------------------------------------------------------------
 
-def _background_research_pass(text, new_topics, config):
+def _background_research_pass(text, new_topics, config, backend):
     """For new topics, find surveys, foundational papers, and comparisons."""
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     topics_str = "\n".join([f"- {t['name']}: {t['relevance']}" for t in new_topics])
 
@@ -250,17 +183,16 @@ Only output JSON.
 Paper being discussed (for context):
 {text[:6000]}"""
 
-    return _llm_json(client, model, prompt)
+    return llm_call(backend, model, prompt)
 
 
 # ---------------------------------------------------------------------------
 # Pass 2: Concept Analysis + Critical Questions
 # ---------------------------------------------------------------------------
 
-def _concept_analysis_pass(text, background_context, config):
+def _concept_analysis_pass(text, background_context, config, backend):
     """Identify concepts needing explanation and critical questions, informed by background."""
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     bg_text = ""
     if background_context:
@@ -327,14 +259,14 @@ Only output JSON.
 Paper content:
 {text[:8000]}"""
 
-    return _llm_json(client, model, prompt)
+    return llm_call(backend, model, prompt)
 
 
 # ---------------------------------------------------------------------------
 # Pass 2.5a: Local Adversarial Search (our own prior episodes)
 # ---------------------------------------------------------------------------
 
-def _local_adversarial_search(text, analysis, config):
+def _local_adversarial_search(text, analysis, config, backend):
     """Search our own podcast back catalog for related prior episodes.
 
     Returns relevant prior episodes with excerpts that could inform or challenge
@@ -342,8 +274,7 @@ def _local_adversarial_search(text, analysis, config):
     """
     import os
 
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     # Load ALL prior episodes: new pipeline DB + legacy Anchor feed
     from db import get_connection, init_db, list_podcasts
@@ -498,7 +429,7 @@ Only include episodes with GENUINE connections. If no prior episodes are relevan
 return an empty array. Do NOT force connections that don't exist.
 Only output JSON."""
 
-    result = _llm_json(client, model, prompt, temperature=0.3, max_tokens=2000)
+    result = llm_call(backend, model, prompt, temperature=0.3, max_tokens=2000)
     if isinstance(result, list):
         prior = result
     else:
@@ -512,7 +443,7 @@ Only output JSON."""
 # Pass 2.5b: External Adversarial Search (Google Scholar)
 # ---------------------------------------------------------------------------
 
-def _adversarial_search_pass(text, analysis, config):
+def _adversarial_search_pass(text, analysis, config, backend):
     """Search for recent work that challenges, complicates, or extends the paper's claims.
 
     Uses the paper's key components and claims to find adversarial context via Google Scholar.
@@ -523,8 +454,7 @@ def _adversarial_search_pass(text, analysis, config):
     import re
     import time
 
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4.1-mini")
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     # Step 1: Ask LLM to identify searchable claims and components
     print("[Podcast] Pass 2.5: Adversarial context search...", file=sys.stderr)
@@ -564,7 +494,7 @@ Only output JSON.
 Paper content (first 4000 chars):
 {text[:4000]}"""
 
-    search_plan = _llm_json(client, model, search_prompt, temperature=0.3, max_tokens=2000)
+    search_plan = llm_call(backend, model, search_prompt, temperature=0.3, max_tokens=2000)
     queries = search_plan.get("search_queries", [])
 
     if not queries:
@@ -673,7 +603,7 @@ Only include findings you're confident are real based on the snippets. If a sear
 is irrelevant or you can't tell what the paper actually says, skip it.
 Only output JSON."""
 
-    result = _llm_json(client, model, synth_prompt, temperature=0.3, max_tokens=4000)
+    result = llm_call(backend, model, synth_prompt, temperature=0.3, max_tokens=4000)
     n_findings = len(result.get("adversarial_findings", []))
     n_questions = len(result.get("new_critical_questions", []))
     n_refs = len(result.get("adversarial_refs", []))
@@ -695,10 +625,10 @@ def generate_podcast_script(text, config, covered_topics=None):
     from fun_facts import get_podcast_context
     from db import get_connection, init_db, mark_facts_used
 
-    client = _get_openai_client()
+    backend = get_llm_backend(config)
     podcast_config = config.get("podcast", {})
     max_words = podcast_config.get("max_words", 3000)
-    model = podcast_config.get("llm_model", "gpt-4.1-mini")
+    model = podcast_config.get("llm_model", "sonnet")
 
     if covered_topics is None:
         covered_topics = set()
@@ -737,7 +667,7 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     # Pass 0: Topic classification
     print("[Podcast] Pass 0: Classifying topics...", file=sys.stderr)
-    topic_info = _topic_classification_pass(text, covered_topics, config)
+    topic_info = _topic_classification_pass(text, covered_topics, config, backend)
     topics = topic_info.get("topics", [])
     new_topics = [t for t in topics if t.get("is_new", True)]
     topic_names = [t["name"] for t in topics]
@@ -767,7 +697,7 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     if new_topics:
         print(f"[Podcast] Pass 1: Researching {len(new_topics)} new topic(s)...", file=sys.stderr)
-        background_context = _background_research_pass(text, new_topics, config)
+        background_context = _background_research_pass(text, new_topics, config, backend)
 
         for bg in background_context.get("background", []):
             background_text += f"\n=== BACKGROUND: {bg['topic']} ===\n"
@@ -784,13 +714,13 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     # Pass 2: Concept analysis
     print("[Podcast] Pass 2: Analyzing concepts and critical questions...", file=sys.stderr)
-    analysis = _concept_analysis_pass(text, background_context, config)
+    analysis = _concept_analysis_pass(text, background_context, config, backend)
 
     # Pass 2.5a: Local adversarial search (our own prior episodes)
-    local_adversarial = _local_adversarial_search(text, analysis, config)
+    local_adversarial = _local_adversarial_search(text, analysis, config, backend)
 
     # Pass 2.5b: External adversarial search (Google Scholar)
-    adversarial = _adversarial_search_pass(text, analysis, config)
+    adversarial = _adversarial_search_pass(text, analysis, config, backend)
 
     questions_text = "\n".join([f"- {q}" for q in analysis.get("critical_questions", [])])
 
@@ -930,10 +860,10 @@ One host should push back firmly: "I actually disagree with you there, Hal..." o
 exchanges before they find common ground or agree to disagree. This adds authenticity.
 """
 
-    common_style = f"""Each speaker turn should be 100-250 words — like a real conversation
+    common_style = f"""Each speaker turn should be 80-200 words — like a real conversation
 paragraph, NOT a one-liner. Write substantial, detailed dialogue. If a turn is under
 50 words, it's too short — expand it with examples, analogies, or follow-up thoughts.
-Generate AT LEAST {quarter_words} words for this part.
+Generate APPROXIMATELY {quarter_words} words for this part (hard maximum: {int(quarter_words * 1.3)}).
 
 IMPORTANT — SEAMLESS TRANSITIONS: This is ONE continuous conversation. Do NOT include
 any "welcome back", "in this segment", "moving on to part two", or any language that
@@ -1055,7 +985,7 @@ Output as JSON:
 Source content:
 {text[:6000]}"""
 
-    episode_bible = _llm_json(client, model, bible_prompt, temperature=0.3, max_tokens=4000)
+    episode_bible = llm_call(backend, model, bible_prompt, temperature=0.3, max_tokens=4000)
     bible_text = json.dumps(episode_bible, indent=2)
 
     # Anti-repetition constraints used in all parts after Part 1
@@ -1102,7 +1032,7 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-    p1_script = _llm_json(client, model, p1, temperature=0.7, max_tokens=16000)
+    p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
     if not isinstance(p1_script, list):
         p1_script = p1_script.get("script", [])
     p1_words = sum(len(s["text"].split()) for s in p1_script)
@@ -1198,7 +1128,7 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-    p2_script = _llm_json(client, model, p2, temperature=0.7, max_tokens=16000)
+    p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
     if not isinstance(p2_script, list):
         p2_script = p2_script.get("script", [])
     p2_words = sum(len(s["text"].split()) for s in p2_script)
@@ -1265,7 +1195,7 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-      p3_script = _llm_json(client, model, p3, temperature=0.7, max_tokens=16000)
+      p3_script = llm_call(backend, model, p3, temperature=0.7, max_tokens=16000)
       if not isinstance(p3_script, list):
           p3_script = p3_script.get("script", [])
       p3_words = sum(len(s["text"].split()) for s in p3_script)
@@ -1320,7 +1250,7 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-      p4_script = _llm_json(client, model, p4, temperature=0.7, max_tokens=16000)
+      p4_script = llm_call(backend, model, p4, temperature=0.7, max_tokens=16000)
       if not isinstance(p4_script, list):
           p4_script = p4_script.get("script", [])
       p4_words = sum(len(s["text"].split()) for s in p4_script)
@@ -1354,14 +1284,17 @@ Only output the JSON array.
 FULL TRANSCRIPT:
 {full_transcript}"""
 
-    edited_script = _llm_json(client, model, edit_prompt, temperature=0.3, max_tokens=16000)
-    if isinstance(edited_script, list) and len(edited_script) > 5:
-        removed = len(all_scripts) - len(edited_script)
-        edited_words = sum(len(s["text"].split()) for s in edited_script)
-        print(f"[Podcast]   Editorial: {len(edited_script)} segments ({removed:+d}), {edited_words} words", file=sys.stderr)
-        all_scripts = edited_script
-    else:
-        print("[Podcast]   Editorial pass returned invalid result, using original", file=sys.stderr)
+    try:
+        edited_script = llm_call(backend, model, edit_prompt, temperature=0.3, max_tokens=16000)
+        if isinstance(edited_script, list) and len(edited_script) > 5:
+            removed = len(all_scripts) - len(edited_script)
+            edited_words = sum(len(s["text"].split()) for s in edited_script)
+            print(f"[Podcast]   Editorial: {len(edited_script)} segments ({removed:+d}), {edited_words} words", file=sys.stderr)
+            all_scripts = edited_script
+        else:
+            print("[Podcast]   Editorial pass returned invalid result, using original", file=sys.stderr)
+    except Exception as e:
+        print(f"[Podcast]   Editorial pass failed ({e}), using original script", file=sys.stderr)
 
     script = all_scripts
     total_words = sum(len(s["text"].split()) for s in script)

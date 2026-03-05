@@ -157,7 +157,8 @@ def _read_text_file(filepath):
         return f.read().strip()
 
 
-SUBCOMMANDS = {"digest", "podcast", "spotify-upload"}
+SUBCOMMANDS = {"digest", "podcast", "queue", "spotify-upload", "publish",
+                "publish-site"}
 
 
 def main():
@@ -176,6 +177,8 @@ modes:
   --list-podcasts                      list public episodes from Anchor RSS
   --list-generated-podcasts            list locally generated episodes
   --top N                              limit listing to latest N episodes
+  publish                              publish latest episode to R2
+  publish --draft drafts/2026/03/stem  publish a specific draft
   spotify-upload                       regenerate RSS feed for Spotify
 """,
     )
@@ -212,6 +215,10 @@ modes:
         help="upload episode to R2 and regenerate RSS feed after generation",
     )
     parser.add_argument(
+        "--draft", metavar="DIR_OR_STEM",
+        help="draft directory or file stem to publish (use with 'publish' subcommand)",
+    )
+    parser.add_argument(
         "--list-podcasts", action="store_true",
         help="list all public episodes from the Anchor RSS feed",
     )
@@ -244,9 +251,15 @@ modes:
     if args.top is not None and not (args.list_podcasts or args.list_generated_podcasts):
         parser.error("--top requires --list-podcasts or --list-generated-podcasts")
 
+    # --draft requires publish subcommand or --publish
+    if args.draft and not args.publish:
+        if not (args.args and args.args[0] == "publish"):
+            parser.error("--draft requires the 'publish' subcommand")
+
     # No args and no flags → print help
     if (not args.args and not args.input_papers
-            and not args.list_podcasts and not args.list_generated_podcasts):
+            and not args.list_podcasts and not args.list_generated_podcasts
+            and not args.publish):
         parser.print_help()
         sys.exit(0)
 
@@ -268,9 +281,18 @@ modes:
 
     if command == "digest":
         run_digest(config)
+    elif command == "queue":
+        from paper_queue import run_queue
+        run_queue(config)
     elif command == "podcast":
         from podcast import generate_podcast
         generate_podcast(config, arxiv_id=args.paper)
+    elif command == "publish":
+        _publish_episode(config, draft=args.draft)
+        return
+    elif command == "publish-site":
+        _publish_site(config)
+        return
     elif command == "spotify-upload":
         from rss import generate_feed
         feed_path = generate_feed(config)
@@ -291,50 +313,127 @@ modes:
         from podcast import generate_podcast_from_urls
         generate_podcast_from_urls(urls, config, goal=args.goal, description_guidance=args.description)
 
-    # Publish is now a separate step — user must approve first
+    # --publish after generation
     if args.publish:
-        _publish_latest(config)
-
-    if args.args and args.args[0] == "publish":
-        _publish_latest(config)
-        return
+        _publish_episode(config, draft=args.draft)
 
 
-def _publish_latest(config):
-    """Upload the latest episode to R2 and regenerate the RSS feed."""
+def _find_episode_by_draft(draft_path):
+    """Find a DB episode matching a draft path or stem.
+
+    Args:
+        draft_path: Path to a draft file, directory, or file stem.
+                    e.g. "drafts/2026/03/2026-03-04-4-papers-combined-8a237d"
+                    or   "drafts/2026/03/2026-03-04-4-papers-combined-8a237d.mp3"
+
+    Returns:
+        Episode dict from DB, or None.
+    """
     from db import get_connection, init_db, list_podcasts
-    from r2_upload import publish_episode, upload_feed
-    from rss import generate_feed
-    import glob
     import os
-    import shutil
+
+    # Normalize: strip extensions, resolve to absolute
+    draft_path = str(draft_path).rstrip("/")
+    for ext in [".mp3", ".txt", ".json", ".srt", ".png"]:
+        if draft_path.endswith(ext):
+            draft_path = draft_path[:-len(ext)]
+            break
+    stem = os.path.basename(draft_path)
 
     conn = get_connection()
     init_db(conn)
     episodes = list_podcasts(conn)
     conn.close()
 
-    if not episodes:
-        print("No episodes to publish.", file=sys.stderr)
-        return
+    for ep in episodes:
+        audio = ep.get("audio_file", "")
+        if stem in audio:
+            return ep
+    return None
 
-    latest = episodes[0]  # list_podcasts returns newest first
-    audio = latest.get("audio_file", "")
+
+def _c(code, text):
+    """ANSI color helper for stderr."""
+    if not (hasattr(sys.stderr, "isatty") and sys.stderr.isatty()):
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _publish_site(config):
+    """Upload static site files to R2: feed, index, queue, background."""
+    from r2_upload import get_r2_client, upload_file, upload_feed
+    from rss import generate_feed
+    import os
+
+    feed_path = generate_feed(config)
+    feed_url = upload_feed(feed_path)
+    print(f"{_c('35', '[Site]')} Feed: {_c('2', feed_url)}",
+          file=sys.stderr)
+
+    r2 = get_r2_client()
+    feed_dir = os.path.dirname(feed_path)
+
+    static_files = [
+        ("index.html",              "index.html",              "text/html"),
+        ("queue.html",              "queue.html",              "text/html"),
+        ("queue.xml",               "queue.xml",               "application/xml"),
+        ("images/podcast-bg.png",   "images/podcast-bg.png",   "image/png"),
+        ("images/queue-bg.png",    "images/queue-bg.png",     "image/png"),
+    ]
+    for local_name, r2_key, ctype in static_files:
+        local_path = os.path.join(feed_dir, local_name)
+        if os.path.exists(local_path):
+            url = upload_file(r2, local_path, r2_key, content_type=ctype)
+            print(f"{_c('35', '[Site]')} {_c('1', r2_key)}: "
+                  f"{_c('2', url)}", file=sys.stderr)
+
+    print(f"\n{_c('32', 'Site published!')}", file=sys.stderr)
+
+
+def _publish_episode(config, draft=None):
+    """Upload an episode to R2 and regenerate the RSS feed.
+
+    Requires --draft to specify which draft to publish.
+    """
+    from r2_upload import publish_episode, upload_feed
+    from rss import generate_feed
+    import glob
+    import os
+    import shutil
+
+    if not draft:
+        print("Error: publish requires --draft to specify which episode.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    episode = _find_episode_by_draft(draft)
+    if not episode:
+        print(f"No episode found matching draft: {draft}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    audio = episode.get("audio_file", "")
     if not audio or not os.path.exists(audio):
         print(f"Audio file not found: {audio}", file=sys.stderr)
         return
 
-    image = latest.get("image_file")
+    image = episode.get("image_file")
+    # Check for image alongside audio if not in DB
+    if not image or not os.path.exists(image):
+        candidate = os.path.splitext(audio)[0] + ".png"
+        if os.path.exists(candidate):
+            image = candidate
     srt = os.path.splitext(audio)[0] + ".srt" if audio else None
 
-    print(f"\n[Publish] Uploading: {latest.get('title', 'Untitled')}", file=sys.stderr)
+    print(f"\n[Publish] Uploading: {episode.get('title', 'Untitled')}",
+          file=sys.stderr)
     urls = publish_episode(audio, image_file=image, srt_file=srt)
 
     for k, v in urls.items():
         print(f"[Publish] {k}: {v}", file=sys.stderr)
 
-    # Copy episode files to public/YYYY/MM/
-    pub_date = latest.get("publish_date", "")
+    # Copy episode files to public/YYYY/MM/ and update DB paths
+    pub_date = episode.get("publish_date", "")
     if pub_date:
         year, month = pub_date.split("-")[:2]
         public_dir = Path(__file__).parent / "public" / year / month
@@ -345,11 +444,42 @@ def _publish_latest(config):
             shutil.copy2(src, dst)
             print(f"[Publish] Copied → {dst}", file=sys.stderr)
 
-    # Regenerate and upload RSS feed
+        # Update DB so audio/image point to public/ (needed for feed)
+        if "/drafts/" in audio:
+            new_audio = audio.replace("/drafts/", "/public/")
+            new_image = image.replace("/drafts/", "/public/") if image and "/drafts/" in image else image
+            conn = get_connection()
+            init_db(conn)
+            cur = conn.cursor()
+            cur.execute("UPDATE podcasts SET audio_file = ?, image_file = ? WHERE id = ?",
+                        (new_audio, new_image, episode.get("id")))
+            conn.commit()
+            conn.close()
+            print(f"[Publish] DB updated: drafts → public", file=sys.stderr)
+
+    # Regenerate and upload RSS feed + index page
     feed_path = generate_feed(config)
     feed_url = upload_feed(feed_path)
     print(f"[Publish] Feed: {feed_url}", file=sys.stderr)
-    print(f"\n✅ Published!", file=sys.stderr)
+
+    # Upload index.html and static assets alongside feed
+    from r2_upload import get_r2_client, upload_file
+    feed_dir = os.path.dirname(feed_path)
+    r2 = get_r2_client()
+
+    index_path = os.path.join(feed_dir, "index.html")
+    if os.path.exists(index_path):
+        idx_url = upload_file(r2, index_path, "index.html",
+                              content_type="text/html")
+        print(f"[Publish] Index: {idx_url}", file=sys.stderr)
+
+    bg_path = os.path.join(feed_dir, "images", "podcast-bg.png")
+    if os.path.exists(bg_path):
+        bg_url = upload_file(r2, bg_path, "images/podcast-bg.png",
+                             content_type="image/png")
+        print(f"[Publish] Background: {bg_url}", file=sys.stderr)
+
+    print(f"\nPublished!", file=sys.stderr)
 
 
 if __name__ == "__main__":

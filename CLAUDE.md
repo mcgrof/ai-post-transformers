@@ -68,21 +68,34 @@ Audio files are uploaded to R2 under `episodes/{basename}`. Public
 URLs follow `https://podcast.do-not-panic.com/episodes/{basename}`.
 The RSS feed references these URLs for podcast distribution.
 
-### OpenAI model selection
+### LLM backend selection
 
-The pipeline uses OpenAI for script generation, topic analysis, and
-episode summaries. Model is configured in `config.yaml`:
+The pipeline routes all LLM calls through a configurable backend
+defined in `llm_backend.py`. Three backends are supported:
 
 ```yaml
 podcast:
-  llm_model: gpt-4.1-mini      # script generation
-  analysis_model: gpt-4.1-mini  # topic classification, analysis
+  llm_backend: claude-cli   # "claude-cli", "openai", or "anthropic"
+  llm_model: sonnet          # backend-specific model name
+  analysis_model: sonnet
 ```
 
-Previous default was `gpt-4o`. Switched to `gpt-4.1-mini` for
-better rate limits (200K TPM vs 30K) and lower cost. The fallback
-defaults in `podcast.py` and `elevenlabs_client.py` also use
-`gpt-4.1-mini`.
+**claude-cli** (default): Calls the `claude` CLI as a subprocess.
+Uses the Max subscription at no extra API cost. Temperature is not
+controllable via CLI. Model names are Claude CLI model names
+(e.g., `sonnet`, `opus`, `haiku`).
+
+**openai**: Uses the OpenAI Python SDK. Requires `OPENAI_API_KEY`.
+Model names are OpenAI model names (e.g., `gpt-4.1-mini`).
+
+**anthropic**: Uses the Anthropic Python SDK. Requires
+`ANTHROPIC_API_KEY`. Model names are Anthropic API model IDs
+(e.g., `claude-sonnet-4-20250514`).
+
+`image_gen.py` still uses the OpenAI image API (`gpt-image-1`)
+since no Claude/Anthropic equivalent exists. When `OPENAI_API_KEY`
+is not set, image generation is silently skipped and the episode
+is created without a cover image.
 
 ## Git Commit Practices
 

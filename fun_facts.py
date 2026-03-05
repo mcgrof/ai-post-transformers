@@ -6,20 +6,10 @@ Categories:
   - fun_fact: General nerdy/interesting facts related to AI/tech
   - meta: Self-referential AI humor
 """
-import json
-import os
-import re
 import sys
 
 from db import get_connection, init_db, add_fun_facts, get_unused_fun_facts, get_fun_facts_stats, prune_used_fun_facts
-
-
-def _get_openai_client():
-    import openai
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set OPENAI_API_KEY")
-    return openai.OpenAI(api_key=api_key)
+from llm_backend import get_llm_backend, llm_call
 
 
 def collect_fun_facts(config, count=15):
@@ -31,8 +21,8 @@ def collect_fun_facts(config, count=15):
     - fun_fact: interesting tidbits about AI/ML/tech history
     - meta: self-referential AI humor
     """
-    client = _get_openai_client()
-    model = config.get("podcast", {}).get("analysis_model", "gpt-4o")
+    backend = get_llm_backend(config)
+    model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     # Check what we already have
     conn = get_connection()
@@ -78,14 +68,7 @@ Output as JSON array:
 [{{"fact": "...", "category": "intro_joke|ai_news|fun_fact|meta", "source": "optional source/context"}}]
 Only output the JSON array."""
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.8,
-    )
-    result = resp.choices[0].message.content.strip()
-    result = re.sub(r"^```json\n?|```$", "", result, flags=re.MULTILINE).strip()
-    facts = json.loads(result)
+    facts = llm_call(backend, model, prompt, temperature=0.8)
 
     # Save to DB
     conn = get_connection()

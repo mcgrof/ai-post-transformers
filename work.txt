@@ -1,0 +1,356 @@
+Refactor the AI Post Transformers paper queue into a transparent two-pass editorial ranking system.
+
+Goal
+Build a public, explainable paper-selection pipeline for a research podcast.
+This is NOT peer review. It is editorial triage for episode selection.
+
+Core design change
+Replace the current single research-interest score with TWO explicit editorial lenses:
+
+1. Public AI Interest
+   Definition:
+   Papers likely to matter to a broad AI audience and make a strong educational episode.
+   Signals:
+   frontier relevance, practical consequence, teachability, novelty, momentum, ecosystem relevance.
+
+2. Memory / Storage First-Class AI
+   Definition:
+   Papers that directly improve, explain, or exploit memory bandwidth, memory capacity, KV cache behavior,
+   data movement, offload, quantization, locality, tiering, paging, interconnect, or scheduling in AI systems.
+   Subclass:
+   Memory-adjacent papers that are not about memory directly but create useful execution signals for prefetch,
+   tiering, reuse prediction, or scheduling. Examples include speculative decoding, parallel token prediction,
+   execution forecasting, dynamic routing, and other mechanisms that can expose future access structure.
+
+Do not collapse both lenses into one opaque score.
+A paper can score high on one, both, or neither.
+
+Non-negotiables
+- Keep pass 1 cheap and scalable.
+- Reserve LLM review for a shortlist only.
+- Make all weights, seed sets, and thresholds public in config files.
+- Every paper must have a score breakdown and a human-readable rationale.
+- Never use “rejected” or “queue passed” in the public UI.
+- User-facing statuses must be editorial, not insulting.
+
+Required public statuses
+- Cover now
+- Monitor
+- Deferred this cycle
+- Out of scope
+
+Required badges
+- Public AI
+- Memory/Storage Core
+- Memory/Storage Adjacent
+- Bridge
+- Systems
+- Theory
+- Hardware
+- Training
+- Inference
+- Application
+
+A “Bridge” paper is one that scores high on both Public AI Interest and Memory/Storage.
+
+Data model
+Create a normalized PaperRecord schema with at least:
+- id
+- source_ids
+- title
+- abstract
+- authors
+- published_at
+- categories
+- url
+- code_url
+- github_submission_flag
+- hf_trending_flag
+- citation_count
+- influential_citation_count
+- embeddings
+- topic_tags
+- domain_tags
+- method_tags
+- paper_type
+- scope_fit
+- public_interest_score
+- memory_score
+- evidence_score
+- transferability_score
+- novelty_score
+- teachability_score
+- fatigue_penalty
+- negative_profile_penalty
+- badges
+- status
+- why_now
+- why_not_higher
+- downgrade_reasons
+- what_would_raise_priority
+
+Editorial principle
+This queue is not “best papers on arXiv.”
+It is “best papers for this show under declared editorial lenses.”
+
+Build three seed/profile sets
+1. public_interest_positive
+   Seed from past episodes and manually curated papers that made strong, broad, educational topics.
+
+2. memory_storage_positive
+   Seed from past episodes and curated papers on:
+   KV cache, PagedAttention, offload, memory-efficient training, optimizer-state memory, quantization,
+   activation memory, HBM/DRAM/CXL/SSD hierarchy, prefix reuse, cache locality, disaggregated serving,
+   tiering, data movement, memory scheduling, and related systems work.
+
+3. negative_out_of_scope
+   Seed from recurring false positives:
+   narrow domain papers where “transformer” or “GPU memory” appears incidentally without transferring to
+   general AI systems or foundation-model practice.
+
+Make the seed sets public and editable in YAML.
+
+First pass: cheap, high-recall, explainable
+Keep current ingestion sources:
+- arXiv
+- HF Daily Papers
+- Semantic Scholar metadata
+- GitHub Issues paper submissions
+- existing dedup against covered and in-progress items
+
+But change scoring.
+
+Step 1: scope + taxonomy classification
+For each paper, cheaply classify:
+- scope_bucket: foundation | systems | architecture | training | inference | eval | benchmark | hardware | application | survey
+- domain_bucket: llm | multimodal | vision | audio | robotics | bio | medical | graphics | pde | recommendation | other
+- paper_type: theory | empirical | systems | benchmark | survey | application
+
+Step 2: hard and soft editorial filters
+Add strong penalties for narrow application papers unless they introduce a clearly general method that transfers to frontier AI.
+Examples of often-low-priority narrow domains:
+- image restoration
+- medical segmentation
+- point clouds
+- PDE solvers
+- recommendation systems
+- anomaly detection
+- video editing
+- quantum-classical hybrids
+
+Do NOT blindly exclude them.
+Instead:
+- if narrow domain + low transferability => major penalty
+- if narrow domain + strong general method or systems insight => allow through
+
+Step 3: split similarity into three separate similarities
+Replace one interest profile with:
+- sim_public
+- sim_memory
+- sim_negative
+
+Similarity is only one feature, not the decision.
+
+Step 4: compute feature scores
+Compute at least these normalized scores:
+
+public_interest_score:
+- broad relevance
+- momentum (HF trending, manual submissions, etc.)
+- teachability / episode potential
+- novelty relative to already covered topics
+- practical or conceptual consequence
+
+memory_score:
+- direct memory/storage relevance
+- systems leverage
+- inference/training deployment proximity
+- memory-adjacent future value
+- bandwidth/capacity/data-movement relevance
+
+evidence_score:
+- real LLMs vs toy models
+- real hardware or realistic systems traces
+- strength of ablations
+- code or reproducibility signals
+- benchmark realism
+
+transferability_score:
+- general AI / foundation-model relevance
+- cross-domain applicability
+- likely transfer beyond the benchmark/task
+
+novelty_score:
+- not already covered repeatedly
+- not near-duplicate of recent episode clusters
+- adds a new angle or a meaningful advance
+
+teachability_score:
+- clear bottleneck or conceptual hook
+- can support a strong episode narrative
+- not just numerically better on obscure benchmarks
+
+fatigue_penalty:
+- penalize papers too similar to the last N episodes unless they represent a clear leap
+
+negative_profile_penalty:
+- penalize similarity to recurring false-positive clusters
+
+Step 5: explicit cheap formulas
+Use transparent weighted formulas in config, for example:
+
+public_interest_score =
+  0.30 * broad_relevance
++ 0.20 * momentum
++ 0.20 * teachability
++ 0.15 * novelty
++ 0.15 * evidence
+
+memory_score =
+  0.35 * direct_memory_relevance
++ 0.20 * systems_leverage
++ 0.15 * deployment_proximity
++ 0.15 * evidence
++ 0.15 * memory_adjacent_future_value
+
+quality_score =
+  0.40 * evidence
++ 0.25 * transferability
++ 0.20 * clarity
++ 0.15 * reproducibility
+
+Do not hide these weights. Put them in YAML.
+
+Step 6: shortlist policy
+Do not build the final list from one scalar score.
+Instead compute:
+- bridge_score = min(public_interest_score, memory_score)
+- max_axis_score = max(public_interest_score, memory_score)
+
+Shortlist papers by a combination of:
+- max_axis_score
+- bridge_score
+- quality_score
+- novelty_score
+- diversity constraints
+
+Keep the top ~100 for second-pass LLM review.
+
+Second pass: parallel LLM editorial review
+Run LLM analysis in parallel only on shortlisted papers.
+
+Prompt the model to output strict JSON only with:
+- public_interest_score_adjustment
+- memory_score_adjustment
+- evidence_score_adjustment
+- transferability_score_adjustment
+- badges
+- status
+- why_now
+- why_not_higher
+- downgrade_reasons
+- what_would_raise_priority
+- one_sentence_episode_hook
+
+Rubric for LLM review
+The model must answer these questions:
+1. Would a broad AI audience likely care within the next 30-90 days?
+2. Does this paper change how people think about building, training, serving, or evaluating modern AI systems?
+3. Is the memory/storage connection direct, adjacent, or absent?
+4. Are the claims supported on realistic workloads, models, or hardware?
+5. Is this paper general, or is it a narrow task paper wearing a transformer costume?
+6. Is it genuinely new relative to recent episodes, or just another near-duplicate?
+7. Does it make a good episode, not just a decent benchmark result?
+
+Important LLM behavior
+- Be skeptical of keyword overlap.
+- Optimizer or theory papers without clear large-model or systems relevance should usually be Deferred this cycle, not promoted by default.
+- Narrow application papers should usually be Out of scope unless the general method clearly transfers.
+- Memory-adjacent papers can score well on the memory lens if they create useful predictive signals for scheduling, prefetch, tiering, or cache reuse, even when they are not explicit memory papers.
+
+Optional top-end reranking
+For the top 40 after second pass:
+- do pairwise comparisons within topical clusters
+- use the pairwise results only to refine local ordering
+- keep all decisions logged and reproducible
+
+Final queue construction
+For the published top 30:
+- 10 Bridge papers
+- 10 Public-first papers
+- 10 Memory-first papers
+
+If one bucket is sparse, backfill from Monitor by:
+- higher quality_score
+- stronger teachability
+- greater diversity
+
+Diversity constraints
+- cap very tight topic clusters
+- avoid filling the page with 8 near-identical speculative decoding papers
+- avoid overloading on a single category like optimizer theory
+- allow one or two strategically important deep cuts, but not a wall of them
+
+Publishing requirements
+Generate:
+- queue.html with sections:
+  - Bridge
+  - Public AI
+  - Memory/Storage
+  - Monitor
+- queue.json with full feature breakdown
+- editorial_lenses.yaml
+- weights.yaml
+- seed_sets/*.yaml
+- rationale_manifesto.md explaining the declared lenses
+- tests/regression_cases.yaml
+
+Public-facing copy requirement
+The site must explicitly say:
+- this is an editorial ranking, not a scientific verdict
+- papers are scored under two declared lenses
+- a paper can be excellent and still be deferred if it does not fit the show this cycle
+
+Terminology rules
+Never label a paper as:
+- rejected
+- failed
+- queue passed
+
+Use:
+- Cover now
+- Monitor
+- Deferred this cycle
+- Out of scope
+
+“Deferred this cycle” means:
+relevant or interesting, but not currently selected.
+“Out of scope” means:
+not a fit for this show’s editorial mission, not a claim that the paper is bad.
+
+Regression tests
+Add explicit regression expectations for known failure modes:
+- generic optimizer theory paper with weak connection to large-model practice => usually Deferred this cycle
+- narrow transformer application paper in a specialized domain => usually Out of scope
+- broad LLM inference/systems paper with clear scheduling/tiering/cache implications => Bridge or Memory/Storage
+- direct memory-efficient training / KV cache / offload / quantization / locality paper => Memory/Storage Core
+- broad architecture or inference paper with strong ecosystem relevance but weak memory link => Public AI
+
+Implementation constraints
+- Keep existing sources and build on top of them
+- Preserve the current queue page but refactor the backend
+- Cache expensive operations
+- Make the system deterministic enough to diff outputs across runs
+- Keep configs public and easy to fork
+
+Stretch goal
+If episode engagement data exists, prepare a pluggable module to learn better public-interest weights later.
+Do not block the refactor on engagement data.
+
+Deliverables
+1. Refactored scoring pipeline
+2. Public config files for weights and seeds
+3. Second-pass LLM reviewer
+4. Updated queue page with badges, statuses, and explanations
+5. Regression tests that catch false positives
+6. Short README explaining the editorial philosophy

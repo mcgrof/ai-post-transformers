@@ -40,6 +40,35 @@ def _get_output_dir(date_str):
     return output_dir
 
 
+def _rename_episode_files(old_audio, new_stem):
+    """Rename all episode files (.mp3, .txt, .srt, .json, .png) to new_stem.
+
+    Args:
+        old_audio: Path to the current .mp3 file.
+        new_stem: New filename stem (without extension).
+
+    Returns:
+        New audio Path object, or old_audio if rename failed.
+    """
+    old_path = Path(old_audio)
+    output_dir = old_path.parent
+    old_stem = old_path.stem
+
+    renamed = []
+    for ext in [".mp3", ".txt", ".srt", ".json", ".png"]:
+        old_file = output_dir / f"{old_stem}{ext}"
+        new_file = output_dir / f"{new_stem}{ext}"
+        if old_file.exists():
+            old_file.rename(new_file)
+            renamed.append(ext)
+
+    if renamed:
+        print(f"[Podcast] Renamed files: {old_stem} → {new_stem} "
+              f"({', '.join(renamed)})", file=sys.stderr)
+        return output_dir / f"{new_stem}.mp3"
+    return old_path
+
+
 def _save_generation_inputs(title, date_str, urls, goal=None,
                             description_guidance=None):
     """Save podcast generation inputs to a versioned directory.
@@ -89,6 +118,39 @@ def _save_generation_inputs(title, date_str, urls, goal=None,
     return inputs_dir
 
 
+def _generate_title(script, config):
+    """Generate a short episode title from the podcast script.
+
+    Returns a concise title (5-10 words) suitable for filenames
+    and RSS feed display.
+    """
+    from llm_backend import get_llm_backend, llm_call
+
+    backend = get_llm_backend(config)
+    model = config.get("podcast", {}).get("llm_model", "sonnet")
+
+    transcript = "\n".join([
+        f"{'Hal' if s['speaker'] == 'A' else 'Ada'}: {s['text']}"
+        for s in script[:20]
+    ])
+
+    prompt = f"""Based on this podcast transcript, write a short episode title (5-10 words).
+The title should capture the main topic or paper being discussed.
+Do NOT include "Episode:", podcast name, or host names.
+Do NOT use quotes around the title.
+Output ONLY the title text, nothing else.
+
+Transcript:
+{transcript[:4000]}"""
+
+    title = llm_call(backend, model, prompt, temperature=0.2,
+                     max_tokens=50, json_mode=False)
+    # Clean up: strip quotes, "Episode:" prefix, whitespace
+    title = title.strip().strip('"\'')
+    title = re.sub(r'^(Episode:\s*)', '', title, flags=re.IGNORECASE)
+    return title
+
+
 def _generate_summary(script, config, guidance=None):
     """Generate an episode summary from the podcast script transcript.
 
@@ -97,11 +159,10 @@ def _generate_summary(script, config, guidance=None):
         config: Config dict with podcast.llm_model.
         guidance: Optional custom guidance for the summary style/content.
     """
-    from openai import OpenAI
-    import os
+    from llm_backend import get_llm_backend, llm_call
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    model = config.get("podcast", {}).get("llm_model", "gpt-4.1-mini")
+    backend = get_llm_backend(config)
+    model = config.get("podcast", {}).get("llm_model", "sonnet")
 
     # Build transcript from script
     transcript = "\n".join([
@@ -132,13 +193,8 @@ Transcript:
 
 Output ONLY the summary text, no quotes or labels."""
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=600,
-    )
-    return resp.choices[0].message.content.strip()
+    return llm_call(backend, model, prompt, temperature=0.3,
+                    max_tokens=600, json_mode=False)
 
 
 def _format_source_citation(papers_info):
@@ -309,7 +365,7 @@ def _generate_episode_image(config, episode_title, abstract_or_summary,
 
     try:
         generate_episode_image(prompt, str(image_path), model=model,
-                               size=size, quality=quality)
+                               size=size, quality=quality, config=config)
         return str(image_path)
     except Exception as e:
         print(f"[Podcast] Warning: Image generation failed: {e}",
@@ -637,21 +693,14 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     print(f"[Podcast] Generating podcast from {num_papers} paper(s) "
           f"({len(source_text)} chars total)", file=sys.stderr)
 
-    # Title (needed for filename stem)
-    if num_papers == 1:
-        title = f"Episode: {urls[0]}"
-    else:
-        title = f"Episode: {num_papers} papers combined"
+    # Temporary title for initial filenames (renamed after script generation)
+    tmp_title = f"wip-{num_papers}-papers"
 
-    # Output path
+    # Output path (temporary, will be renamed once real title is known)
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     output_dir = _get_output_dir(date_str)
-    stem = _make_episode_stem(title, date_str, urls=urls)
+    stem = _make_episode_stem(tmp_title, date_str, urls=urls)
     audio_file = output_dir / f"{stem}.mp3"
-
-    # Save generation inputs for reproducibility
-    _save_generation_inputs(title, date_str, urls, goal=goal,
-                            description_guidance=description_guidance)
 
     # Get previously covered topics
     conn = get_connection()
@@ -663,6 +712,20 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
         source_text, config, covered_topics
     )
     finalize_podcast(tmpdir, list_file, str(audio_file))
+
+    # Generate real title from the script content
+    print("[Podcast] Generating episode title...", file=sys.stderr)
+    title = _generate_title(script, config)
+    print(f"[Podcast] Title: {title}", file=sys.stderr)
+
+    # Rename files from temporary stem to title-based stem
+    new_stem = _make_episode_stem(title, date_str, urls=urls)
+    if new_stem != stem:
+        audio_file = _rename_episode_files(audio_file, new_stem)
+
+    # Save generation inputs with the real title
+    _save_generation_inputs(title, date_str, urls, goal=goal,
+                            description_guidance=description_guidance)
 
     # Save transcript and SRT subtitles
     hosts = config.get("podcast", {}).get("hosts", {})
@@ -701,7 +764,6 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
             year_str = s.get('year', '?')
             url_str = s.get('url', '')
             if not url_str:
-                # Try to construct a search URL for papers without direct links
                 url_str = f"https://scholar.google.com/scholar?q={title_str.replace(' ', '+')}"
             desc_lines.append(f"  {src_num}. {title_str} — {authors_str}, {year_str}")
             desc_lines.append(f"     {url_str}")
