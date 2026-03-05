@@ -1,3 +1,7 @@
+github:
+  repo: ""  # e.g. "mcgrof/paper-feed"
+queue:
+  top_n: 30
 arxiv_categories:
 - cs.LG
 - cs.AI
@@ -88,7 +92,7 @@ image_generation:
   enabled: true
   model: gpt-image-1
   size: 1024x1024
-  quality: high
+  quality: medium
   style_prompt: Dark-themed podcast infographic cover art. Deep navy/charcoal background
     with vibrant accent colors (cyan, electric blue, orange). Clean modern typography.
     Professional tech-forward aesthetic.
@@ -99,9 +103,9 @@ podcast:
   min_minutes: 15
   max_minutes: 23
   multi_paper_minutes: 30
-  # default tier: gpt-4o (switched to gpt-4.1-mini for cost + rate limits)
-  llm_model: gpt-4.1-mini
-  analysis_model: gpt-4.1-mini
+  llm_backend: claude-cli
+  llm_model: sonnet
+  analysis_model: sonnet
   hosts:
     a:
       name: Hal Turing
@@ -192,5 +196,13 @@ spotify:
     image_url: https://podcast.do-not-panic.com/show-art.png
     link: https://podcast.do-not-panic.com
     explicit: 'no'
+  image_overrides:
+    CXL-SpecKV: https://podcast.do-not-panic.com/episodes/cxl-speckv-cover.png
   replaced_anchor_guids:
   - 5e0e365d-8f23-4d0f-86eb-7a67d4ab05bc
+editorial:
+  enabled: true
+  lenses_file: editorial_lenses.yaml
+  weights_file: weights.yaml
+  seed_sets_dir: seed_sets
+  llm_workers: 4
