@@ -1,0 +1,63 @@
+# Seed texts for the negative/out-of-scope profile.
+#
+# These represent recurring false positives: papers where
+# "transformer" or "GPU memory" appears incidentally without
+# transferring to general AI systems or foundation-model
+# practice. High similarity to these seeds incurs a penalty.
+
+seeds:
+  # Image restoration / enhancement
+  - >
+    Image restoration using transformer architectures. Image
+    denoising, super-resolution, inpainting with vision
+    transformers. Restormer, SwinIR. Pixel-level image tasks.
+  - >
+    Image enhancement and low-level vision with transformers.
+    Dehazing, deblurring, demosaicing. Task-specific image
+    processing neural networks.
+
+  # Medical imaging
+  - >
+    Medical image segmentation with transformers. Organ
+    segmentation, tumor detection, CT and MRI analysis.
+    U-Net variants with attention mechanisms.
+  - >
+    Pathology image analysis, histology slide classification.
+    Medical AI for radiology and diagnostics using vision
+    transformers.
+
+  # Point clouds and 3D
+  - >
+    Point cloud processing with transformers. 3D object
+    detection, point cloud segmentation, LiDAR processing.
+    Autonomous driving perception from point clouds.
+  - >
+    3D shape generation, mesh reconstruction, NeRF with
+    transformer components. 3D vision tasks using attention.
+
+  # PDE and physics simulation
+  - >
+    Neural PDE solvers. Physics-informed neural networks for
+    solving differential equations. Fourier neural operator
+    for fluid dynamics simulation.
+  - >
+    Weather prediction neural networks. Climate modeling with
+    transformers. Scientific simulation acceleration using
+    deep learning.
+
+  # Narrow applications
+  - >
+    Recommendation system transformers. Click-through rate
+    prediction, sequential recommendation, user behavior
+    modeling with attention.
+  - >
+    Anomaly detection with transformers. Time series anomaly
+    detection, industrial defect detection, fraud detection
+    using attention mechanisms.
+  - >
+    Video editing and manipulation. Video inpainting, frame
+    interpolation, video style transfer using neural networks.
+  - >
+    Quantum-classical hybrid neural networks. Variational
+    quantum circuits, quantum machine learning, quantum
+    optimization with neural network components.

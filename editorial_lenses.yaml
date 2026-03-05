@@ -1,0 +1,128 @@
+# Editorial lenses for the AI Post Transformers paper queue.
+#
+# This file defines the two declared editorial lenses, taxonomy
+# buckets, valid statuses, valid badges, narrow domain penalty
+# list, and arXiv category mappings.
+
+lenses:
+  public_interest:
+    name: Public AI Interest
+    description: >
+      Papers likely to matter to a broad AI audience and make
+      a strong educational episode.
+    signals:
+      - broad_relevance
+      - momentum
+      - teachability
+      - novelty_score
+      - evidence_score
+
+  memory_storage:
+    name: Memory / Storage First-Class AI
+    description: >
+      Papers that directly improve, explain, or exploit memory
+      bandwidth, memory capacity, KV cache behavior, data
+      movement, offload, quantization, locality, tiering,
+      paging, interconnect, or scheduling in AI systems.
+    signals:
+      - direct_memory_relevance
+      - systems_leverage
+      - deployment_proximity
+      - memory_adjacent_future_value
+      - bandwidth_capacity
+
+taxonomy:
+  scope_buckets:
+    - foundation
+    - systems
+    - architecture
+    - training
+    - inference
+    - eval
+    - benchmark
+    - hardware
+    - application
+    - survey
+
+  domain_buckets:
+    - llm
+    - multimodal
+    - vision
+    - audio
+    - robotics
+    - bio
+    - medical
+    - graphics
+    - pde
+    - recommendation
+    - other
+
+  paper_types:
+    - theory
+    - empirical
+    - systems
+    - benchmark
+    - survey
+    - application
+
+statuses:
+  - Cover now
+  - Monitor
+  - Deferred this cycle
+  - Out of scope
+
+badges:
+  - Public AI
+  - Memory/Storage Core
+  - Memory/Storage Adjacent
+  - Bridge
+  - Systems
+  - Theory
+  - Hardware
+  - Training
+  - Inference
+  - Application
+
+narrow_domain_penalty_list:
+  - image restoration
+  - medical segmentation
+  - point clouds
+  - PDE solvers
+  - recommendation systems
+  - anomaly detection
+  - video editing
+  - quantum-classical hybrids
+
+# Maps arXiv primary categories to taxonomy buckets
+arxiv_category_map:
+  scope:
+    cs.LG: foundation
+    cs.AI: foundation
+    stat.ML: foundation
+    cs.CL: foundation
+    cs.CV: application
+    cs.AR: hardware
+    cs.DC: systems
+    cs.PF: systems
+    cs.DB: systems
+    cs.IR: application
+    cs.NE: foundation
+    cs.RO: application
+    cs.SD: application
+    cs.MM: application
+    cs.CR: application
+    eess.SP: application
+    eess.AS: application
+    q-bio: application
+    physics: application
+    math: foundation
+  domain:
+    cs.CL: llm
+    cs.CV: vision
+    cs.SD: audio
+    eess.AS: audio
+    cs.RO: robotics
+    q-bio: bio
+    cs.MM: multimodal
+    cs.IR: recommendation
+    cs.GR: graphics

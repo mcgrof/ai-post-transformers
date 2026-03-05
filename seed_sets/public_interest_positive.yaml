@@ -1,0 +1,76 @@
+# Seed texts for the Public AI Interest embedding profile.
+#
+# These represent papers/topics that make strong, broad,
+# educational podcast episodes. Bootstrapped from past episode
+# topics and manually curated high-interest research areas.
+
+seeds:
+  # Scaling and architecture
+  - >
+    Scaling laws for neural language models. Compute-optimal
+    training. Chinchilla scaling. How model size, data, and
+    compute trade off in large language models.
+  - >
+    Transformer architecture innovations. Multi-head attention
+    improvements. Efficient attention mechanisms. Flash attention
+    and memory-efficient attention kernels.
+  - >
+    Mixture of experts architectures for large language models.
+    Sparse gating, load balancing, expert routing strategies.
+    Switch Transformer, GShard, Mixtral.
+  - >
+    State space models as alternatives to transformers. Mamba,
+    S4, structured state spaces. Linear-time sequence modeling.
+  - >
+    Long context language models. Extending context windows
+    beyond 100K tokens. Position encoding innovations. RoPE,
+    ALiBi, YaRN.
+
+  # Training and optimization
+  - >
+    Large-scale distributed training. Model parallelism, data
+    parallelism, pipeline parallelism. DeepSpeed, FSDP, Megatron.
+  - >
+    Optimizer research for deep learning. Adam, AdamW, LAMB,
+    Lion. Learning rate scheduling. Per-layer scaling strategies.
+  - >
+    Post-training methods. RLHF, DPO, constitutional AI.
+    Alignment techniques for language models. Reward modeling.
+  - >
+    Low-rank adaptation and parameter-efficient fine-tuning.
+    LoRA, QLoRA, adapter methods. Efficient model customization.
+  - >
+    Quantization for large language models. GPTQ, AWQ, GGML.
+    Weight quantization, activation quantization. Mixed-precision
+    training and inference.
+
+  # Inference and deployment
+  - >
+    Speculative decoding for faster inference. Draft model
+    verification. Parallel token generation. Medusa, Eagle.
+  - >
+    LLM serving systems. vLLM, TensorRT-LLM, TGI. Batching
+    strategies, continuous batching, request scheduling.
+  - >
+    Open source AI tooling and frameworks. PyTorch ecosystem,
+    Hugging Face transformers, model hubs and sharing.
+
+  # Evaluation and safety
+  - >
+    Evaluating large language models. Benchmarks, contamination,
+    measuring emergent capabilities. Reliability of LLM evals.
+  - >
+    AI safety and alignment. Interpretability, mechanistic
+    understanding of neural networks. Probing, feature circuits.
+
+  # Broad impact
+  - >
+    Multimodal foundation models. Vision-language models, image
+    generation, text-to-image, video understanding. GPT-4V,
+    LLaVA, Stable Diffusion.
+  - >
+    Retrieval-augmented generation. RAG architectures, dense
+    retrieval, combining search with language models.
+  - >
+    Agents and tool use. LLM agents, function calling, planning,
+    multi-step reasoning with external tools.

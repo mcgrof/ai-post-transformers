@@ -1,0 +1,48 @@
+# Scoring weights for the editorial queue.
+#
+# All formulas are transparent and publicly editable.
+# Scores are computed as weighted sums, then clamped to [0, 1].
+
+public_interest:
+  broad_relevance: 0.30
+  momentum: 0.20
+  teachability: 0.20
+  novelty: 0.15
+  evidence: 0.15
+
+memory:
+  direct_memory_relevance: 0.35
+  systems_leverage: 0.20
+  deployment_proximity: 0.15
+  evidence: 0.15
+  memory_adjacent_future_value: 0.15
+
+quality:
+  evidence: 0.40
+  transferability: 0.25
+  clarity: 0.20
+  reproducibility: 0.15
+
+# Boost and penalty values
+boosts:
+  hf_trending: 0.12
+  github_submission: 0.08
+  citation_velocity_max: 0.10
+  bridge_bonus: 0.10
+
+penalties:
+  fatigue_max: 0.25
+  negative_profile_max: 0.30
+  narrow_domain: 0.20
+
+# Shortlist configuration
+shortlist:
+  size: 100
+  min_max_axis: 0.15
+
+# Final queue allocation
+final_queue:
+  bridge: 10
+  public: 10
+  memory: 10
+  diversity_cap: 3

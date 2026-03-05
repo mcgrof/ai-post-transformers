@@ -1,0 +1,136 @@
+# Regression test cases for the editorial scoring pipeline.
+#
+# Each case specifies a mock paper and the expected scoring
+# behavior. The test suite verifies that the editorial scorer
+# assigns correct taxonomy, appropriate relative scores, and
+# that the LLM reviewer (mocked) produces expected statuses.
+
+cases:
+  - name: generic_optimizer_theory
+    description: >
+      Generic optimizer theory paper with weak connection to
+      large-model practice. Should usually be Deferred.
+    paper:
+      arxiv_id: "9999.00001"
+      title: "Convergence Analysis of a Novel Stochastic Gradient Method with Adaptive Step Sizes"
+      abstract: >
+        We present a new stochastic optimization algorithm with
+        provable convergence guarantees under convex and non-convex
+        settings. Our method achieves optimal rates for smooth
+        functions and demonstrates improved constants in the
+        convergence bound. Experiments on logistic regression and
+        small neural networks confirm the theoretical predictions.
+      authors: ["Alice Smith", "Bob Jones"]
+      categories: ["stat.ML", "math.OC"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      scope_bucket: foundation
+      paper_type: theory
+      public_interest_low: true
+      memory_score_low: true
+      expected_status: "Deferred this cycle"
+
+  - name: narrow_image_restoration
+    description: >
+      Narrow transformer application paper in image restoration.
+      Should usually be Out of scope.
+    paper:
+      arxiv_id: "9999.00002"
+      title: "TransRestore: A Multi-Scale Transformer for Blind Image Restoration"
+      abstract: >
+        We propose TransRestore, a multi-scale transformer
+        architecture for blind image restoration tasks including
+        denoising, deblurring, and super-resolution. Our method
+        uses window-based self-attention and achieves state-of-the-art
+        PSNR and SSIM on standard benchmarks including Set14,
+        BSD100, and Urban100. GPU memory is reduced 30% via our
+        efficient attention variant.
+      authors: ["Chen Wei", "Li Zhang", "Wang Peng"]
+      categories: ["cs.CV", "eess.IV"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      scope_bucket: application
+      domain_bucket: vision
+      narrow_domain_flag: true
+      public_interest_low: true
+      memory_score_low: true
+      expected_status: "Out of scope"
+
+  - name: broad_llm_inference_cache
+    description: >
+      Broad LLM inference/systems paper with clear cache and
+      scheduling implications. Should be Cover now, Memory/Storage.
+    paper:
+      arxiv_id: "9999.00003"
+      title: "CacheFlow: Optimizing KV Cache Scheduling for Disaggregated LLM Serving"
+      abstract: >
+        We present CacheFlow, a system for scheduling KV cache
+        transfers in disaggregated LLM serving architectures
+        where prefill and decode run on separate nodes. By treating
+        KV cache blocks as first-class resources with explicit
+        lifetime and locality tracking, CacheFlow reduces
+        inter-node data movement by 40% and improves serving
+        throughput by 2.1x on Llama-70B. We implement CacheFlow
+        in vLLM and evaluate on A100 clusters with CXL memory
+        pooling.
+      authors: ["Sarah Chen", "Mike Johnson", "Raj Patel"]
+      categories: ["cs.DC", "cs.LG"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      scope_bucket: systems
+      memory_score_high: true
+      public_interest_moderate: true
+      expected_status: "Cover now"
+      expected_badges_contain: "Memory/Storage Core"
+
+  - name: direct_memory_paper
+    description: >
+      Direct memory paper about PagedAttention-style KV cache
+      management. Should be Cover now, Memory/Storage Core.
+    paper:
+      arxiv_id: "9999.00004"
+      title: "TieredKV: Hierarchical Memory Management for KV Cache in Long-Context LLMs"
+      abstract: >
+        Long-context language models require KV caches that exceed
+        GPU HBM capacity. TieredKV introduces a hierarchical memory
+        manager that tiers KV cache across HBM, DRAM, and SSD with
+        speculative prefetching based on attention patterns. We
+        implement TieredKV as a drop-in replacement for the
+        PagedAttention memory manager in vLLM. On Llama-3.1-405B
+        with 1M context, TieredKV achieves 95% of HBM-only
+        throughput while requiring 4x less HBM per request.
+      authors: ["David Kim", "Emily Park"]
+      categories: ["cs.AR", "cs.LG"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      memory_score_high: true
+      expected_status: "Cover now"
+      expected_badges_contain: "Memory/Storage Core"
+
+  - name: broad_architecture_weak_memory
+    description: >
+      Broad architecture paper with strong ecosystem relevance
+      but weak memory link. Should be Cover now, Public AI.
+    paper:
+      arxiv_id: "9999.00005"
+      title: "HybridMoE: Combining Dense and Sparse Layers for Efficient Large Language Models"
+      abstract: >
+        We propose HybridMoE, a mixed architecture that interleaves
+        dense transformer layers with sparse mixture-of-experts
+        layers. HybridMoE achieves the quality of dense models
+        with 60% of the training compute by activating only 30%
+        of parameters per token. We train HybridMoE-52B on 2T
+        tokens and evaluate on standard LLM benchmarks. The model
+        is released as open-weights with training code compatible
+        with Hugging Face transformers and DeepSpeed.
+      authors: ["Alex Rivera", "Priya Sharma", "Tom Brown"]
+      categories: ["cs.CL", "cs.LG"]
+      published: "2026-03-01T00:00:00Z"
+      hf_daily: true
+    expected:
+      scope_bucket: foundation
+      domain_bucket: llm
+      public_interest_high: true
+      memory_score_low: true
+      expected_status: "Cover now"
+      expected_badges_contain: "Public AI"

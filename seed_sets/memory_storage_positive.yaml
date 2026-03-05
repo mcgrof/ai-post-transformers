@@ -1,0 +1,85 @@
+# Seed texts for the Memory/Storage First-Class AI profile.
+#
+# These represent papers that directly improve, explain, or
+# exploit memory/storage systems in AI workloads. Curated from
+# past episodes and the project's core research interest areas.
+
+seeds:
+  # KV cache and attention memory
+  - >
+    KV cache compression and optimization for large language
+    models. Token eviction policies, cache quantization,
+    attention sink tokens. Reducing memory footprint of
+    autoregressive generation.
+  - >
+    PagedAttention and virtual memory for KV cache management.
+    vLLM memory management. Non-contiguous KV cache allocation.
+    Page tables for attention.
+  - >
+    KV cache scaling laws. How KV cache memory grows with
+    context length, batch size, and model size. Memory bandwidth
+    bottlenecks in long-context inference.
+  - >
+    Prefix caching and KV cache reuse across requests.
+    Shared prefix optimization. Radix attention. Cache-aware
+    scheduling for LLM serving.
+
+  # Memory-efficient training
+  - >
+    Activation checkpointing and gradient checkpointing for
+    memory-efficient training. Recomputation strategies.
+    Trading compute for memory in backpropagation.
+  - >
+    Memory-efficient training techniques. ZeRO optimizer
+    stages, offloading optimizer states to CPU or NVMe.
+    Mixed precision training memory reduction.
+  - >
+    Optimizer state memory. Adam moment buffers, gradient
+    accumulation. Memory cost of first and second moments.
+    Low-rank optimizer states.
+
+  # Hardware memory hierarchy
+  - >
+    GPU memory wall and HBM bandwidth limitations. Memory
+    bandwidth utilization in transformer inference. Arithmetic
+    intensity and roofline model for LLM workloads.
+  - >
+    CXL memory expansion for AI workloads. Disaggregated
+    memory, memory pooling, CXL-attached DRAM. Heterogeneous
+    memory tiering for large models.
+  - >
+    SSD and NVMe offloading for large language models.
+    FlexGen, DeepSpeed Infinity. Tiered storage for model
+    weights, KV cache, and activations.
+  - >
+    HBM, DRAM, CXL, SSD storage hierarchy for AI. Data
+    movement costs, memory bandwidth, interconnect bandwidth.
+    Near-memory and in-memory computation.
+
+  # Quantization as memory technique
+  - >
+    Weight quantization to reduce memory footprint. INT8,
+    INT4, FP8 formats. Memory savings from quantization.
+    Quality-memory tradeoff in low-bit models.
+  - >
+    Activation memory reduction. Sparse activations, low-rank
+    factorization of activations. Compressing intermediate
+    tensors during training and inference.
+
+  # Memory-adjacent (scheduling, prefetch, routing)
+  - >
+    Speculative decoding as a memory-adjacent technique.
+    Draft model speculation creates predictable access patterns
+    for prefetching and cache management.
+  - >
+    Dynamic routing and mixture of experts as memory-adjacent.
+    Expert selection determines memory access patterns. Expert
+    offloading and caching strategies.
+  - >
+    Disaggregated serving with separate prefill and decode
+    phases. Memory allocation differs across phases. KV cache
+    transfer between prefill and decode nodes.
+  - >
+    Memory scheduling and data movement optimization for
+    distributed inference. Communication-computation overlap.
+    Tensor parallelism memory footprint.
