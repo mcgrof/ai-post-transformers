@@ -200,6 +200,23 @@ spotify:
     CXL-SpecKV: https://podcast.do-not-panic.com/episodes/cxl-speckv-cover.png
   replaced_anchor_guids:
   - 5e0e365d-8f23-4d0f-86eb-7a67d4ab05bc
+sister_podcasts:
+  - title: "AI: Origins"
+    description: >
+      A deep dive into the foundational papers that shaped modern AI.
+      Each episode traces a seminal idea from its origins through its
+      lasting impact on the field.
+    image: images/ai-origins.jpg
+    spotify_url: https://open.spotify.com/show/25CopTiDoDyOr5VMnqIKeP
+    status: complete
+  - title: "AI: AX - Introspection"
+    description: >
+      Reflective episodes examining how AI systems reason, fail, and
+      improve. Focused on interpretability, alignment, and the
+      mechanisms behind model behavior.
+    image: images/ai-ax.jpg
+    spotify_url: https://open.spotify.com/show/3YrceHROrdD9oeu2o78U44
+    status: complete
 editorial:
   enabled: true
   lenses_file: editorial_lenses.yaml

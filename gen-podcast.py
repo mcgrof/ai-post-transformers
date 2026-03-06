@@ -380,6 +380,7 @@ def _publish_site(config):
 
     static_files = [
         ("index.html",                "index.html",                "text/html"),
+        ("about.html",                "about.html",                "text/html"),
         ("queue.html",                "queue.html",                "text/html"),
         ("queue.xml",                 "queue.xml",                 "application/xml"),
         ("images/podcast-bg.png",     "images/podcast-bg.png",     "image/png"),
@@ -389,6 +390,8 @@ def _publish_site(config):
         ("images/amazon-podcasts.png","images/amazon-podcasts.png","image/png"),
         ("images/rss-feed.png",       "images/rss-feed.png",       "image/png"),
         ("images/paper-queue.png",    "images/paper-queue.png",    "image/png"),
+        ("images/ai-origins.jpg",     "images/ai-origins.jpg",     "image/jpeg"),
+        ("images/ai-ax.jpg",          "images/ai-ax.jpg",          "image/jpeg"),
     ]
     for local_name, r2_key, ctype in static_files:
         local_path = os.path.join(feed_dir, local_name)

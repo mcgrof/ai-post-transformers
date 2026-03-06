@@ -824,7 +824,7 @@ a:hover {{ text-decoration: underline; }}
 </div>
 
 <div class="footer">
-  {html.escape(show_title)}
+  {html.escape(show_title)} &middot; <a href="about.html">Sister Podcasts</a>
 </div>
 
 <div class="card-overlay" id="card-overlay"></div>
@@ -880,4 +880,181 @@ a:hover {{ text-decoration: underline; }}
     print(f"{_c('34', '[HTML]')} Index written to {_c('2', str(index_path))} "
           f"({_c('1', str(count))} episodes)",
           file=sys.stderr)
+
+    # Generate about page alongside index
+    generate_about(config, feed_path.parent)
+
     return str(index_path)
+
+
+def generate_about(config, output_dir):
+    """Generate about.html with sister podcast listings.
+
+    Sister podcasts are configured in config.yaml under
+    sister_podcasts. Each entry has title, description, image,
+    spotify_url, and status (complete or active).
+    """
+    sisters = config.get("sister_podcasts", [])
+    if not sisters:
+        return None
+
+    spotify = config.get("spotify", {})
+    show = spotify.get("show", {})
+    show_title = show.get("title", "AI Post Transformers")
+
+    cards = []
+    for pod in sisters:
+        title = html.escape(pod.get("title", ""))
+        desc = html.escape(pod.get("description", "").strip())
+        image = html.escape(pod.get("image", ""))
+        url = html.escape(pod.get("spotify_url", ""))
+        status = pod.get("status", "active")
+
+        badge = ""
+        if status == "complete":
+            badge = '<span class="badge-complete">Complete Series</span>'
+
+        cards.append(f"""<a class="sister-card" href="{url}" target="_blank">
+  <img class="sister-img" src="{image}" alt="{title}" loading="lazy">
+  <div class="sister-info">
+    <div class="sister-title">{title} {badge}</div>
+    <p class="sister-desc">{desc}</p>
+  </div>
+</a>""")
+
+    cards_html = "\n".join(cards)
+
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About &mdash; {html.escape(show_title)}</title>
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Helvetica, Arial, sans-serif;
+  background: #141414;
+  color: #e5e5e5;
+  line-height: 1.6;
+  min-height: 100vh;
+}}
+a {{ color: #e50914; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+
+.page {{
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 2rem;
+}}
+.back {{ font-size: 0.85rem; color: #777; margin-bottom: 2rem; display: inline-block; }}
+.back:hover {{ color: #e5e5e5; }}
+h1 {{
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}}
+.subtitle {{
+  color: #777;
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+}}
+
+.sister-card {{
+  display: flex;
+  gap: 1.2rem;
+  align-items: flex-start;
+  padding: 1.2rem;
+  border-radius: 8px;
+  background: #1a1a1a;
+  margin-bottom: 1rem;
+  text-decoration: none;
+  color: #e5e5e5;
+  transition: background 0.2s, transform 0.2s;
+}}
+.sister-card:hover {{
+  background: #222;
+  transform: translateY(-2px);
+  text-decoration: none;
+}}
+.sister-img {{
+  width: 100px;
+  height: 100px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}}
+.sister-info {{
+  flex: 1;
+  min-width: 0;
+}}
+.sister-title {{
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 0.3rem;
+}}
+.sister-desc {{
+  font-size: 0.85rem;
+  color: #999;
+  line-height: 1.5;
+}}
+.badge-complete {{
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  padding: 0.15em 0.5em;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+}}
+.footer {{
+  text-align: center;
+  padding: 2rem;
+  color: #555;
+  font-size: 0.78rem;
+  border-top: 1px solid #222;
+  margin-top: 2rem;
+}}
+
+@media (max-width: 480px) {{
+  .sister-card {{ flex-direction: column; align-items: center;
+    text-align: center; }}
+  .sister-img {{ width: 120px; height: 120px; }}
+}}
+</style>
+</head>
+<body>
+
+<div class="page">
+  <a class="back" href="index.html">&larr; Back to episodes</a>
+  <h1>Sister Podcasts</h1>
+  <p class="subtitle">Earlier podcast series from the same team.
+    These are complete and no longer releasing new episodes, but
+    every episode remains available to listen.</p>
+
+{cards_html}
+
+</div>
+
+<div class="footer">
+  {html.escape(show_title)}
+</div>
+
+</body>
+</html>
+"""
+
+    about_path = Path(output_dir) / "about.html"
+    about_path.write_text(page)
+    print(f"{_c('34', '[HTML]')} About written to {_c('2', str(about_path))} "
+          f"({_c('1', str(len(sisters)))} sister podcasts)",
+          file=sys.stderr)
+    return str(about_path)
