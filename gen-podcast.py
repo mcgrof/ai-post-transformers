@@ -393,8 +393,11 @@ def _publish_site(config):
         ("images/ai-origins.jpg",     "images/ai-origins.jpg",     "image/jpeg"),
         ("images/ai-ax.jpg",          "images/ai-ax.jpg",          "image/jpeg"),
     ]
+    project_root = os.path.dirname(os.path.abspath(__file__))
     for local_name, r2_key, ctype in static_files:
         local_path = os.path.join(feed_dir, local_name)
+        if not os.path.exists(local_path):
+            local_path = os.path.join(project_root, local_name)
         if os.path.exists(local_path):
             url = upload_file(r2, local_path, r2_key, content_type=ctype)
             print(f"{_c('35', '[Site]')} {_c('1', r2_key)}: "
