@@ -1,5 +1,5 @@
 github:
-  repo: ""  # e.g. "mcgrof/paper-feed"
+  repo: "mcgrof/ai-post-transformers"
 queue:
   top_n: 30
 arxiv_categories:
