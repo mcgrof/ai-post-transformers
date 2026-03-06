@@ -975,7 +975,7 @@ tr:hover {{ background: #1c1c1c; }}
   <h1>Paper Queue</h1>
   <div class="subtitle-wrap">
     <p class="subtitle">{count} papers ranked by interest score
-      <span class="how-link">how?</span>
+      <span class="how-link">&mdash; scoring algorithm</span>
     </p>
     <div class="pipeline-tip">
       <div class="tip-header">How this queue is built</div>
@@ -1341,9 +1341,10 @@ def _render_section_table(section_name, records, accent_color,
         header_html = (
             f'<div class="section-header-wrap">'
             f'<h2 class="section-header"'
-            f' style="border-left: 4px solid {accent_color};'
+            f' style="border-left: 5px solid {accent_color};'
             f' padding-left: 0.8rem;">'
-            f'{html.escape(section_name)}'
+            f'<span style="color:{accent_color}">'
+            f'{html.escape(section_name)}</span>'
             f' <span class="section-count">{len(records)}</span>'
             f' <span class="section-help">(?)</span></h2>'
             f'<div class="section-tip">'
@@ -1351,9 +1352,10 @@ def _render_section_table(section_name, records, accent_color,
     else:
         header_html = (
             f'<h2 class="section-header"'
-            f' style="border-left: 4px solid {accent_color};'
+            f' style="border-left: 5px solid {accent_color};'
             f' padding-left: 0.8rem;">'
-            f'{html.escape(section_name)}'
+            f'<span style="color:{accent_color}">'
+            f'{html.escape(section_name)}</span>'
             f' <span class="section-count">{len(records)}</span>'
             f'</h2>')
 
@@ -1388,13 +1390,13 @@ def generate_queue_html_v2(sections, config):
     total = sum(len(v) for v in sections.values())
 
     section_configs = [
-        ("Bridge", sections.get("bridge", []), "#2d6a4f"),
-        ("Public AI", sections.get("public", []), "#1d3557"),
-        ("Memory/Storage", sections.get("memory", []), "#6b2737"),
-        ("Monitor", sections.get("monitor", []), "#2b2d42"),
-        ("Deferred", sections.get("deferred", []), "#4a4a2b"),
+        ("Bridge", sections.get("bridge", []), "#a8dadc"),
+        ("Public AI", sections.get("public", []), "#8ab4f8"),
+        ("Memory/Storage", sections.get("memory", []), "#f4a261"),
+        ("Monitor", sections.get("monitor", []), "#b0b0b0"),
+        ("Deferred", sections.get("deferred", []), "#c9b458"),
         ("Out of Scope",
-         sections.get("out_of_scope", []), "#3d2b2b"),
+         sections.get("out_of_scope", []), "#c07070"),
     ]
 
     sections_html = ""
@@ -1538,16 +1540,17 @@ a:hover {{ color: #fff; text-decoration: underline; }}
   padding: 0 1.5rem;
 }}
 .section-header {{
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 1.5rem;
+  font-weight: 800;
   color: #fff;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
+  letter-spacing: -0.01em;
 }}
 .section-count {{
-  font-size: 0.8rem;
-  font-weight: 400;
-  color: #666;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #888;
   margin-left: 0.5rem;
 }}
 table {{
@@ -1686,11 +1689,11 @@ tr:hover {{ background: #1c1c1c; }}
   display: inline-block;
 }}
 .section-help {{
-  font-size: 0.72rem;
-  font-weight: 400;
-  color: #666;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #777;
   cursor: help;
-  margin-left: 0.3rem;
+  margin-left: 0.4rem;
 }}
 .section-header-wrap:hover .section-help {{ color: #f0b27a; }}
 .section-tip {{
@@ -1867,7 +1870,7 @@ tr:hover {{ background: #1c1c1c; }}
   <h1>Paper Queue</h1>
   <div class="subtitle-wrap">
     <p class="subtitle">{total} papers ranked under two editorial lenses
-      <span class="how-link">how?</span>
+      <span class="how-link">&mdash; scoring algorithm</span>
     </p>
     <div class="pipeline-tip">
       <div class="tip-header">Two-pass editorial pipeline</div>
