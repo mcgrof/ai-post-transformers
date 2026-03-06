@@ -542,17 +542,10 @@ a:hover {{ text-decoration: underline; }}
   pointer-events: none;
 }}
 .hero-art {{
-  width: 160px; height: 160px;
-  border-radius: 12px;
+  width: 220px; height: 220px;
+  border-radius: 16px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.6);
   margin-bottom: 1.5rem;
-  position: relative;
-}}
-.hero h1 {{
-  font-size: 2.2rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.5rem;
   position: relative;
 }}
 .hero p {{
@@ -579,9 +572,9 @@ a:hover {{ text-decoration: underline; }}
   text-decoration: none;
 }}
 .hero-links img {{
-  height: 40px;
+  height: 56px;
   width: auto;
-  border-radius: 6px;
+  border-radius: 8px;
 }}
 
 /* --- Grid --- */
@@ -748,8 +741,8 @@ a:hover {{ text-decoration: underline; }}
 
 @media (max-width: 600px) {{
   .hero {{ padding: 2.5rem 1rem 2rem; }}
-  .hero-art {{ width: 120px; height: 120px; }}
-  .hero h1 {{ font-size: 1.6rem; }}
+  .hero-art {{ width: 160px; height: 160px; }}
+  .hero-links img {{ height: 44px; }}
   .grid {{
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 0.8rem;
@@ -804,8 +797,7 @@ a:hover {{ text-decoration: underline; }}
 <body>
 
 <div class="hero">
-  <img class="hero-art" src="{html.escape(show_image)}" alt="{html.escape(show_title)}" width="160" height="160">
-  <h1>{html.escape(show_title)}</h1>
+  <img class="hero-art" src="{html.escape(show_image)}" alt="{html.escape(show_title)}" width="220" height="220">
   <p>{html.escape(_truncate_sentence(show_desc, 200))}</p>
   <div class="hero-links">
     <a href="{html.escape(anchor_rss)}" title="Spotify"><img src="images/spotify.png" alt="Spotify"></a>
