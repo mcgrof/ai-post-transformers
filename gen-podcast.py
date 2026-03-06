@@ -380,7 +380,7 @@ def _publish_site(config):
 
     static_files = [
         ("index.html",                "index.html",                "text/html"),
-        ("about.html",                "about.html",                "text/html"),
+        ("sister-podcasts.html",      "sister-podcasts.html",      "text/html"),
         ("queue.html",                "queue.html",                "text/html"),
         ("queue.xml",                 "queue.xml",                 "application/xml"),
         ("images/podcast-bg.png",     "images/podcast-bg.png",     "image/png"),
@@ -390,6 +390,7 @@ def _publish_site(config):
         ("images/amazon-podcasts.png","images/amazon-podcasts.png","image/png"),
         ("images/rss-feed.png",       "images/rss-feed.png",       "image/png"),
         ("images/paper-queue.png",    "images/paper-queue.png",    "image/png"),
+        ("images/sister-podcasts.png","images/sister-podcasts.png","image/png"),
         ("images/ai-origins.jpg",     "images/ai-origins.jpg",     "image/jpeg"),
         ("images/ai-ax.jpg",          "images/ai-ax.jpg",          "image/jpeg"),
     ]
@@ -402,6 +403,24 @@ def _publish_site(config):
             url = upload_file(r2, local_path, r2_key, content_type=ctype)
             print(f"{_c('35', '[Site]')} {_c('1', r2_key)}: "
                   f"{_c('2', url)}", file=sys.stderr)
+
+    # Upload GitHub icon if present
+    gh_icon = os.path.join(project_root, "images", "github.png")
+    if os.path.exists(gh_icon):
+        url = upload_file(r2, gh_icon, "images/github.png",
+                          content_type="image/png")
+        print(f"{_c('35', '[Site]')} {_c('1', 'images/github.png')}: "
+              f"{_c('2', url)}", file=sys.stderr)
+
+    # Upload archive pages (YYYY/MM/index.html)
+    import glob as globmod
+    for archive_page in sorted(globmod.glob(
+            os.path.join(feed_dir, "[0-9][0-9][0-9][0-9]",
+                         "[0-9][0-9]", "index.html"))):
+        rel = os.path.relpath(archive_page, feed_dir)
+        url = upload_file(r2, archive_page, rel, content_type="text/html")
+        print(f"{_c('35', '[Site]')} {_c('1', rel)}: "
+              f"{_c('2', url)}", file=sys.stderr)
 
     print(f"\n{_c('32', 'Site published!')}", file=sys.stderr)
 
