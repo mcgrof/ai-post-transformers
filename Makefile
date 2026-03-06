@@ -1,6 +1,6 @@
 PYTHON = .venv/bin/python
 
-.PHONY: queue publish publish-site test
+.PHONY: queue publish publish-site viz-sync test
 
 queue:
 	$(PYTHON) gen-podcast.py queue
@@ -14,6 +14,9 @@ endif
 
 publish-site:
 	$(PYTHON) gen-podcast.py publish-site
+
+viz-sync:
+	$(PYTHON) gen-podcast.py viz-sync
 
 test:
 	$(PYTHON) -m pytest tests/ -v

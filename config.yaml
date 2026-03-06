@@ -206,3 +206,8 @@ editorial:
   weights_file: weights.yaml
   seed_sets_dir: seed_sets
   llm_workers: 4
+visualization:
+  cache_dir: viz_cache
+  sources:
+    - name: do-not-panic
+      url: https://www.do-not-panic.com/viz/catalog.json

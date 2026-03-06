@@ -219,6 +219,40 @@ def get_all_episode_arxiv_ids(conn):
     return ids
 
 
+def get_episodes_by_arxiv_id(conn):
+    """Map each arXiv ID to the list of episodes that reference it.
+
+    Combines podcast_papers junction table entries with arXiv IDs
+    extracted from the source_urls JSON column. Returns a
+    defaultdict(list) mapping arXiv ID strings to episode dicts.
+    """
+    from collections import defaultdict
+    episodes = list_podcasts(conn)
+    mapping = defaultdict(list)
+    for ep in episodes:
+        aids = set()
+        # Junction table IDs
+        paper_ids = ep.get("paper_ids")
+        if paper_ids:
+            for aid in paper_ids.split(","):
+                aid = aid.strip()
+                if aid:
+                    aids.add(aid)
+        # Source URL IDs
+        source_urls = ep.get("source_urls")
+        if source_urls:
+            try:
+                for url in json.loads(source_urls):
+                    m = re.search(r'(\d{4}\.\d{4,5})', url)
+                    if m:
+                        aids.add(m.group(1))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        for aid in aids:
+            mapping[aid].append(ep)
+    return mapping
+
+
 def get_covered_topics(conn):
     rows = conn.execute("SELECT topic FROM covered_topics").fetchall()
     return {row["topic"] for row in rows}

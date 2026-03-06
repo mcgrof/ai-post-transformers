@@ -158,7 +158,7 @@ def _read_text_file(filepath):
 
 
 SUBCOMMANDS = {"digest", "podcast", "queue", "spotify-upload", "publish",
-                "publish-site"}
+                "publish-site", "viz-sync"}
 
 
 def main():
@@ -180,6 +180,7 @@ modes:
   publish                              publish latest episode to R2
   publish --draft drafts/2026/03/stem  publish a specific draft
   spotify-upload                       regenerate RSS feed for Spotify
+  viz-sync                             sync visualization catalogs
 """,
     )
     parser.add_argument(
@@ -293,6 +294,10 @@ modes:
     elif command == "publish-site":
         _publish_site(config)
         return
+    elif command == "viz-sync":
+        from viz_catalog import run_viz_sync
+        run_viz_sync(config)
+        return
     elif command == "spotify-upload":
         from rss import generate_feed
         feed_path = generate_feed(config)
@@ -374,11 +379,16 @@ def _publish_site(config):
     feed_dir = os.path.dirname(feed_path)
 
     static_files = [
-        ("index.html",              "index.html",              "text/html"),
-        ("queue.html",              "queue.html",              "text/html"),
-        ("queue.xml",               "queue.xml",               "application/xml"),
-        ("images/podcast-bg.png",   "images/podcast-bg.png",   "image/png"),
-        ("images/queue-bg.png",    "images/queue-bg.png",     "image/png"),
+        ("index.html",                "index.html",                "text/html"),
+        ("queue.html",                "queue.html",                "text/html"),
+        ("queue.xml",                 "queue.xml",                 "application/xml"),
+        ("images/podcast-bg.png",     "images/podcast-bg.png",     "image/png"),
+        ("images/queue-bg.png",       "images/queue-bg.png",       "image/png"),
+        ("images/spotify.png",        "images/spotify.png",        "image/png"),
+        ("images/apple-podcasts.png", "images/apple-podcasts.png", "image/png"),
+        ("images/amazon-podcasts.png","images/amazon-podcasts.png","image/png"),
+        ("images/rss-feed.png",       "images/rss-feed.png",       "image/png"),
+        ("images/paper-queue.png",    "images/paper-queue.png",    "image/png"),
     ]
     for local_name, r2_key, ctype in static_files:
         local_path = os.path.join(feed_dir, local_name)

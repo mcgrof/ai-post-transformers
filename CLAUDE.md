@@ -11,6 +11,138 @@ Cloudflare R2 bucket. The RSS feed is at `podcasts/feed.xml`
 Legacy functionality includes a daily paper digest pipeline that
 scores arXiv papers against a research interest profile.
 
+## Architecture
+
+### File map
+
+**Entry points:**
+- `gen-podcast.py` — CLI: generate episodes, publish, list, digest, queue, viz-sync
+- `Makefile` — targets: `queue`, `publish`, `publish-site`, `viz-sync`
+
+**Scoring pipeline (editorial queue):**
+- `editorial_scorer.py` — `EditorialScorer`: first-pass embedding scorer
+- `llm_reviewer.py` — `LLMReviewer`: second-pass LLM editorial review
+- `paper_record.py` — `PaperRecord` dataclass (canonical pipeline record)
+- `paper_queue.py` — queue orchestration, `build_final_queue`, HTML/RSS output
+
+**LLM and content generation:**
+- `llm_backend.py` — `get_llm_backend`, `llm_call` (3 backends)
+- `podcast.py` — episode generation workflow
+- `elevenlabs_client.py` — multi-pass script generation + TTS synthesis
+- `image_gen.py` — DALL-E cover art generation
+
+**Data and publishing:**
+- `db.py` — SQLite schema, upserts, queries (`papers.db`)
+- `rss.py` — RSS 2.0 feed builder
+- `r2_upload.py` — Cloudflare R2 upload
+- `pdf_utils.py` — PDF download and text extraction
+- `fun_facts.py` — fun fact pool for episode intros
+- `interests.py` — `InterestScorer` (legacy single-profile scorer)
+- `viz_catalog.py` — visualization catalog sync (`run_viz_sync`)
+
+**Sources:**
+- `sources/arxiv_source.py` — arXiv API fetcher
+- `sources/hf_daily.py` — HuggingFace Daily Papers scraper
+- `sources/semantic.py` — Semantic Scholar citation enrichment
+
+**Tests:**
+- `tests/conftest.py` — shared fixtures (config, editorial_scorer)
+- `tests/test_editorial_scorer.py` — taxonomy, scoring, filters
+- `tests/test_llm_reviewer.py` — adjustments, badges, failure handling
+- `tests/test_viz_catalog.py` — caching, matching, idempotency
+- `tests/regression_cases.yaml` — curated edge-case papers
+
+**Config files:**
+- `config.yaml` — main settings (arXiv categories, models, podcast params)
+- `weights.yaml` — scoring weights, boosts, penalties, queue allocation
+- `editorial_lenses.yaml` — taxonomy buckets, statuses, badges, category maps
+- `seed_sets/*.yaml` — embedding profiles (public, memory, negative)
+
+### Key classes
+
+- **PaperRecord** (`paper_record.py`) — dataclass with ~40 fields
+  covering identity, source signals, taxonomy, similarities,
+  features, composites, penalties, and LLM review. Created via
+  `from_paper_dict()`, serialized via `to_dict()`.
+- **EditorialScorer** (`editorial_scorer.py`) — loads seed
+  embeddings and weights, runs batch embed + taxonomy + filters +
+  feature scoring + composite computation. Entry: `score_papers()`,
+  then `select_shortlist()`.
+- **LLMReviewer** (`llm_reviewer.py`) — parallel LLM calls with
+  7-question rubric. Entry: `review_papers()`. Applies score
+  adjustments, badges, and status. Falls back to Monitor on error.
+- **LLMBackend** (`llm_backend.py`) — `get_llm_backend(config)`
+  returns a backend dict, `llm_call()` dispatches to claude-cli,
+  openai, or anthropic. JSON parsing with progressive repair.
+- **InterestScorer** (`interests.py`) — legacy single-profile
+  scorer using primary/secondary interest embeddings and keyword
+  boosts. Used when `editorial.enabled` is false.
+
+### Data flow
+
+```
+arXiv/HF/Scholar/GitHub → paper dicts
+  → PaperRecord.from_paper_dict()
+  → EditorialScorer.score_papers()
+    → batch embed → classify taxonomy → editorial filters
+    → compute similarities → compute features → composites
+  → EditorialScorer.select_shortlist()
+  → LLMReviewer.review_papers()
+    → parallel LLM calls → apply adjustments/badges/status
+  → build_final_queue()
+    → Bridge / Public / Memory / Monitor / Deferred / Out of Scope
+  → write queue.yaml + queue.html + queue.xml
+```
+
+### Database tables
+
+- **papers** — cached paper metadata and scores
+- **podcasts** — episode records with audio paths and URLs
+- **podcast_papers** — links podcasts to source arXiv papers
+- **covered_topics** — topic novelty/fatigue tracking
+- **fun_facts** — intro fun fact pool with used/unused status
+
+### Common modification patterns
+
+**Adding a new editorial section/queue bucket:** Edit
+`build_final_queue()` in `paper_queue.py` to add the partition
+logic. Add the slot count to `weights.yaml` under `final_queue`.
+Update the HTML/RSS output functions in `paper_queue.py`.
+
+**Changing scoring weights:** Edit `weights.yaml`. The three
+composite formulas (`public_interest`, `memory`, `quality`) are
+weighted sums — coefficients should sum to 1.0. Boosts and
+penalty caps are also there.
+
+**Adding a new badge:** Add it to the `badges` list in
+`editorial_lenses.yaml`. Add it to the `badges` array in the
+LLM review prompt in `llm_reviewer.py`
+(`REVIEW_PROMPT_TEMPLATE`). No code changes needed — badges are
+free-form strings stored in `PaperRecord.badges`.
+
+**Adding a new paper source:** Create a fetcher in `sources/`,
+returning a list of paper dicts with at minimum `arxiv_id`,
+`title`, `abstract`. Wire it into `run_queue()` in
+`paper_queue.py` alongside the existing parallel fetches.
+`PaperRecord.from_paper_dict()` handles normalization.
+
+**Changing the LLM review prompt:** Edit
+`REVIEW_PROMPT_TEMPLATE` in `llm_reviewer.py`. The template
+receives first-pass scores and paper metadata as format
+variables. The expected JSON response schema is defined inline.
+
+**Adding a visualization source:** Add an entry to the
+`visualization.sources` list in `config.yaml` with `name` and
+`url`. The catalog JSON must have `base_url`,
+`visualizations[].url`, and `visualizations[].papers[].id`.
+Run `make viz-sync` to test.
+
+**Adding a test:** Add test functions to the appropriate file
+in `tests/`. For new regression cases, add entries to
+`tests/regression_cases.yaml` with `name`, `paper` dict, and
+optional `expected` fields. Use the shared `editorial_scorer`
+fixture from `conftest.py` (session-scoped, loaded once).
+
 ## Podcast Generation
 
 ### Primary workflow: generate from PDF URLs

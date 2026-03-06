@@ -226,33 +226,6 @@ JSON responses are parsed with progressive repair: regex cleanup,
 brace-matched extraction, trailing-comma removal, truncation
 repair, and up to 2 LLM retries with stricter instructions.
 
-## Directory Structure
-
-```
-paper-feed/
-  gen-podcast.py         # CLI entry point
-  Makefile               # queue, publish, publish-site targets
-  config.yaml            # interests, models, podcast settings
-  podcast.py             # podcast generation workflow
-  paper_queue.py         # paper queue pipeline + HTML/RSS
-  elevenlabs_client.py   # multi-pass script + TTS pipeline
-  rss.py                 # RSS 2.0 feed generator
-  pdf_utils.py           # PDF download and text extraction
-  image_gen.py           # episode cover image generation
-  fun_facts.py           # fun fact collector for episode intros
-  interests.py           # interest profile embedding + scoring
-  db.py                  # SQLite schema and queries
-  r2_upload.py           # Cloudflare R2 upload
-  sources/
-    arxiv_source.py      # arXiv API fetcher
-    hf_daily.py          # HuggingFace Daily Papers scraper
-    semantic.py          # Semantic Scholar enrichment
-  drafts/                # generated episodes (gitignored)
-  public/                # local mirror of R2 episodes (gitignored)
-  inputs/                # saved generation inputs (gitignored)
-  podcasts/              # feed.xml + anchor_feed.xml
-```
-
 ## Episode Filenames
 
 Episodes use unique filenames to avoid collisions:
@@ -283,6 +256,150 @@ https://podcast.do-not-panic.com/queue.html with a companion
 RSS feed at `queue.xml`. Each paper shows a score breakdown on
 hover explaining how it ranked.
 
+### Editorial Queue Pipeline
+
+The queue uses a two-pass scoring architecture. Pass 1 is fast
+embedding-based scoring that processes hundreds of papers in
+seconds. Pass 2 sends a shortlist to an LLM for editorial
+judgment. The pipeline is implemented across `editorial_scorer.py`,
+`llm_reviewer.py`, `paper_record.py`, and `paper_queue.py`.
+
+**Pass 1 — EditorialScorer** (`editorial_scorer.py`)
+
+1. Convert each paper dict into a `PaperRecord` dataclass
+2. Batch-embed all paper titles + abstracts using
+   `sentence-transformers` (model: `all-MiniLM-L6-v2`)
+3. Classify taxonomy: `scope_bucket` (foundation, systems,
+   architecture, training, inference, eval, benchmark, hardware,
+   application, survey), `domain_bucket` (llm, multimodal,
+   vision, audio, robotics, bio, medical, graphics, pde,
+   recommendation, other), and `paper_type` (theory, empirical,
+   systems, benchmark, survey, application)
+4. Apply editorial filters: flag narrow-domain papers (medical,
+   bio, graphics, pde, recommendation, plus keyword matches)
+5. Compute triple similarity against seed embedding profiles:
+   `sim_public` (public interest seeds), `sim_memory` (memory/
+   storage seeds), `sim_negative` (out-of-scope seeds)
+6. Compute feature scores: `broad_relevance`, `momentum`,
+   `teachability`, `novelty_score`, `evidence_score`,
+   `direct_memory_relevance`, `systems_leverage`,
+   `deployment_proximity`, `memory_adjacent_future_value`,
+   `bandwidth_capacity`, `transferability_score`, `clarity`,
+   `reproducibility`
+7. Compute composite scores as weighted sums (weights from
+   `weights.yaml`):
+   - `public_interest_score = 0.30*broad_relevance +
+     0.20*momentum + 0.20*teachability + 0.15*novelty +
+     0.15*evidence`
+   - `memory_score = 0.35*direct_memory_relevance +
+     0.20*systems_leverage + 0.15*deployment_proximity +
+     0.15*evidence + 0.15*memory_adjacent_future_value`
+   - `quality_score = 0.40*evidence + 0.25*transferability +
+     0.20*clarity + 0.15*reproducibility`
+8. Apply penalties: fatigue (>0.75 similarity to covered topics),
+   negative profile (>0.5 sim to negative seeds), narrow domain
+   (if transferability < 0.5), podcasted (10% of original score)
+9. Compute `bridge_score = min(public, memory)` and
+   `max_axis_score = max(public, memory)`
+10. Select shortlist: top papers by `max_axis + 0.10*bridge +
+    0.20*quality + 0.10*novelty`, minimum `max_axis >= 0.15`,
+    default 100 papers
+
+**Pass 2 — LLMReviewer** (`llm_reviewer.py`)
+
+Runs parallel LLM calls (default 4 workers) on each shortlisted
+paper using a 7-question editorial rubric:
+
+1. Would a broad AI audience care within 30-90 days?
+2. Does this change how people build/train/serve/evaluate AI?
+3. Is the memory/storage connection direct, adjacent, or absent?
+4. Are claims supported on realistic workloads?
+5. General method or narrow task paper?
+6. Genuinely new or near-duplicate of recent episodes?
+7. Good episode potential or just a benchmark result?
+
+The LLM returns JSON with score adjustments (clamped to ±0.3),
+badges, status, editorial notes, and an episode hook. Score
+adjustments are applied to the first-pass composites and
+bridge/max_axis are recomputed.
+
+Valid statuses: `Cover now`, `Monitor`, `Deferred this cycle`,
+`Out of scope`. Valid badges: `Public AI`, `Memory/Storage Core`,
+`Memory/Storage Adjacent`, `Bridge`, `Systems`, `Theory`,
+`Hardware`, `Training`, `Inference`, `Application`.
+
+On LLM failure for any paper, it keeps first-pass scores and
+defaults to `Monitor` status.
+
+**Final Queue Partitioning** (`paper_queue.build_final_queue`)
+
+Papers with `Cover now` status are partitioned into three buckets:
+
+- **Bridge** — scores above 0.3 on both lenses, or has `Bridge`
+  badge (target: 10 slots)
+- **Public** — `public_interest > memory` (target: 10 slots)
+- **Memory** — `memory >= public_interest` (target: 10 slots)
+
+Remaining papers fill **Monitor** (top 20 by quality×teachability),
+**Deferred**, and **Out of Scope** sections. A diversity cap
+(default 3) limits very similar papers within each bucket.
+Sparse buckets backfill from Monitor.
+
+## Visualization Catalog
+
+The `viz-sync` command links podcast episodes to interactive
+visualizations published at external sites. When a visualization
+references the same arXiv papers as an episode, the episode
+description is updated with a link to the visualization.
+
+```bash
+make viz-sync                     # fetch catalogs + update episodes
+```
+
+Catalog sources are configured in `config.yaml`:
+
+```yaml
+visualization:
+  cache_dir: viz_cache
+  sources:
+    - name: do-not-panic
+      url: https://www.do-not-panic.com/viz/catalog.json
+```
+
+Catalogs are cached locally so unchanged files are skipped on
+subsequent runs. Multiple sources are fetched in parallel.
+
+### Catalog JSON Format
+
+Anyone can publish a visualization catalog. The required format:
+
+```json
+{
+  "base_url": "https://example.com/visualizations/",
+  "updated": "2026-03-05",
+  "visualizations": [
+    {
+      "id": 72,
+      "title": "Interactive Deep Dive",
+      "url": "viz/2026/03/04/page.html",
+      "date": "2026-03-04",
+      "papers": [
+        {"id": "2404.19737", "type": "arxiv"}
+      ]
+    }
+  ]
+}
+```
+
+Required fields: `base_url`, `updated`, `visualizations[]`.
+Each visualization requires `id`, `title`, `url`, `date`, and
+`papers[]`. Each paper ref requires `id` and `type` (currently
+only `"arxiv"` is supported). Optional fields: `description`,
+`image`.
+
+The `url` field is relative to the site root (scheme+host from
+`base_url`). Absolute URLs are also accepted.
+
 ## Legacy: Paper Digest
 
 The original use case was a daily paper digest pipeline:
@@ -299,9 +416,155 @@ HuggingFace trending signal, and outputs a ranked digest.
 
 ## Configuration
 
-All settings live in `config.yaml`: arXiv categories, interest
-keywords, scoring weights, OpenAI model selection, ElevenLabs
-voices, image generation, and Spotify/RSS distribution settings.
+Settings are split across three config files and a set of seed
+embedding profiles.
+
+**`config.yaml`** — Main configuration. Contains arXiv categories,
+legacy interest keywords and scoring weights, embedding model
+selection, Semantic Scholar API settings, ElevenLabs voices and
+quality, image generation (DALL-E model, size, style), podcast
+parameters (word counts, durations, host personalities, dynamics,
+LLM backend/model), Spotify/RSS distribution, and the
+`editorial` section that enables the two-pass pipeline and
+points to the other config files.
+
+**`weights.yaml`** — Scoring weights for the editorial queue.
+Defines the weighted-sum coefficients for `public_interest`,
+`memory`, and `quality` composites, boost values (`hf_trending`,
+`github_submission`, `citation_velocity_max`, `bridge_bonus`),
+penalty caps (`fatigue_max`, `negative_profile_max`,
+`narrow_domain`), shortlist parameters (`size`, `min_max_axis`),
+and final queue slot allocation (`bridge`, `public`, `memory`,
+`diversity_cap`).
+
+**`editorial_lenses.yaml`** — Editorial taxonomy definitions.
+Declares the two lenses (Public AI Interest, Memory/Storage
+First-Class AI) with their signal lists, taxonomy buckets
+(scope, domain, paper types), valid statuses and badges, the
+narrow domain penalty list, and arXiv category-to-bucket
+mappings.
+
+**`seed_sets/*.yaml`** — Embedding seed profiles used for
+computing similarity scores:
+- `public_interest_positive.yaml` — seeds for broad AI interest
+- `memory_storage_positive.yaml` — seeds for memory/storage
+  relevance
+- `negative_out_of_scope.yaml` — seeds for out-of-scope detection
+
+## Data Model
+
+`PaperRecord` (`paper_record.py`) is the canonical dataclass
+flowing through the editorial pipeline. Fields are grouped as:
+
+- **Identity**: `arxiv_id`, `title`, `abstract`, `authors`,
+  `published_at`, `categories`, `url`, `code_url`
+- **Source signals**: `github_submission_flag`,
+  `hf_trending_flag`, `citation_count`,
+  `influential_citation_count`
+- **Taxonomy**: `scope_bucket`, `domain_bucket`, `paper_type`,
+  `narrow_domain_flag`
+- **Similarities**: `sim_public`, `sim_memory`, `sim_negative`
+- **Feature scores**: `broad_relevance`, `momentum`,
+  `teachability`, `novelty_score`, `evidence_score`,
+  `direct_memory_relevance`, `systems_leverage`,
+  `deployment_proximity`, `memory_adjacent_future_value`,
+  `bandwidth_capacity`, `transferability_score`, `clarity`,
+  `reproducibility`
+- **Composites**: `public_interest_score`, `memory_score`,
+  `quality_score`, `bridge_score`, `max_axis_score`
+- **Penalties**: `fatigue_penalty`, `negative_profile_penalty`
+- **LLM review**: `badges`, `status`, `why_now`,
+  `why_not_higher`, `downgrade_reasons`,
+  `what_would_raise_priority`, `one_sentence_episode_hook`
+
+`PaperRecord.from_paper_dict()` normalizes the varying field
+names across arXiv, HF Daily, Semantic Scholar, and GitHub
+Issues sources. `to_dict()` serializes all fields except the
+embedding vector.
+
+## Database
+
+SQLite database (`papers.db`) with five tables:
+
+- **papers** — cached paper metadata, scores, and fetch dates
+- **podcasts** — episode records (title, date, audio file,
+  source URLs, description, image)
+- **podcast_papers** — junction table linking podcasts to their
+  source arXiv papers
+- **covered_topics** — tracks topics covered across episodes
+  for novelty/fatigue scoring
+- **fun_facts** — pool of fun facts for episode intros (unused/
+  used status tracking)
+
+## Directory Structure
+
+```
+paper-feed/
+  gen-podcast.py         # CLI entry point
+  Makefile               # queue, publish, publish-site targets
+  podcast.py             # podcast generation workflow
+  elevenlabs_client.py   # multi-pass script + TTS pipeline
+  paper_queue.py         # paper queue pipeline + HTML/RSS
+  editorial_scorer.py    # first-pass embedding scorer
+  llm_reviewer.py        # second-pass LLM editorial reviewer
+  paper_record.py        # PaperRecord dataclass
+  llm_backend.py         # LLM backend abstraction (3 backends)
+  interests.py           # legacy interest profile scoring
+  rss.py                 # RSS 2.0 feed generator
+  pdf_utils.py           # PDF download and text extraction
+  image_gen.py           # episode cover image generation
+  fun_facts.py           # fun fact collector for episode intros
+  viz_catalog.py         # visualization catalog sync
+  db.py                  # SQLite schema and queries
+  r2_upload.py           # Cloudflare R2 upload
+  config.yaml            # main settings
+  weights.yaml           # scoring weights and queue allocation
+  editorial_lenses.yaml  # taxonomy, statuses, badges
+  seed_sets/
+    public_interest_positive.yaml
+    memory_storage_positive.yaml
+    negative_out_of_scope.yaml
+  sources/
+    arxiv_source.py      # arXiv API fetcher
+    hf_daily.py          # HuggingFace Daily Papers scraper
+    semantic.py          # Semantic Scholar enrichment
+  tests/
+    conftest.py          # shared fixtures (config, scorer)
+    test_editorial_scorer.py
+    test_llm_reviewer.py
+    regression_cases.yaml
+  drafts/                # generated episodes (gitignored)
+  public/                # local mirror of R2 episodes (gitignored)
+  inputs/                # saved generation inputs (gitignored)
+  podcasts/              # feed.xml + anchor_feed.xml
+```
+
+## Testing
+
+```bash
+.venv/bin/python -m pytest tests/ -v
+```
+
+Tests cover the editorial scoring pipeline:
+
+- `test_editorial_scorer.py` — PaperRecord construction,
+  taxonomy classification (scope/domain/paper_type), relative
+  score ordering across regression cases, editorial filter
+  behavior (narrow domain flags), and shortlist threshold
+  enforcement. Uses a shared `EditorialScorer` fixture loaded
+  once per session.
+
+- `test_llm_reviewer.py` — score adjustment application
+  (positive, negative, clamped-to-zero), badge and status
+  assignment, composite recomputation after adjustments, and
+  graceful failure handling (defaults to Monitor on LLM error).
+  All LLM calls are mocked.
+
+- `tests/regression_cases.yaml` — curated papers representing
+  edge cases: generic optimizer theory, narrow image
+  restoration, broad LLM inference cache, direct memory papers,
+  and broad architecture with weak memory signal. Tests assert
+  relative ordering and taxonomy correctness against these cases.
 
 ## Requirements
 
@@ -309,6 +572,20 @@ voices, image generation, and Spotify/RSS distribution settings.
 - CPU only (no GPU required)
 - API keys: OpenAI, ElevenLabs
 - Optional: Cloudflare R2 credentials (for publishing)
+
+Key dependencies (`requirements.txt`):
+
+- `sentence-transformers` — embedding model for seed profile
+  similarity scoring
+- `openai` — OpenAI API SDK (LLM backend + image generation)
+- `anthropic` — Anthropic API SDK (LLM backend)
+- `arxiv` — arXiv API client for paper fetching
+- `feedparser` — RSS feed parsing (Anchor/Spotify feed)
+- `beautifulsoup4` — HTML scraping (HuggingFace Daily Papers)
+- `pypdf` — PDF text extraction
+- `PyYAML` — YAML config loading
+- `boto3` — Cloudflare R2 uploads (S3-compatible)
+- `pytest` — test framework
 
 ## License
 
