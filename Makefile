@@ -1,6 +1,6 @@
 PYTHON = .venv/bin/python
 
-.PHONY: queue publish publish-site viz-sync test
+.PHONY: queue publish publish-site viz-sync backfill-images test
 
 queue:
 	$(PYTHON) gen-podcast.py queue
@@ -17,6 +17,9 @@ publish-site:
 
 viz-sync:
 	$(PYTHON) gen-podcast.py viz-sync
+
+backfill-images:
+	$(PYTHON) backfill_images.py
 
 test:
 	$(PYTHON) -m pytest tests/ -v
