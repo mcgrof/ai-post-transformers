@@ -439,6 +439,16 @@ def _extract_episodes_from_feed(feed_path):
     return episodes
 
 
+def _extract_viz_links(desc):
+    """Extract Interactive Visualization links from description HTML."""
+    viz = []
+    for m in re.finditer(
+            r'Interactive Visualization:\s*([^<\n]+)'
+            r'.*?href="([^"]+)"', desc):
+        viz.append((m.group(1).strip(), m.group(2)))
+    return viz
+
+
 def _render_card(ep, root_prefix=""):
     """Render a single episode card HTML. root_prefix adjusts relative paths."""
     img_html = ""
@@ -466,6 +476,17 @@ def _render_card(ep, root_prefix=""):
             f'<source src="{html.escape(ep["audio_url"])}" '
             f'type="audio/mpeg"></audio>')
 
+    # Viz links shown below the date on the card tile
+    viz_links = _extract_viz_links(ep["description"])
+    viz_html = ""
+    if viz_links:
+        parts = []
+        for title, url in viz_links:
+            parts.append(
+                f'<a class="card-viz" href="{html.escape(url)}" '
+                f'target="_blank">{html.escape(title)}</a>')
+        viz_html = "\n    ".join(parts)
+
     return f"""<div class="card">
   <div class="card-visual">
     {img_html}
@@ -473,6 +494,7 @@ def _render_card(ep, root_prefix=""):
   <div class="card-meta">
     <div class="card-title">{html.escape(ep["title"])}</div>
     <div class="card-date">{html.escape(ep["date"])}</div>
+    {viz_html}
   </div>
   <div class="card-body">
     <p class="card-desc">{ep["description"]}</p>
@@ -684,6 +706,19 @@ a:hover {{ text-decoration: underline; }}
   font-size: 0.72rem;
   color: #777;
   margin-top: 0.15rem;
+}}
+.card-viz {{
+  display: block;
+  font-size: 0.7rem;
+  color: #5eeacd;
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+.card-viz:hover {{
+  color: #fff;
+  text-decoration: underline;
 }}
 
 /* Expanded body: wider centered overlay below the visual */
@@ -1067,6 +1102,19 @@ h1 {{
   font-size: 0.72rem;
   color: #777;
   margin-top: 0.15rem;
+}}
+.card-viz {{
+  display: block;
+  font-size: 0.7rem;
+  color: #5eeacd;
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+.card-viz:hover {{
+  color: #fff;
+  text-decoration: underline;
 }}
 .card-body {{
   position: absolute;
