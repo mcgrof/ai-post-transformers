@@ -409,9 +409,12 @@ def _extract_episodes_from_feed(feed_path):
 
         pub_el = item.find("pubDate")
         pub = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
+        date_dt = None
         try:
-            dt = datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %z")
-            date_str = dt.strftime("%b %-d, %Y")
+            # Handle GMT suffix (not parsed by %z)
+            pub_norm = pub.replace(" GMT", " +0000")
+            date_dt = datetime.strptime(pub_norm, "%a, %d %b %Y %H:%M:%S %z")
+            date_str = date_dt.strftime("%b %-d, %Y")
         except (ValueError, TypeError):
             date_str = pub
 
@@ -427,6 +430,7 @@ def _extract_episodes_from_feed(feed_path):
         episodes.append({
             "title": title,
             "date": date_str,
+            "date_dt": date_dt,
             "description": desc,
             "audio_url": audio,
             "image_url": img,
@@ -435,58 +439,34 @@ def _extract_episodes_from_feed(feed_path):
     return episodes
 
 
-def generate_index(config, feed_path=None):
-    """Generate a static index.html with embedded episode data.
+def _render_card(ep, root_prefix=""):
+    """Render a single episode card HTML. root_prefix adjusts relative paths."""
+    img_html = ""
+    if ep["image_url"]:
+        img_html = (
+            f'<img class="card-img" src="{html.escape(ep["image_url"])}" '
+            f'alt="" loading="lazy">')
+    else:
+        img_html = '<div class="card-img card-img-placeholder"></div>'
 
-    Works from file:// and from a web server. Rebuilds each time
-    the feed is regenerated so episode data is always current.
-    """
-    spotify = config.get("spotify", {})
-    show = spotify.get("show", {})
-    show_title = show.get("title", "AI Post Transformers")
-    show_desc = show.get("description", "")
-    show_image = show.get("image_url", "")
-    anchor_rss = spotify.get("anchor_rss", "")
+    links = []
+    if ep["audio_url"]:
+        links.append(
+            f'<a href="{html.escape(ep["audio_url"])}" download>'
+            f'Download</a>')
+    if ep["srt_url"]:
+        links.append(
+            f'<a href="{html.escape(ep["srt_url"])}">Subtitles</a>')
+    links_html = " ".join(links)
 
-    if feed_path is None:
-        feed_path = Path(__file__).parent / spotify.get("feed_file", "podcasts/feed.xml")
-    feed_path = Path(feed_path)
+    audio_html = ""
+    if ep["audio_url"]:
+        audio_html = (
+            f'<audio controls preload="none">'
+            f'<source src="{html.escape(ep["audio_url"])}" '
+            f'type="audio/mpeg"></audio>')
 
-    if not feed_path.exists():
-        print("[HTML] Skipping index.html: feed.xml not found", file=sys.stderr)
-        return None
-
-    episodes = _extract_episodes_from_feed(feed_path)
-
-    # Build episode HTML cards
-    cards = []
-    for ep in episodes:
-        img_html = ""
-        if ep["image_url"]:
-            img_html = (
-                f'<img class="card-img" src="{html.escape(ep["image_url"])}" '
-                f'alt="" loading="lazy">')
-        else:
-            img_html = '<div class="card-img card-img-placeholder"></div>'
-
-        links = []
-        if ep["audio_url"]:
-            links.append(
-                f'<a href="{html.escape(ep["audio_url"])}" download>'
-                f'Download</a>')
-        if ep["srt_url"]:
-            links.append(
-                f'<a href="{html.escape(ep["srt_url"])}">Subtitles</a>')
-        links_html = " ".join(links)
-
-        audio_html = ""
-        if ep["audio_url"]:
-            audio_html = (
-                f'<audio controls preload="none">'
-                f'<source src="{html.escape(ep["audio_url"])}" '
-                f'type="audio/mpeg"></audio>')
-
-        cards.append(f"""<div class="card">
+    return f"""<div class="card">
   <div class="card-visual">
     {img_html}
   </div>
@@ -499,10 +479,61 @@ def generate_index(config, feed_path=None):
     {audio_html}
     <div class="card-links">{links_html}</div>
   </div>
-</div>""")
+</div>"""
 
-    cards_html = "\n".join(cards)
-    count = len(episodes)
+
+def generate_index(config, feed_path=None):
+    """Generate index.html (latest 8 episodes) and per-month archive pages."""
+    import calendar
+    from collections import defaultdict
+
+    spotify = config.get("spotify", {})
+    show = spotify.get("show", {})
+    show_title = show.get("title", "AI Post Transformers")
+    show_desc = show.get("description", "")
+    show_image = show.get("image_url", "")
+    anchor_rss = spotify.get("anchor_rss", "")
+    github_repo = config.get("github", {}).get("repo", "")
+
+    if feed_path is None:
+        feed_path = Path(__file__).parent / spotify.get("feed_file", "podcasts/feed.xml")
+    feed_path = Path(feed_path)
+
+    if not feed_path.exists():
+        print("[HTML] Skipping index.html: feed.xml not found", file=sys.stderr)
+        return None
+
+    episodes = _extract_episodes_from_feed(feed_path)
+    total = len(episodes)
+
+    # Latest 8 for index
+    latest = episodes[:8]
+    cards_html = "\n".join(_render_card(ep) for ep in latest)
+
+    # Group all episodes by year/month for archive
+    by_month = defaultdict(list)
+    for ep in episodes:
+        dt = ep.get("date_dt")
+        if dt:
+            by_month[(dt.year, dt.month)].append(ep)
+        else:
+            by_month[(0, 0)].append(ep)
+
+    # Build archive links sorted newest first
+    sorted_months = sorted(
+        ((ym, eps) for ym, eps in by_month.items() if ym != (0, 0)),
+        key=lambda x: x[0], reverse=True)
+    archive_links = []
+    for (year, month), month_eps in sorted_months:
+        label = f"{calendar.month_name[month]} {year}"
+        href = f"{year}/{month:02d}/"
+        archive_links.append(
+            f'<a class="archive-link" href="{href}">'
+            f'{html.escape(label)} '
+            f'<span class="ep-count">({len(month_eps)})</span></a>')
+    archive_html = "\n    ".join(archive_links)
+
+    count = total
 
     page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -572,7 +603,7 @@ a:hover {{ text-decoration: underline; }}
   text-decoration: none;
 }}
 .hero-links img {{
-  height: 56px;
+  height: 180px;
   width: auto;
   border-radius: 8px;
 }}
@@ -729,6 +760,44 @@ a:hover {{ text-decoration: underline; }}
   border-radius: 0 0 6px 6px;
 }}
 
+/* --- Archive --- */
+.archive-section {{
+  border-top: 1px solid #222;
+}}
+.archive-grid {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}}
+.archive-link {{
+  display: inline-block;
+  padding: 0.4rem 0.9rem;
+  background: #1a1a1a;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #ccc;
+  transition: background 0.2s;
+}}
+.archive-link:hover {{
+  background: #2a2a2a;
+  text-decoration: none;
+  color: #fff;
+}}
+.ep-count {{
+  color: #666;
+  font-size: 0.75rem;
+}}
+
+/* --- Suggest link --- */
+.suggest-link {{
+  display: inline-block;
+  margin-top: 0.8rem;
+  font-size: 0.85rem;
+  color: #777;
+  position: relative;
+}}
+.suggest-link:hover {{ color: #e50914; }}
+
 /* --- Footer --- */
 .footer {{
   text-align: center;
@@ -742,7 +811,7 @@ a:hover {{ text-decoration: underline; }}
 @media (max-width: 600px) {{
   .hero {{ padding: 2.5rem 1rem 2rem; }}
   .hero-art {{ width: 160px; height: 160px; }}
-  .hero-links img {{ height: 44px; }}
+  .hero-links img {{ height: 120px; }}
   .grid {{
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 0.8rem;
@@ -805,18 +874,28 @@ a:hover {{ text-decoration: underline; }}
     <a href="https://music.amazon.com/podcasts/bad34c42-bf59-4b9a-8085-5742fd63e011/ai-post-transformers" title="Amazon Podcasts"><img src="images/amazon-podcasts.png" alt="Amazon Podcasts"></a>
     <a href="feed.xml" title="RSS Feed"><img src="images/rss-feed.png" alt="RSS Feed"></a>
     <a href="queue.html" title="Paper Queue"><img src="images/paper-queue.png" alt="Paper Queue"></a>
+    <a href="sister-podcasts.html" title="Sister Podcasts"><img src="images/sister-podcasts.png" alt="Sister Podcasts"></a>
+{"" if not github_repo else f'    <a href="https://github.com/{html.escape(github_repo)}" title="GitHub"><img src="images/github.png" alt="GitHub"></a>'}
   </div>
+{"" if not github_repo else f'  <a class="suggest-link" href="https://github.com/{html.escape(github_repo)}/issues/new?template=paper-submission.yml" target="_blank">Know a paper we should cover? Suggest it &rarr;</a>'}
 </div>
 
 <div class="section">
-  <div class="section-title">{count} Episodes</div>
+  <div class="section-title">Latest Episodes</div>
   <div class="grid">
 {cards_html}
   </div>
 </div>
 
+<div class="section archive-section">
+  <div class="section-title">Archive ({count} episodes)</div>
+  <div class="archive-grid">
+    {archive_html}
+  </div>
+</div>
+
 <div class="footer">
-  {html.escape(show_title)} &middot; <a href="about.html">Sister Podcasts</a>
+  {html.escape(show_title)}
 </div>
 
 <div class="card-overlay" id="card-overlay"></div>
@@ -873,10 +952,296 @@ a:hover {{ text-decoration: underline; }}
           f"({_c('1', str(count))} episodes)",
           file=sys.stderr)
 
+    # Generate per-month archive pages
+    _generate_month_pages(sorted_months, show_title, feed_path.parent)
+
     # Generate about page alongside index
     generate_about(config, feed_path.parent)
 
     return str(index_path)
+
+
+def _generate_month_pages(sorted_months, show_title, output_dir):
+    """Generate per-month archive pages under YYYY/MM/index.html."""
+    import calendar
+
+    for (year, month), month_eps in sorted_months:
+        label = f"{calendar.month_name[month]} {year}"
+        cards_html = "\n".join(_render_card(ep, root_prefix="../../") for ep in month_eps)
+
+        page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(label)} &mdash; {html.escape(show_title)}</title>
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Helvetica, Arial, sans-serif;
+  background: #141414;
+  color: #e5e5e5;
+  line-height: 1.5;
+  min-height: 100vh;
+}}
+a {{ color: #e50914; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+.page-header {{
+  padding: 2rem 1.5rem 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}}
+.back {{ font-size: 0.85rem; color: #777; }}
+.back:hover {{ color: #e5e5e5; }}
+h1 {{
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 0.8rem;
+}}
+.section {{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 2rem;
+}}
+.grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.2rem;
+}}
+.card {{
+  position: relative;
+  border-radius: 6px;
+  overflow: visible;
+  cursor: default;
+}}
+.card-visual {{
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #222;
+  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94),
+              box-shadow 0.3s ease;
+  z-index: 1;
+}}
+.card:hover .card-visual {{
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
+  z-index: 10;
+  border-radius: 6px 6px 0 0;
+}}
+.card-img {{
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}}
+.card:hover .card-img {{ transform: scale(1.1); }}
+.card-img-placeholder {{
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, #1a1a2e, #2d2d44);
+}}
+.card-meta {{
+  position: relative;
+  padding: 0.6rem 0.5rem 0.3rem;
+  background: #1a1a1a;
+  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94);
+  z-index: 2;
+}}
+.card:hover .card-meta {{
+  transform: scale(1.05);
+  z-index: 11;
+}}
+.card-title {{
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e5e5e5;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}}
+.card-date {{
+  font-size: 0.72rem;
+  color: #777;
+  margin-top: 0.15rem;
+}}
+.card-body {{
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 520px;
+  max-width: 90vw;
+  background: #1c1c1c;
+  border-radius: 0 0 6px 6px;
+  padding: 1rem 1.2rem;
+  z-index: 9;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -8px);
+  transform-origin: top center;
+  transition: opacity 0.25s ease, visibility 0.25s ease,
+              transform 0.25s cubic-bezier(.25,.46,.45,.94);
+  pointer-events: none;
+}}
+.card:hover .card-body {{
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}}
+.card-desc {{
+  font-size: 0.82rem;
+  color: #e5e5e5;
+  line-height: 1.6;
+  margin-bottom: 0.6rem;
+}}
+.card-sources {{
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #333;
+  font-size: 0.75rem;
+  color: #999;
+  line-height: 1.7;
+}}
+.card-sources a {{
+  color: #7ab;
+  word-break: break-all;
+}}
+.card-sources a:hover {{ color: #e50914; }}
+.card-body audio {{
+  width: 100%;
+  height: 34px;
+  margin-bottom: 0.4rem;
+  border-radius: 4px;
+}}
+.card-links {{
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+}}
+.card-links a {{ color: #999; }}
+.card-links a:hover {{ color: #e50914; text-decoration: none; }}
+.card.expand-up .card-body {{
+  top: auto;
+  bottom: 100%;
+  border-radius: 6px 6px 0 0;
+  transform-origin: bottom center;
+  transform: translate(-50%, 8px);
+}}
+.card.expand-up:hover .card-body {{
+  transform: translate(-50%, 0);
+}}
+.card.expand-up:hover .card-visual {{
+  border-radius: 0 0 6px 6px;
+}}
+.footer {{
+  text-align: center;
+  padding: 2rem;
+  color: #555;
+  font-size: 0.78rem;
+  border-top: 1px solid #222;
+  margin-top: 0;
+}}
+@media (max-width: 600px) {{
+  .grid {{
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.8rem;
+  }}
+  .card-body {{
+    position: fixed;
+    top: auto; bottom: 0; left: 0;
+    width: 100%; max-width: 100vw; max-height: 70vh;
+    overflow-y: auto;
+    border-radius: 12px 12px 0 0;
+    transform: translateY(100%);
+    opacity: 0; visibility: hidden;
+    z-index: 1000; pointer-events: none;
+    transition: transform 0.3s ease, opacity 0.25s ease, visibility 0.25s ease;
+  }}
+  .card.active .card-body {{
+    transform: translateY(0);
+    opacity: 1; visibility: visible; pointer-events: auto;
+  }}
+  .card-overlay {{
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 999;
+  }}
+  .card.active + .card-overlay, .card-overlay.active {{ display: block; }}
+  .card-visual {{ border-radius: 6px; }}
+  .card:hover .card-visual {{ transform: none; box-shadow: none; border-radius: 6px; }}
+  .card:hover .card-meta {{ transform: none; }}
+  .card:hover .card-body {{ transform: translateY(100%); opacity: 0; visibility: hidden; }}
+  .card.active:hover .card-body {{ transform: translateY(0); opacity: 1; visibility: visible; }}
+}}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <a class="back" href="../../index.html">&larr; All episodes</a>
+  <h1>{html.escape(label)}</h1>
+</div>
+
+<div class="section">
+  <div class="grid">
+{cards_html}
+  </div>
+</div>
+
+<div class="footer">
+  {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
+</div>
+
+<div class="card-overlay" id="card-overlay"></div>
+
+<script>
+(function() {{
+  var cards = document.querySelectorAll('.card');
+  if (!cards.length) return;
+  var lastTop = cards[cards.length - 1].getBoundingClientRect().top;
+  for (var i = cards.length - 1; i >= 0; i--) {{
+    if (Math.abs(cards[i].getBoundingClientRect().top - lastTop) < 5)
+      cards[i].classList.add('expand-up');
+    else break;
+  }}
+  var isMobile = window.matchMedia('(max-width: 600px)');
+  var overlay = document.getElementById('card-overlay');
+  function closeActive() {{
+    var a = document.querySelector('.card.active');
+    if (a) a.classList.remove('active');
+    overlay.classList.remove('active');
+  }}
+  cards.forEach(function(c) {{
+    c.addEventListener('click', function(e) {{
+      if (!isMobile.matches) return;
+      if (e.target.closest('a, audio, button')) return;
+      e.stopPropagation();
+      var w = c.classList.contains('active');
+      closeActive();
+      if (!w) {{ c.classList.add('active'); overlay.classList.add('active'); }}
+    }});
+  }});
+  overlay.addEventListener('click', closeActive);
+}})();
+</script>
+
+</body>
+</html>
+"""
+
+        month_dir = Path(output_dir) / str(year) / f"{month:02d}"
+        month_dir.mkdir(parents=True, exist_ok=True)
+        month_path = month_dir / "index.html"
+        month_path.write_text(page)
+
+    count = len(sorted_months)
+    if count:
+        print(f"{_c('34', '[HTML]')} Generated {_c('1', str(count))} "
+              f"archive page(s)", file=sys.stderr)
 
 
 def generate_about(config, output_dir):
@@ -921,7 +1286,7 @@ def generate_about(config, output_dir):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>About &mdash; {html.escape(show_title)}</title>
+<title>Sister Podcasts &mdash; {html.escape(show_title)}</title>
 <style>
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{
@@ -1029,8 +1394,9 @@ h1 {{
   <a class="back" href="index.html">&larr; Back to episodes</a>
   <h1>Sister Podcasts</h1>
   <p class="subtitle">Earlier podcast series from the same team.
-    These are complete and no longer releasing new episodes, but
-    every episode remains available to listen.</p>
+    These series are complete and are no longer releasing new episodes &mdash;
+    {html.escape(show_title)} is now the home for all new publications.
+    Every past episode remains available to listen.</p>
 
 {cards_html}
 
@@ -1044,9 +1410,10 @@ h1 {{
 </html>
 """
 
-    about_path = Path(output_dir) / "about.html"
-    about_path.write_text(page)
-    print(f"{_c('34', '[HTML]')} About written to {_c('2', str(about_path))} "
-          f"({_c('1', str(len(sisters)))} sister podcasts)",
+    out_path = Path(output_dir) / "sister-podcasts.html"
+    out_path.write_text(page)
+    print(f"{_c('34', '[HTML]')} Sister podcasts written to "
+          f"{_c('2', str(out_path))} "
+          f"({_c('1', str(len(sisters)))} podcasts)",
           file=sys.stderr)
-    return str(about_path)
+    return str(out_path)
