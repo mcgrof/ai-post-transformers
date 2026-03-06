@@ -1,0 +1,331 @@
+# Topic tags for browsing podcast episodes by AI research area.
+# Each tag has a slug (URL-safe), display name, and keywords list.
+# Tagging: case-insensitive substring match against title + description.
+# An episode can match multiple tags. Unmatched episodes get "general-ai".
+
+tags:
+  - slug: transformer-architecture
+    name: Transformer Architecture
+    keywords:
+      - transformer
+      - attention is all you need
+      - layer norm
+      - batch norm
+      - normalization
+      - residual block
+      - resnet
+      - positional encoding
+      - rope
+      - alibi
+      - gelu
+      - dropout
+      - scaling law
+      - chinchilla
+      - architecture
+
+  - slug: large-language-models
+    name: Large Language Models
+    keywords:
+      - large language model
+      - language model
+      - llm
+      - gpt
+      - llama
+      - gemma
+      - deepseek
+      - qwen
+      - mistral
+      - bert
+      - bart
+      - roberta
+      - unilm
+      - pretraining
+      - pre-training
+      - fine-tuning
+
+  - slug: inference-optimization
+    name: Inference Optimization
+    keywords:
+      - inference
+      - speculative decoding
+      - speculative sampling
+      - serving
+      - throughput
+      - latency
+      - batching
+      - continuous batching
+      - vllm
+      - sglang
+      - tensorrt
+      - flash-llm
+      - pageattention
+      - pagedattention
+      - offload
+      - token generation
+
+  - slug: training-optimization
+    name: Training Optimization
+    keywords:
+      - training
+      - optimizer
+      - adam
+      - adamw
+      - adafactor
+      - learning rate
+      - gradient
+      - fsdp
+      - sharded
+      - checkpoint
+      - pre-training
+      - pretraining
+      - initialization
+      - kaiming
+      - xavier
+      - zero-offload
+      - zerofload
+
+  - slug: model-compression
+    name: Model Compression
+    keywords:
+      - quantization
+      - quantiz
+      - pruning
+      - lora
+      - low-rank
+      - compression
+      - distillation
+      - fp8
+      - 1-bit
+      - 1.58-bit
+      - awq
+      - microscaling
+
+  - slug: attention-mechanisms
+    name: Attention Mechanisms
+    keywords:
+      - attention
+      - flash attention
+      - flashattention
+      - multi-head
+      - grouped query
+      - gqa
+      - multi query
+      - linformer
+      - longformer
+      - sparse attention
+      - linear attention
+      - block attention
+      - gated attention
+
+  - slug: kv-cache
+    name: KV Cache
+    keywords:
+      - kv cache
+      - kvcache
+      - key-value cache
+      - snapkv
+      - pqcache
+      - chunkkv
+      - shadowkv
+      - tailorkv
+      - morphkv
+      - cacheslide
+      - elasticcache
+      - elastic-cache
+      - lmcache
+      - context cach
+
+  - slug: mixture-of-experts
+    name: Mixture of Experts
+    keywords:
+      - mixture of experts
+      - mixture-of-experts
+      - moe
+      - switch transformer
+      - deepseek-moe
+      - deepseekv3
+      - expert offload
+      - fmoe
+      - compressed expert
+
+  - slug: sequence-models
+    name: Sequence Models
+    keywords:
+      - mamba
+      - state space
+      - ssm
+      - lstm
+      - recurrent
+      - rnn
+      - retnet
+      - retentive
+      - linear transformer
+      - megabyte
+      - h-net
+      - dynamic chunking
+
+  - slug: rl-reasoning
+    name: RL & Reasoning
+    keywords:
+      - reinforcement learning
+      - chain of thought
+      - chain-of-thought
+      - reasoning
+      - reward model
+      - grpo
+      - ppo
+      - rlhf
+      - self-play
+      - test-time scaling
+      - deepseek-r1
+      - process reward
+      - policy optimization
+
+  - slug: knowledge-distillation
+    name: Knowledge Distillation
+    keywords:
+      - distillation
+      - distill
+      - teacher
+      - student model
+      - knowledge transfer
+
+  - slug: retrieval-augmented
+    name: Retrieval & RAG
+    keywords:
+      - retrieval
+      - rag
+      - embedding
+      - colbert
+      - sentence-bert
+      - mteb
+      - anns
+      - approximate nearest
+      - vector search
+      - information retrieval
+
+  - slug: ai-agents
+    name: AI Agents
+    keywords:
+      - agent
+      - agentic
+      - multi-agent
+      - tool use
+      - tool-augmented
+      - autonomous
+      - delegation
+      - self-improving
+
+  - slug: computer-vision
+    name: Computer Vision
+    keywords:
+      - vision
+      - image
+      - video
+      - visual
+      - diffusion model
+      - sam
+      - lenet
+      - convolutional
+      - cnn
+      - object detection
+      - fastv
+      - multimodal
+
+  - slug: ai-safety
+    name: AI Safety
+    keywords:
+      - safety
+      - alignment
+      - jailbreak
+      - constitutional ai
+      - misalignment
+      - hallucination
+      - harmful
+      - catastrophic risk
+      - confidential
+      - reward hacking
+      - sabotage
+
+  - slug: ai-society
+    name: AI & Society
+    keywords:
+      - society
+      - societal
+      - employment
+      - advertising
+      - regulatory
+      - democratiz
+      - environmental impact
+      - adoption
+      - policy
+      - diminishing returns
+      - agi
+      - superintelligen
+      - artificial general intelligence
+
+  - slug: systems-infrastructure
+    name: Systems & Infrastructure
+    keywords:
+      - memory wall
+      - gpu
+      - nvme
+      - ssd
+      - hbm
+      - hbf
+      - cxl
+      - cuda
+      - processing-in-memory
+      - storage
+      - hardware
+      - neuromorphic
+      - operating system
+      - postgresql
+      - database
+      - pnfs
+
+  - slug: diffusion-models
+    name: Diffusion Models
+    keywords:
+      - diffusion
+      - denoising
+      - flow matching
+      - image generation
+      - seedream
+      - stable diffusion
+      - latent
+
+  - slug: robotics
+    name: Robotics
+    keywords:
+      - robot
+      - locomotion
+      - quadruped
+      - manipulation
+      - embodied
+      - imitation learning
+
+  - slug: code-generation
+    name: Code & Programming
+    keywords:
+      - code generation
+      - code synthesis
+      - codegen
+      - coding
+      - vibe coding
+      - programming
+      - triton kernel
+      - onnx
+      - pytorch
+      - mojo
+
+  - slug: long-context
+    name: Long Context
+    keywords:
+      - long context
+      - long-context
+      - long sequence
+      - context length
+      - context window
+      - lost in the middle
+      - context compression
