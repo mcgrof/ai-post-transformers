@@ -548,7 +548,7 @@ def generate_index(config, feed_path=None):
     archive_links = []
     for (year, month), month_eps in sorted_months:
         label = f"{calendar.month_name[month]} {year}"
-        href = f"{year}/{month:02d}/"
+        href = f"{year}/{month:02d}/index.html"
         archive_links.append(
             f'<a class="archive-link" href="{href}">'
             f'{html.escape(label)} '
@@ -556,6 +556,21 @@ def generate_index(config, feed_path=None):
     archive_html = "\n    ".join(archive_links)
 
     count = total
+
+    # Build search index: all episodes with title, date, archive page link
+    search_index = []
+    for ep in episodes:
+        dt = ep.get("date_dt")
+        month_href = ""
+        if dt:
+            month_href = f"{dt.year}/{dt.month:02d}/index.html"
+        search_index.append({
+            "t": ep["title"],
+            "d": ep["date"],
+            "m": month_href,
+            "a": ep.get("audio_url", ""),
+        })
+    search_json = json.dumps(search_index, separators=(",", ":"))
 
     page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -795,6 +810,77 @@ a:hover {{ text-decoration: underline; }}
   border-radius: 0 0 6px 6px;
 }}
 
+/* --- Search --- */
+.search-section {{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 0;
+}}
+.search-box {{
+  width: 100%;
+  padding: 0.7rem 1rem 0.7rem 2.6rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #e5e5e5;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 0.8rem center;
+}}
+.search-box:focus {{
+  border-color: #e50914;
+}}
+.search-box::placeholder {{
+  color: #666;
+}}
+.search-results {{
+  margin-top: 0.8rem;
+  display: none;
+}}
+.search-results.active {{
+  display: block;
+}}
+.search-result {{
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.5rem 0.6rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}}
+.search-result:hover {{
+  background: #1a1a1a;
+}}
+.search-result-title {{
+  font-size: 0.85rem;
+  color: #e5e5e5;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+.search-result-title a {{
+  color: #e5e5e5;
+}}
+.search-result-title a:hover {{
+  color: #e50914;
+}}
+.search-result-date {{
+  font-size: 0.72rem;
+  color: #777;
+  margin-left: 1rem;
+  white-space: nowrap;
+}}
+.search-count {{
+  font-size: 0.78rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}}
+
 /* --- Archive --- */
 .archive-section {{
   border-top: 1px solid #222;
@@ -915,7 +1001,13 @@ a:hover {{ text-decoration: underline; }}
 {"" if not github_repo else f'  <a class="suggest-link" href="https://github.com/{html.escape(github_repo)}/issues/new?template=paper-submission.yml" target="_blank">Know a paper we should cover? Suggest it &rarr;</a>'}
 </div>
 
-<div class="section">
+<div class="search-section">
+  <input class="search-box" type="text" id="ep-search"
+         placeholder="Search {count} episodes..." autocomplete="off">
+  <div class="search-results" id="search-results"></div>
+</div>
+
+<div class="section" id="latest-section">
   <div class="section-title">Latest Episodes</div>
   <div class="grid">
 {cards_html}
@@ -974,6 +1066,51 @@ a:hover {{ text-decoration: underline; }}
   }});
 
   overlay.addEventListener('click', closeActive);
+}})();
+</script>
+
+<script>
+(function() {{
+  var idx = {search_json};
+  var box = document.getElementById('ep-search');
+  var results = document.getElementById('search-results');
+  var latest = document.getElementById('latest-section');
+  var archive = document.querySelector('.archive-section');
+
+  box.addEventListener('input', function() {{
+    var q = box.value.trim().toLowerCase();
+    if (q.length < 2) {{
+      results.classList.remove('active');
+      results.innerHTML = '';
+      if (latest) latest.style.display = '';
+      if (archive) archive.style.display = '';
+      return;
+    }}
+    var terms = q.split(/\\s+/);
+    var hits = idx.filter(function(e) {{
+      var t = e.t.toLowerCase();
+      return terms.every(function(w) {{ return t.indexOf(w) >= 0; }});
+    }});
+    if (latest) latest.style.display = 'none';
+    if (archive) archive.style.display = 'none';
+    if (!hits.length) {{
+      results.innerHTML = '<div class="search-count">No episodes found</div>';
+      results.classList.add('active');
+      return;
+    }}
+    var html = '<div class="search-count">' + hits.length + ' episode' +
+               (hits.length === 1 ? '' : 's') + ' found</div>';
+    hits.forEach(function(e) {{
+      var href = e.m || '#';
+      html += '<div class="search-result">' +
+              '<span class="search-result-title">' +
+              '<a href="' + href + '">' +
+              e.t.replace(/</g, '&lt;') + '</a></span>' +
+              '<span class="search-result-date">' + e.d + '</span></div>';
+    }});
+    results.innerHTML = html;
+    results.classList.add('active');
+  }});
 }})();
 </script>
 
