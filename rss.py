@@ -564,28 +564,25 @@ a:hover {{ text-decoration: underline; }}
 }}
 .hero-links {{
   display: flex;
-  gap: 0.75rem;
+  gap: 1rem;
   justify-content: center;
   flex-wrap: wrap;
   position: relative;
 }}
 .hero-links a {{
-  padding: 0.5rem 1.4rem;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: background 0.2s;
+  display: inline-block;
+  transition: transform 0.2s, opacity 0.2s;
 }}
-.btn-primary {{
-  background: #e50914;
-  color: #fff;
+.hero-links a:hover {{
+  transform: scale(1.1);
+  opacity: 0.85;
+  text-decoration: none;
 }}
-.btn-primary:hover {{ background: #f6121d; text-decoration: none; }}
-.btn-outline {{
-  border: 1px solid #555;
-  color: #e5e5e5;
+.hero-links img {{
+  height: 40px;
+  width: auto;
+  border-radius: 6px;
 }}
-.btn-outline:hover {{ border-color: #e5e5e5; text-decoration: none; }}
 
 /* --- Grid --- */
 .section {{
@@ -811,9 +808,11 @@ a:hover {{ text-decoration: underline; }}
   <h1>{html.escape(show_title)}</h1>
   <p>{html.escape(_truncate_sentence(show_desc, 200))}</p>
   <div class="hero-links">
-    <a class="btn-primary" href="feed.xml">RSS Feed</a>
-    <a class="btn-outline" href="{html.escape(anchor_rss)}">Spotify</a>
-    <a class="btn-outline" href="queue.html">Paper Queue</a>
+    <a href="{html.escape(anchor_rss)}" title="Spotify"><img src="images/spotify.png" alt="Spotify"></a>
+    <a href="https://podcasts.apple.com/us/podcast/ai-post-transformers/id1835878324" title="Apple Podcasts"><img src="images/apple-podcasts.png" alt="Apple Podcasts"></a>
+    <a href="https://music.amazon.com/podcasts/bad34c42-bf59-4b9a-8085-5742fd63e011/ai-post-transformers" title="Amazon Podcasts"><img src="images/amazon-podcasts.png" alt="Amazon Podcasts"></a>
+    <a href="feed.xml" title="RSS Feed"><img src="images/rss-feed.png" alt="RSS Feed"></a>
+    <a href="queue.html" title="Paper Queue"><img src="images/paper-queue.png" alt="Paper Queue"></a>
   </div>
 </div>
 
