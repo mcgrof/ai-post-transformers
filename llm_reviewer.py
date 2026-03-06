@@ -14,8 +14,28 @@ from llm_backend import get_llm_backend, llm_call
 from editorial_scorer import clamp
 
 
+def _isatty():
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+_COLORS = {
+    "reset":   "\033[0m",
+    "bold":    "\033[1m",
+    "dim":     "\033[2m",
+    "cyan":    "\033[36m",
+    "green":   "\033[32m",
+    "yellow":  "\033[33m",
+    "magenta": "\033[35m",
+    "red":     "\033[31m",
+    "blue":    "\033[34m",
+}
+
+def _c(color, text):
+    if not _isatty():
+        return text
+    return f"{_COLORS.get(color, '')}{text}{_COLORS['reset']}"
+
 def _log(tag, msg, color="cyan"):
-    print(f"{tag} {msg}", file=sys.stderr)
+    print(f"{_c(color, tag)} {msg}", file=sys.stderr)
 
 
 REVIEW_PROMPT_TEMPLATE = """\
@@ -104,11 +124,13 @@ class LLMReviewer:
         On failure for any paper, it keeps first-pass scores and
         gets status "Monitor" as a safe default.
         """
+        backend_type = self.backend['type']
         _log("[LLMReview]",
-             f"Reviewing {len(records)} papers "
-             f"({self.workers} workers, "
-             f"backend={self.backend['type']}, "
-             f"model={self.model})...")
+             f"Reviewing {_c('bold', str(len(records)))} papers "
+             f"({_c('dim', f'{self.workers} workers, '
+              f'backend={backend_type}, '
+              f'model={self.model}')})",
+             "magenta")
 
         results = {}
         with ThreadPoolExecutor(
@@ -124,7 +146,8 @@ class LLMReviewer:
                     results[rec.arxiv_id] = review
                 except Exception as e:
                     _log("[LLMReview]",
-                         f"Failed for {rec.arxiv_id}: {e}")
+                         f"Failed for {rec.arxiv_id}: {e}",
+                         "yellow")
                     results[rec.arxiv_id] = None
 
         # Apply results
@@ -140,7 +163,9 @@ class LLMReviewer:
             reviewed += 1
 
         _log("[LLMReview]",
-             f"Reviewed {reviewed}/{len(records)} papers")
+             f"Reviewed {_c('green', str(reviewed))}"
+             f"/{len(records)} papers",
+             "magenta")
         return records
 
     def _review_one(self, rec):

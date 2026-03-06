@@ -18,8 +18,28 @@ from sentence_transformers import SentenceTransformer
 from paper_record import PaperRecord
 
 
+def _isatty():
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+_COLORS = {
+    "reset":   "\033[0m",
+    "bold":    "\033[1m",
+    "dim":     "\033[2m",
+    "cyan":    "\033[36m",
+    "green":   "\033[32m",
+    "yellow":  "\033[33m",
+    "magenta": "\033[35m",
+    "red":     "\033[31m",
+    "blue":    "\033[34m",
+}
+
+def _c(color, text):
+    if not _isatty():
+        return text
+    return f"{_COLORS.get(color, '')}{text}{_COLORS['reset']}"
+
 def _log(tag, msg, color="cyan"):
-    print(f"{tag} {msg}", file=sys.stderr)
+    print(f"{_c(color, tag)} {msg}", file=sys.stderr)
 
 
 class EditorialScorer:
@@ -81,9 +101,9 @@ class EditorialScorer:
                 "narrow_domain_penalty_list", []))
 
         _log("[Editorial]",
-             f"Seeds: {len(self.public_seeds)} public, "
-             f"{len(self.memory_seeds)} memory, "
-             f"{len(self.negative_seeds)} negative")
+             f"Seeds: {_c('bold', str(len(self.public_seeds)))} public, "
+             f"{_c('bold', str(len(self.memory_seeds)))} memory, "
+             f"{_c('bold', str(len(self.negative_seeds)))} negative")
 
     def _load_seeds(self, path):
         with open(path) as f:
@@ -95,7 +115,8 @@ class EditorialScorer:
 
         Returns a list of PaperRecord objects sorted by max_axis_score.
         """
-        _log("[Editorial]", f"Scoring {len(papers)} papers...")
+        _log("[Editorial]",
+             f"Scoring {_c('bold', str(len(papers)))} papers...")
 
         # Convert to PaperRecords
         records = [PaperRecord.from_paper_dict(p) for p in papers]
@@ -118,7 +139,8 @@ class EditorialScorer:
         records.sort(key=lambda r: r.max_axis_score, reverse=True)
         if records:
             _log("[Editorial]",
-                 f"Top max_axis: {records[0].max_axis_score:.3f} "
+                 f"Top max_axis: "
+                 f"{_c('green', f'{records[0].max_axis_score:.3f}')} "
                  f"({records[0].title[:60]})")
         return records
 
@@ -475,8 +497,8 @@ class EditorialScorer:
 
         shortlist = eligible[:size]
         _log("[Editorial]",
-             f"Shortlist: {len(shortlist)} papers "
-             f"(from {len(eligible)} eligible)")
+             f"Shortlist: {_c('bold', str(len(shortlist)))} papers "
+             f"({_c('dim', f'from {len(eligible)} eligible')})")
         return shortlist
 
 

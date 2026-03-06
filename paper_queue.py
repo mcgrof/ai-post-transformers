@@ -172,6 +172,18 @@ def _run_editorial_queue(scorer, papers, config, date_str, base):
     # Build final queue sections
     sections = build_final_queue(reviewed, records, config)
 
+    # Log section breakdown
+    _log("[Queue]",
+         f"Editorial sections: "
+         f"{_c('green', 'Bridge')} {len(sections.get('bridge', []))}, "
+         f"{_c('blue', 'Public')} {len(sections.get('public', []))}, "
+         f"{_c('magenta', 'Memory')} {len(sections.get('memory', []))}, "
+         f"{_c('dim', 'Monitor')} {len(sections.get('monitor', []))}, "
+         f"{_c('yellow', 'Deferred')} "
+         f"{len(sections.get('deferred', []))}, "
+         f"{_c('red', 'Out of scope')} "
+         f"{len(sections.get('out_of_scope', []))}")
+
     # Write outputs
     write_queue_json(sections, records, base / "queue.json")
     _write_queue_yaml_v2(sections, base / "queue.yaml")
@@ -214,6 +226,16 @@ def build_final_queue(reviewed, all_records, config):
 
     cover_now = [r for r in reviewed if r.status == "Cover now"]
     monitor = [r for r in reviewed if r.status == "Monitor"]
+    deferred = [r for r in reviewed
+                if r.status == "Deferred this cycle"]
+    out_of_scope = [r for r in reviewed
+                    if r.status == "Out of scope"]
+
+    # Sort deferred/out-of-scope by highest axis score (most
+    # interesting deferrals first for auditing)
+    deferred.sort(key=lambda r: r.max_axis_score, reverse=True)
+    out_of_scope.sort(
+        key=lambda r: r.max_axis_score, reverse=True)
 
     # Partition Cover now into Bridge, Public-first, Memory-first
     bridge = []
@@ -255,13 +277,19 @@ def build_final_queue(reviewed, all_records, config):
         while len(bucket) < target and monitor:
             bucket.append(monitor.pop(0))
 
-    # Remaining reviewed papers that weren't placed go to monitor
+    # Remaining reviewed papers that weren't placed go to monitor,
+    # but skip those already in deferred or out_of_scope
     placed_ids = set()
     for bucket in (bridge, public_first, memory_first):
         for r in bucket:
             placed_ids.add(r.arxiv_id)
+    deferred_ids = {r.arxiv_id for r in deferred}
+    oos_ids = {r.arxiv_id for r in out_of_scope}
     for r in reviewed:
-        if r.arxiv_id not in placed_ids and r not in monitor:
+        if (r.arxiv_id not in placed_ids
+                and r not in monitor
+                and r.arxiv_id not in deferred_ids
+                and r.arxiv_id not in oos_ids):
             monitor.append(r)
 
     return {
@@ -269,6 +297,8 @@ def build_final_queue(reviewed, all_records, config):
         "public": public_first,
         "memory": memory_first,
         "monitor": monitor[:20],
+        "deferred": deferred,
+        "out_of_scope": out_of_scope,
     }
 
 
@@ -886,7 +916,7 @@ tr:hover {{ background: #1c1c1c; }}
   position: absolute;
   top: 100%;
   left: 50%;
-  width: 460px;
+  width: 540px;
   max-width: 92vw;
   background: #1c1c1c;
   border-radius: 6px;
@@ -1069,6 +1099,8 @@ def generate_queue_feed_v2(sections, config):
         "public": "Public AI",
         "memory": "Memory/Storage",
         "monitor": "Monitor",
+        "deferred": "Deferred",
+        "out_of_scope": "Out of Scope",
     }
 
     total = 0
@@ -1121,6 +1153,43 @@ def generate_queue_feed_v2(sections, config):
     return str(feed_path)
 
 
+# Section descriptions for tooltip help text
+_SECTION_DESCS = {
+    "Bridge": (
+        "Papers scoring high on both lenses \u2014 broad public AI "
+        "significance and memory/storage systems relevance. These "
+        "make the strongest episodes because they connect "
+        "foundational AI advances to real systems constraints."),
+    "Public AI": (
+        "Papers ranking high on broad AI significance. These "
+        "change how the field thinks about models, training, "
+        "evaluation, or deployment \u2014 strong episode candidates "
+        "for a general AI audience."),
+    "Memory/Storage": (
+        "Papers ranking high on memory, storage, and data "
+        "movement relevance. These address bandwidth, KV cache, "
+        "offload, quantization, tiering, or scheduling \u2014 "
+        "systems bottlenecks that increasingly constrain AI "
+        "workloads."),
+    "Monitor": (
+        "Interesting papers that scored well enough to review "
+        "but were not scheduled this cycle. They may be promoted "
+        "in a future run if the topic becomes more timely or if "
+        "queue slots open up."),
+    "Deferred": (
+        "Papers the LLM reviewer judged as relevant but not "
+        "urgent enough to cover now. They may fit better in a "
+        "future cycle when the topic landscape shifts or related "
+        "work appears."),
+    "Out of Scope": (
+        "Papers the LLM reviewer judged as outside this show's "
+        "editorial lenses. Typically narrow-domain work, pure "
+        "theory without clear systems relevance, or papers that "
+        "mention AI keywords without genuinely advancing the "
+        "field. Shown here for algorithm auditing."),
+}
+
+
 # Badge CSS class mapping
 _BADGE_CSS = {
     "Bridge": "badge-bridge",
@@ -1140,11 +1209,12 @@ _STATUS_CSS = {
     "Cover now": "status-cover",
     "Monitor": "status-monitor",
     "Deferred this cycle": "status-deferred",
-    "Out of scope": "status-deferred",
+    "Out of scope": "status-out-of-scope",
 }
 
 
-def _render_section_table(section_name, records, accent_color):
+def _render_section_table(section_name, records, accent_color,
+                          section_desc=""):
     """Render an HTML section with header and table rows."""
     if not records:
         return ""
@@ -1194,7 +1264,32 @@ def _render_section_table(section_name, records, accent_color):
             f'<div class="tip-line">Quality: '
             f'{rec.quality_score:.3f} | Bridge: '
             f'{rec.bridge_score:.3f}</div>')
+        tip_lines.append(
+            f'<div class="tip-taxonomy">Scope: '
+            f'{html.escape(rec.scope_bucket)} | '
+            f'Domain: {html.escape(rec.domain_bucket)} | '
+            f'Type: {html.escape(rec.paper_type)}</div>')
+        tip_lines.append('<hr class="tip-divider">')
+        tip_lines.append(
+            f'<div class="tip-scores">Public lens &nbsp; '
+            f'broad={rec.broad_relevance:.2f} '
+            f'momentum={rec.momentum:.2f} '
+            f'teach={rec.teachability:.2f}<br>'
+            f'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
+            f'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
+            f'novelty={rec.novelty_score:.2f} '
+            f'evidence={rec.evidence_score:.2f}</div>')
+        tip_lines.append(
+            f'<div class="tip-scores">Memory lens &nbsp; '
+            f'direct={rec.direct_memory_relevance:.2f} '
+            f'systems={rec.systems_leverage:.2f} '
+            f'deploy={rec.deployment_proximity:.2f}<br>'
+            f'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
+            f'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
+            f'adjacent={rec.memory_adjacent_future_value:.2f} '
+            f'bandwidth={rec.bandwidth_capacity:.2f}</div>')
         if rec.why_now:
+            tip_lines.append('<hr class="tip-divider">')
             tip_lines.append(
                 f'<div class="tip-line tip-hf">'
                 f'{html.escape(rec.why_now)}</div>')
@@ -1202,6 +1297,16 @@ def _render_section_table(section_name, records, accent_color):
             tip_lines.append(
                 f'<div class="tip-line tip-penalty">'
                 f'{html.escape(rec.why_not_higher)}</div>')
+        if rec.downgrade_reasons:
+            reasons_str = ", ".join(rec.downgrade_reasons)
+            tip_lines.append(
+                f'<div class="tip-line tip-penalty">'
+                f'{html.escape(reasons_str)}</div>')
+        if rec.what_would_raise_priority:
+            tip_lines.append(
+                f'<div class="tip-line tip-dim">'
+                f'{html.escape(rec.what_would_raise_priority)}'
+                f'</div>')
         if rec.one_sentence_episode_hook:
             tip_lines.append(
                 f'<div class="tip-line tip-keyword">'
@@ -1230,12 +1335,31 @@ def _render_section_table(section_name, records, accent_color):
             f'</tr>')
 
     rows_html = "\n".join(rows)
+
+    # Section header with optional tooltip
+    if section_desc:
+        header_html = (
+            f'<div class="section-header-wrap">'
+            f'<h2 class="section-header"'
+            f' style="border-left: 4px solid {accent_color};'
+            f' padding-left: 0.8rem;">'
+            f'{html.escape(section_name)}'
+            f' <span class="section-count">{len(records)}</span>'
+            f' <span class="section-help">(?)</span></h2>'
+            f'<div class="section-tip">'
+            f'{html.escape(section_desc)}</div></div>')
+    else:
+        header_html = (
+            f'<h2 class="section-header"'
+            f' style="border-left: 4px solid {accent_color};'
+            f' padding-left: 0.8rem;">'
+            f'{html.escape(section_name)}'
+            f' <span class="section-count">{len(records)}</span>'
+            f'</h2>')
+
     return f"""
 <div class="queue-section" id="{section_id}">
-  <h2 class="section-header"
-      style="border-left: 4px solid {accent_color};
-             padding-left: 0.8rem;">{html.escape(section_name)}
-    <span class="section-count">{len(records)}</span></h2>
+  {header_html}
   <table>
     <thead>
       <tr>
@@ -1268,11 +1392,16 @@ def generate_queue_html_v2(sections, config):
         ("Public AI", sections.get("public", []), "#1d3557"),
         ("Memory/Storage", sections.get("memory", []), "#6b2737"),
         ("Monitor", sections.get("monitor", []), "#2b2d42"),
+        ("Deferred", sections.get("deferred", []), "#4a4a2b"),
+        ("Out of Scope",
+         sections.get("out_of_scope", []), "#3d2b2b"),
     ]
 
     sections_html = ""
     for name, recs, color in section_configs:
-        sections_html += _render_section_table(name, recs, color)
+        desc = _SECTION_DESCS.get(name, "")
+        sections_html += _render_section_table(
+            name, recs, color, section_desc=desc)
 
     # Section navigation links
     nav_links = ""
@@ -1462,7 +1591,7 @@ tr:hover {{ background: #1c1c1c; }}
   position: absolute;
   right: 0;
   top: 100%;
-  width: 320px;
+  width: 380px;
   background: #1c1c1c;
   border-radius: 6px;
   padding: 0.8rem 1rem;
@@ -1501,6 +1630,25 @@ tr:hover {{ background: #1c1c1c; }}
 .tip-line.tip-hf {{ color: #f0b27a; }}
 .tip-line.tip-penalty {{ color: #e57373; }}
 .tip-line.tip-keyword {{ color: #c9a0dc; }}
+.tip-line.tip-dim {{ color: #777; }}
+.tip-divider {{
+  border: none;
+  border-top: 1px solid #2a2a2a;
+  margin: 0.35rem 0;
+}}
+.tip-taxonomy {{
+  font-size: 0.75rem;
+  color: #777;
+  padding: 0.1rem 0;
+  line-height: 1.4;
+}}
+.tip-scores {{
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: #999;
+  padding: 0.1rem 0;
+  line-height: 1.5;
+}}
 /* Badge pills */
 .badge {{
   display: inline-block;
@@ -1530,7 +1678,50 @@ tr:hover {{ background: #1c1c1c; }}
 }}
 .status-cover {{ background: #1b4332; color: #95d5b2; }}
 .status-monitor {{ background: #3d3200; color: #f0b27a; }}
-.status-deferred {{ background: #2b2b2b; color: #888; }}
+.status-deferred {{ background: #3d3d20; color: #a0a060; }}
+.status-out-of-scope {{ background: #2b2020; color: #a06060; }}
+/* Section header tooltip */
+.section-header-wrap {{
+  position: relative;
+  display: inline-block;
+}}
+.section-help {{
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: #666;
+  cursor: help;
+  margin-left: 0.3rem;
+}}
+.section-header-wrap:hover .section-help {{ color: #f0b27a; }}
+.section-tip {{
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 380px;
+  max-width: 92vw;
+  background: #1c1c1c;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  z-index: 30;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, visibility 0.2s ease,
+              transform 0.2s cubic-bezier(.25,.46,.45,.94);
+  pointer-events: none;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: #bbb;
+  line-height: 1.5;
+}}
+.section-header-wrap:hover .section-tip {{
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(4px);
+  pointer-events: auto;
+}}
 /* Pipeline tooltip */
 .subtitle-wrap {{
   position: relative;
@@ -1557,7 +1748,7 @@ tr:hover {{ background: #1c1c1c; }}
   position: absolute;
   top: 100%;
   left: 50%;
-  width: 460px;
+  width: 540px;
   max-width: 92vw;
   background: #1c1c1c;
   border-radius: 6px;
@@ -1600,6 +1791,24 @@ tr:hover {{ background: #1c1c1c; }}
 }}
 .pip-color {{
   font-weight: 600;
+}}
+.pip-divider {{
+  border: none;
+  border-top: 1px solid #333;
+  margin: 0.5rem 0;
+}}
+.pip-desc {{
+  font-size: 0.78rem;
+  color: #999;
+  padding: 0.15rem 0 0.3rem 0;
+  line-height: 1.45;
+}}
+.pip-formula {{
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: #888;
+  padding: 0.1rem 0 0.15rem 1.7rem;
+  line-height: 1.4;
 }}
 .section-nav {{
   display: flex;
@@ -1662,29 +1871,73 @@ tr:hover {{ background: #1c1c1c; }}
     </p>
     <div class="pipeline-tip">
       <div class="tip-header">Two-pass editorial pipeline</div>
+      <div class="pip-desc">This queue scores papers under two declared
+        editorial lenses:</div>
+      <div class="pip-desc"><strong style="color:#a8dadc">Public AI
+        Interest</strong> &mdash; papers that matter to a broad AI
+        audience and make strong educational episodes.</div>
+      <div class="pip-desc"><strong style="color:#f4a261">Memory/Storage
+        First-Class AI</strong> &mdash; papers about memory bandwidth,
+        KV cache, data movement, offload, quantization, tiering, or
+        scheduling in AI systems.</div>
+      <div class="pip-desc" style="color:#777">A paper can score high
+        on one, both, or neither.</div>
+      <hr class="pip-divider">
+      <div class="pip-desc" style="color:#888; font-weight:600;">
+        Pass 1 &mdash; Cheap, scalable scoring</div>
       <div class="pip-step"><span class="pip-num">1</span>
         <span class="pip-color" style="color:#8ab4f8">Fetch</span>
-        &mdash; arXiv, HF Daily, Semantic Scholar, GitHub Issues.</div>
+        &mdash; arXiv (6 categories), HF Daily, Semantic Scholar,
+        GitHub Issues submissions.</div>
       <div class="pip-step"><span class="pip-num">2</span>
         <span class="pip-color" style="color:#f0b27a">Classify</span>
-        &mdash; scope, domain, and paper type taxonomy.</div>
+        &mdash; scope (foundation/systems/architecture/...),
+        domain (llm/vision/audio/...), paper type
+        (theory/empirical/systems/...).</div>
       <div class="pip-step"><span class="pip-num">3</span>
         <span class="pip-color" style="color:#7dcea0">Embed</span>
-        &mdash; triple similarity against Public AI, Memory/Storage,
-        and negative seed profiles.</div>
+        &mdash; compute similarity against three seed profiles:
+        public interest, memory/storage, and known false
+        positives.</div>
       <div class="pip-step"><span class="pip-num">4</span>
         <span class="pip-color" style="color:#c9a0dc">Score</span>
-        &mdash; weighted feature scores, penalties, composite scores.</div>
+        &mdash; weighted feature formulas:</div>
+      <div class="pip-formula">Public = 0.30*relevance +
+        0.20*momentum + 0.20*teachability + 0.15*novelty +
+        0.15*evidence</div>
+      <div class="pip-formula">Memory = 0.35*direct_memory +
+        0.20*systems + 0.15*deploy + 0.15*evidence +
+        0.15*adjacent</div>
       <div class="pip-step"><span class="pip-num">5</span>
-        <span class="pip-color" style="color:#e5e5e5">Shortlist</span>
-        &mdash; top ~100 papers by max-axis score.</div>
+        <span class="pip-color" style="color:#e57373">Filter</span>
+        &mdash; narrow domain penalty for papers that mention
+        &ldquo;transformer&rdquo; or &ldquo;GPU&rdquo; incidentally
+        without transferring to general AI.</div>
       <div class="pip-step"><span class="pip-num">6</span>
-        <span class="pip-color" style="color:#8ab4f8">LLM Review</span>
-        &mdash; parallel 7-question editorial rubric on shortlist.</div>
+        <span class="pip-color" style="color:#e5e5e5">Shortlist</span>
+        &mdash; top ~100 by composite ranking signal.</div>
+      <hr class="pip-divider">
+      <div class="pip-desc" style="color:#888; font-weight:600;">
+        Pass 2 &mdash; LLM editorial review</div>
       <div class="pip-step"><span class="pip-num">7</span>
+        <span class="pip-color" style="color:#8ab4f8">Review</span>
+        &mdash; each shortlisted paper evaluated against a
+        7-question rubric covering audience relevance, systems
+        impact, memory connection, evidence quality, generality,
+        novelty, and episode potential.</div>
+      <div class="pip-step"><span class="pip-num">8</span>
+        <span class="pip-color" style="color:#c9a0dc">Adjust</span>
+        &mdash; LLM assigns score adjustments (&plusmn;0.3),
+        badges, editorial status, and rationale fields.</div>
+      <div class="pip-step"><span class="pip-num">9</span>
         <span class="pip-color" style="color:#e57373">Publish</span>
-        &mdash; partition into Bridge, Public AI, Memory/Storage,
-        and Monitor sections.</div>
+        &mdash; partition into Bridge (high on both lenses),
+        Public AI, Memory/Storage, and Monitor sections.
+        Target: 10 + 10 + 10 + overflow.</div>
+      <div class="pip-desc" style="color:#666; font-size:0.72rem;
+        margin-top:0.3rem;">All weights and seed sets are public
+        in editorial_lenses.yaml, weights.yaml, and
+        seed_sets/*.yaml.</div>
     </div>
   </div>
   <div class="hero-links">
@@ -1706,10 +1959,13 @@ tr:hover {{ background: #1c1c1c; }}
 <div class="footer">
   {html.escape(show_title)} &mdash; Paper Queue
   <div class="editorial-note">
-    This is an editorial ranking, not a scientific verdict.
-    Papers are scored under two declared lenses: Public AI Interest
-    and Memory/Storage First-Class AI. A paper can be excellent
-    and still be deferred if it does not fit this show this cycle.
+    AI Post Transformers ranks papers through two declared lenses:
+    broad public AI significance and the view that memory, storage,
+    and data movement are increasingly first-class constraints in
+    modern AI systems. A paper can rank highly because it changes
+    how the field thinks, because it addresses real systems
+    bottlenecks, or both. This is editorial triage, not a scientific
+    verdict.
   </div>
 </div>
 
