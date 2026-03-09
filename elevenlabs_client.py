@@ -974,7 +974,7 @@ Additional references: {extra_refs_text[:1000]}
 
 Output as JSON:
 {{
-  "paper_citation": "Full citation (title, authors, institution, year) — say ONLY in Part 1",
+  "paper_citation": "Title, first author et al. (N co-authors), institution(s), year — say ONLY in Part 1. NEVER list all authors.",
   "core_research_question": "One sentence — state ONLY in Part 1",
   "key_definitions": [
     {{"term": "...", "define_in_part": 1, "brief": "..."}}
@@ -1013,8 +1013,9 @@ EPISODE BIBLE (follow this allocation strictly):
 PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
 1. INTRO: Speaker A delivers this intro VERBATIM as the FIRST line:
    "{intro}"
-   Then Hal introduces today's material: title, authors/organization, publication date.
-   Give proper credit to who produced this work. Ada jumps in with why it caught her attention.
+   Then Hal introduces today's material: title, first author et al. (number of co-authors),
+   institution(s), publication date. NEVER list all authors — say "First Author et al." and
+   mention the total co-author count. Ada jumps in with why it caught her attention.
    This is the ONLY time authors and full title should be stated.
 {intro_joke_text}
 
