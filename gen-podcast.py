@@ -158,7 +158,7 @@ def _read_text_file(filepath):
 
 
 SUBCOMMANDS = {"digest", "podcast", "queue", "spotify-upload", "publish",
-                "publish-site", "viz-sync"}
+                "publish-site", "gen-viz"}
 
 
 def main():
@@ -180,7 +180,8 @@ modes:
   publish                              publish latest episode to R2
   publish --draft drafts/2026/03/stem  publish a specific draft
   spotify-upload                       regenerate RSS feed for Spotify
-  viz-sync                             sync visualization catalogs
+  gen-viz                              generate visualizations for episodes
+  gen-viz --draft STEM                 generate viz for a specific episode
 """,
     )
     parser.add_argument(
@@ -252,10 +253,10 @@ modes:
     if args.top is not None and not (args.list_podcasts or args.list_generated_podcasts):
         parser.error("--top requires --list-podcasts or --list-generated-podcasts")
 
-    # --draft requires publish subcommand or --publish
+    # --draft requires publish/gen-viz subcommand or --publish
     if args.draft and not args.publish:
-        if not (args.args and args.args[0] == "publish"):
-            parser.error("--draft requires the 'publish' subcommand")
+        if not (args.args and args.args[0] in ("publish", "gen-viz")):
+            parser.error("--draft requires the 'publish' or 'gen-viz' subcommand")
 
     # No args and no flags → print help
     if (not args.args and not args.input_papers
@@ -294,9 +295,9 @@ modes:
     elif command == "publish-site":
         _publish_site(config)
         return
-    elif command == "viz-sync":
-        from viz_catalog import run_viz_sync
-        run_viz_sync(config)
+    elif command == "gen-viz":
+        from viz_gen import generate_viz, upload_viz, update_episode_viz_link
+        _run_gen_viz(config, args)
         return
     elif command == "spotify-upload":
         from rss import generate_feed
@@ -364,6 +365,52 @@ def _c(code, text):
     return f"\033[{code}m{text}\033[0m"
 
 
+def _run_gen_viz(config, args):
+    """Generate visualizations for episodes.
+
+    With --draft, generates for a specific episode. Without it,
+    generates for recent episodes that lack a viz link.
+    """
+    from viz_gen import generate_viz, upload_viz, update_episode_viz_link
+    import os
+
+    if args.draft:
+        episode = _find_episode_by_draft(args.draft)
+        if not episode:
+            print(f"No episode found matching: {args.draft}",
+                  file=sys.stderr)
+            sys.exit(1)
+        episodes = [episode]
+    else:
+        conn = get_connection()
+        init_db(conn)
+        from db import list_podcasts
+        all_eps = list_podcasts(conn)
+        conn.close()
+        # Select recent episodes without viz links
+        episodes = []
+        for ep in all_eps:
+            desc = ep.get("description") or ""
+            if "podcast.do-not-panic.com/viz/" not in desc:
+                episodes.append(ep)
+            if len(episodes) >= 5:
+                break
+
+    for ep in episodes:
+        ep_id = ep.get("id")
+        try:
+            viz_path = generate_viz(ep_id, config)
+            if viz_path:
+                url = upload_viz(viz_path)
+                slug = os.path.splitext(os.path.basename(viz_path))[0]
+                update_episode_viz_link(ep_id, slug)
+                print(f"[Viz] {ep.get('title', 'Untitled')}: {url}",
+                      file=sys.stderr)
+        except Exception as e:
+            print(f"[Viz] Error for episode {ep_id}: {e}",
+                  file=sys.stderr)
+
+
 def _publish_site(config):
     """Upload static site files to R2: feed, index, queue, background."""
     from r2_upload import get_r2_client, upload_file, upload_feed
@@ -421,6 +468,16 @@ def _publish_site(config):
         url = upload_file(r2, archive_page, rel, content_type="text/html")
         print(f"{_c('35', '[Site]')} {_c('1', rel)}: "
               f"{_c('2', url)}", file=sys.stderr)
+
+    # Upload all viz HTML files
+    viz_dir = os.path.join(project_root, "viz")
+    if os.path.isdir(viz_dir):
+        for viz_file in sorted(globmod.glob(os.path.join(viz_dir, "*.html"))):
+            r2_key = f"viz/{os.path.basename(viz_file)}"
+            url = upload_file(r2, viz_file, r2_key,
+                              content_type="text/html")
+            print(f"{_c('35', '[Site]')} {_c('1', r2_key)}: "
+                  f"{_c('2', url)}", file=sys.stderr)
 
     print(f"\n{_c('32', 'Site published!')}", file=sys.stderr)
 
@@ -491,6 +548,24 @@ def _publish_episode(config, draft=None):
             conn.commit()
             conn.close()
             print(f"[Publish] DB updated: drafts → public", file=sys.stderr)
+
+            # Clean up draft files (already copied to public/)
+            for src in glob.glob(f"{stem}.*"):
+                os.remove(src)
+                print(f"[Publish] Removed draft: {src}",
+                      file=sys.stderr)
+
+    # Generate and upload visualization (non-fatal on failure)
+    try:
+        from viz_gen import generate_viz, upload_viz, update_episode_viz_link
+        viz_path = generate_viz(episode.get("id"), config)
+        if viz_path:
+            viz_url = upload_viz(viz_path)
+            slug = os.path.splitext(os.path.basename(viz_path))[0]
+            update_episode_viz_link(episode.get("id"), slug)
+            print(f"[Publish] Viz: {viz_url}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Publish] Viz generation skipped: {e}", file=sys.stderr)
 
     # Regenerate and upload RSS feed + index page
     feed_path = generate_feed(config)
