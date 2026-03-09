@@ -440,12 +440,26 @@ def _extract_episodes_from_feed(feed_path):
 
 
 def _extract_viz_links(desc):
-    """Extract Interactive Visualization links from description HTML."""
+    """Extract Interactive Visualization links from description HTML.
+
+    Handles two formats:
+      New: Interactive Visualization: <a href="URL">Title</a>
+      Legacy: Interactive Visualization: Title\\nURL
+    """
     viz = []
+    # New format: anchor tag with href
     for m in re.finditer(
-            r'Interactive Visualization:\s*([^<\n]+)'
-            r'.*?href="([^"]+)"', desc):
-        viz.append((m.group(1).strip(), m.group(2)))
+            r'Interactive Visualization:\s*<a\s+href="([^"]+)"[^>]*>'
+            r'([^<]+)</a>', desc):
+        viz.append((m.group(2).strip(), m.group(1)))
+    # Legacy format: title on one line, bare URL on next
+    for m in re.finditer(
+            r'Interactive Visualization:\s*([^<\n]+)\n'
+            r'(https?://[^\s<]+)', desc):
+        url = m.group(2).strip()
+        # Skip if already captured via anchor format
+        if not any(u == url for _, u in viz):
+            viz.append((m.group(1).strip(), url))
     return viz
 
 
