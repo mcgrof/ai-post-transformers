@@ -57,6 +57,7 @@ def upload_file(client, local_path, r2_key, content_type=None, bucket=None):
             ".jpg": "image/jpeg",
             ".srt": "text/plain",
             ".txt": "text/plain",
+            ".html": "text/html",
             ".xml": "application/xml",
             ".json": "application/json",
         }
