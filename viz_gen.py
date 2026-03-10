@@ -48,47 +48,81 @@ Known source paper arXiv IDs: {id_list}
 Extract any additional arXiv IDs mentioned in the transcript (pattern: DDDD.DDDDD).
 """
 
-    return f"""Generate a standalone HTML page that serves as an interactive
-visualization companion for a podcast episode. The page should analyze
-and present the key findings, technical details, and cross-references
-discussed in the episode.
+    return f"""Generate a VISUAL-HEAVY interactive HTML companion page for a
+podcast episode. This is a VISUALIZATION page, not a text summary.
+The majority of the page should be SVG diagrams, charts, heatmaps,
+interactive elements, and data visualizations. Text exists only to
+label and explain visuals.
 
 EPISODE TITLE: {title}
 EPISODE DESCRIPTION: {description or 'N/A'}
 {arxiv_section}
-DESIGN REQUIREMENTS:
-- Standalone HTML with ALL CSS and JS inline (no external dependencies
-  except Google Fonts)
-- Google Fonts to load: Syne (headings), JetBrains Mono (code/data)
-- Dark theme matching the podcast site:
-  - Background: #080c14
-  - Text: #c9d8ec
-  - Accent: #00d4ff
-  - Secondary accent: #ff6b35
-  - Card/section backgrounds: #0d1520
-  - Border: #1a2535
-- Responsive layout (works on mobile and desktop)
-- Smooth scroll behavior
+VISUAL REQUIREMENTS (CRITICAL — this is what makes a good viz):
+Build ALL diagrams with inline SVG elements and vanilla JavaScript.
+No external libraries. Create helper functions for rendering:
+  - svgEl(tag, attrs) to create SVG elements
+  - htmlEl(tag, attrs, children) to create HTML elements
+  - heatColor(val) mapping 0-1 to HSL gradient (blue→orange→red)
 
-STRUCTURAL REQUIREMENTS:
-1. Header with episode title and brief overview
-2. Key Findings section — the most important takeaways
-3. Technical Deep-Dive — detailed breakdown of methods, architectures,
-   or concepts discussed, with diagrams rendered in CSS/SVG where helpful
-4. Cross-References — all papers mentioned in the discussion, with
-   arXiv links (https://arxiv.org/abs/XXXX.XXXXX) for each
-5. A "Listen to the Episode" section at the bottom linking back to
+Types of visuals to include (pick what fits the topic):
+  - SVG HEATMAPS: color-coded grids showing data distributions,
+    attention patterns, matrix values, with hover highlighting
+  - SVG BAR/LINE CHARTS: performance comparisons, throughput,
+    latency, accuracy metrics with labeled axes
+  - FLOW DIAGRAMS: pipeline/architecture diagrams with boxes,
+    arrows, and labels showing data flow or system structure
+  - INTERACTIVE TOGGLES: buttons that switch between modes,
+    configurations, or before/after views (e.g., "Baseline" vs
+    "Optimized", "Pre" vs "Post")
+  - TABBED NAVIGATION: organize 3-5 visual sections behind tabs
+    so users can explore different aspects interactively
+  - ANIMATED TRANSITIONS: CSS transitions on state changes
+  - MATRIX VISUALIZATIONS: for anything involving tensors, weights,
+    embeddings — show the actual grid with color-coded cells
+  - STEP-BY-STEP DIAGRAMS: progressive disclosure showing how an
+    algorithm or process works stage by stage
+
+Minimum: the page MUST contain at least 3 distinct SVG visualizations
+and at least 2 interactive elements (tabs, toggles, hover effects).
+Generate realistic mock data that illustrates the concepts discussed.
+
+DESIGN SPEC:
+- Standalone HTML, ALL CSS/JS inline (only external: Google Fonts)
+- Google Fonts: Syne (headings), JetBrains Mono (code/data)
+- Dark theme: bg=#0a0e17, text=#e0e4eb, card-bg=#0d1520,
+  border=#1a2535
+- Accent gradient: #00ffa3 (cyan-green), #b48eff (purple),
+  #ff9f43 (orange) — use for highlights, active tabs, chart colors
+- Secondary: #00d4ff (links), #ff6b35 (warnings/hot values)
+- Semi-transparent rgba backgrounds for overlays
+- Responsive SVG with viewBox scaling
+- Smooth CSS transitions on interactive elements
+
+STRUCTURE:
+1. Header: episode title, paper metadata, arXiv badge link
+2. Tab bar or section navigation (3-5 tabs)
+3. Visual sections — each tab has its own SVG visualization:
+   - Overview/pipeline diagram
+   - Technical deep-dive with interactive diagrams
+   - Performance/results charts with comparison toggles
+   - Architecture or method visualization
+4. References: compact list of cited papers with arXiv links
+   (https://arxiv.org/abs/XXXX.XXXXX)
+5. Footer: "Listen to the Episode" link to
    https://podcast.do-not-panic.com
 
-For every paper mentioned by name, author, or ID in the transcript,
-include a properly formatted arXiv link. Extract IDs from the
-transcript text itself.
+ANTI-PATTERNS (do NOT do these):
+- Do NOT make a text-heavy page with bullet points
+- Do NOT use placeholder rectangles or empty boxes
+- Do NOT describe a diagram in words — DRAW it in SVG
+- Do NOT use <canvas> — use SVG for all graphics
+- Keep text paragraphs under 2-3 sentences each
 
 TRANSCRIPT:
 {transcript[:30000]}
 
-OUTPUT: Return ONLY the complete HTML document, starting with <!DOCTYPE html>
-and ending with </html>. No markdown fences, no explanation text."""
+OUTPUT: Return ONLY the complete HTML document, starting with
+<!DOCTYPE html> and ending with </html>. No markdown fences."""
 
 
 def generate_viz(episode_id, config):
