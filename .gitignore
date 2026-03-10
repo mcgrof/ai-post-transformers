@@ -9,5 +9,6 @@ drafts/
 public/
 inputs/
 .claude/
+viz/
 viz_cache/
 generated_covers/
