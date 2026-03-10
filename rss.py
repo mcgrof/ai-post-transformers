@@ -362,6 +362,8 @@ def _extract_episodes_from_feed(feed_path):
 
         desc_el = item.find("description")
         raw_desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
+        # Extract viz links before HTML stripping destroys anchor tags
+        viz_links = _extract_viz_links(raw_desc)
         # Strip HTML tags (legacy Anchor episodes have <p> etc.)
         raw_desc = re.sub(r"<br\s*/?>", "\n", raw_desc)
         raw_desc = re.sub(r"</p>", "\n", raw_desc)
@@ -435,6 +437,7 @@ def _extract_episodes_from_feed(feed_path):
             "audio_url": audio,
             "image_url": img,
             "srt_url": srt,
+            "viz_links": viz_links,
         })
     return episodes
 
@@ -491,7 +494,7 @@ def _render_card(ep, root_prefix=""):
             f'type="audio/mpeg"></audio>')
 
     # Viz links shown below the date on the card tile
-    viz_links = _extract_viz_links(ep["description"])
+    viz_links = ep.get("viz_links", [])
     viz_html = ""
     if viz_links:
         parts = []

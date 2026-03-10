@@ -198,7 +198,7 @@ def update_episode_viz_link(episode_id, viz_slug):
     conn = get_connection()
     init_db(conn)
     row = conn.execute(
-        "SELECT description FROM podcasts WHERE id = ?", (episode_id,)
+        "SELECT title, description FROM podcasts WHERE id = ?", (episode_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -209,8 +209,9 @@ def update_episode_viz_link(episode_id, viz_slug):
         conn.close()
         return
 
-    # Build the anchor-format link
-    link_text = f'Interactive Visualization: <a href="{viz_url}">{viz_slug}</a>'
+    # Build the anchor-format link using episode title
+    title = row["title"] or viz_slug
+    link_text = f'Interactive Visualization: <a href="{viz_url}">{title}</a>'
     desc = desc.strip() + f"\n\n{link_text}"
     update_podcast(conn, episode_id, description=desc.strip())
     conn.close()
