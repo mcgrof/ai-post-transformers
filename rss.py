@@ -406,6 +406,19 @@ def _extract_episodes_from_feed(feed_path):
             r'(https?://[^\s,)<]+)',
             _make_link, desc)
 
+        # Re-inject viz links as clickable URLs (tag stripping removed them)
+        if viz_links:
+            # Remove orphaned "Interactive Visualization: Title" text
+            desc = re.sub(
+                r'\s*Interactive Visualization:\s*[^<]+$', '', desc)
+            for viz_title, viz_url in viz_links:
+                esc_url = html.escape(viz_url)
+                esc_title = html.escape(viz_title)
+                desc += (f'<div class="card-viz-desc">'
+                         f'Interactive Visualization: '
+                         f'<a href="{esc_url}" target="_blank">'
+                         f'{esc_title}</a></div>')
+
         if sources_html:
             desc = desc + '<div class="card-sources">' + sources_html + "</div>"
 
@@ -751,6 +764,17 @@ a:hover {{ text-decoration: underline; }}
 .card-viz:hover {{
   color: #fff;
   text-decoration: underline;
+}}
+.card-viz-desc {{
+  font-size: 0.8rem;
+  margin-top: 0.6rem;
+  color: #5eeacd;
+}}
+.card-viz-desc a {{
+  color: #5eeacd;
+}}
+.card-viz-desc a:hover {{
+  color: #fff;
 }}
 
 /* Expanded body: wider centered overlay below the visual */
@@ -1269,6 +1293,17 @@ h1 {{
 .card-viz:hover {{
   color: #fff;
   text-decoration: underline;
+}}
+.card-viz-desc {{
+  font-size: 0.8rem;
+  margin-top: 0.6rem;
+  color: #5eeacd;
+}}
+.card-viz-desc a {{
+  color: #5eeacd;
+}}
+.card-viz-desc a:hover {{
+  color: #fff;
 }}
 .card-body {{
   position: absolute;
