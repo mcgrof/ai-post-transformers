@@ -630,6 +630,14 @@ def generate_podcast_script(text, config, covered_topics=None):
     max_words = podcast_config.get("max_words", 3000)
     model = podcast_config.get("llm_model", "sonnet")
 
+    # Load quality guidelines if available
+    guidelines_path = os.path.join(os.path.dirname(__file__), "podcast_quality_guidelines.md")
+    quality_guidelines = ""
+    if os.path.exists(guidelines_path):
+        with open(guidelines_path) as gf:
+            quality_guidelines = gf.read()
+        print("[Podcast]   Loaded quality guidelines", file=sys.stderr)
+
     if covered_topics is None:
         covered_topics = set()
 
@@ -793,6 +801,10 @@ def generate_podcast_script(text, config, covered_topics=None):
     print("[Podcast] Pass 3: Generating conversation script...", file=sys.stderr)
 
     instructions = podcast_config.get("instructions", "")
+
+    # Append quality guidelines from user feedback
+    if quality_guidelines:
+        instructions = f"{instructions}\n\n--- QUALITY GUIDELINES (from accumulated editorial feedback) ---\n{quality_guidelines}"
 
     # Host configuration
     hosts = podcast_config.get("hosts", {})
