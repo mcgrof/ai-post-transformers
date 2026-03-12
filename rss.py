@@ -1134,22 +1134,34 @@ a:hover {{ text-decoration: underline; }}
     overlay.classList.remove('active');
   }}
 
-  // Click navigates to episode page; hover shows description
+  // Click navigates to episode page; hover shows description (desktop only)
+  var isTouchDevice = 'ontouchstart' in window;
   cards.forEach(function(card) {{
     card.addEventListener('click', function(e) {{
       if (e.target.closest('a, audio, button')) return;
-      var link = card.querySelector('a[href*="episodes/"]');
+      e.preventDefault();
+      e.stopPropagation();
+      var link = card.querySelector('a[href^="episodes/"]');
       if (link) {{ window.location.href = link.href; return; }}
-    }});
-    card.addEventListener('mouseenter', function() {{
+      // Fallback for legacy episodes without episode pages
+      var wasActive = card.classList.contains('active');
       closeActive();
-      card.classList.add('active');
-      overlay.classList.add('active');
+      if (!wasActive) {{
+        card.classList.add('active');
+        overlay.classList.add('active');
+      }}
     }});
-    card.addEventListener('mouseleave', function() {{
-      card.classList.remove('active');
-      overlay.classList.remove('active');
-    }});
+    if (!isTouchDevice) {{
+      card.addEventListener('mouseenter', function() {{
+        closeActive();
+        card.classList.add('active');
+        overlay.classList.add('active');
+      }});
+      card.addEventListener('mouseleave', function() {{
+        card.classList.remove('active');
+        overlay.classList.remove('active');
+      }});
+    }}
   }});
 
   overlay.addEventListener('click', closeActive);
