@@ -1134,17 +1134,21 @@ a:hover {{ text-decoration: underline; }}
     overlay.classList.remove('active');
   }}
 
-  // Click to toggle on both mobile and desktop
+  // Click navigates to episode page; hover shows description
   cards.forEach(function(card) {{
     card.addEventListener('click', function(e) {{
       if (e.target.closest('a, audio, button')) return;
-      e.stopPropagation();
-      var wasActive = card.classList.contains('active');
+      var link = card.querySelector('a[href*="episodes/"]');
+      if (link) {{ window.location.href = link.href; return; }}
+    }});
+    card.addEventListener('mouseenter', function() {{
       closeActive();
-      if (!wasActive) {{
-        card.classList.add('active');
-        overlay.classList.add('active');
-      }}
+      card.classList.add('active');
+      overlay.classList.add('active');
+    }});
+    card.addEventListener('mouseleave', function() {{
+      card.classList.remove('active');
+      overlay.classList.remove('active');
     }});
   }});
 

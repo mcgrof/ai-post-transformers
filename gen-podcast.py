@@ -469,6 +469,22 @@ def _publish_site(config):
         print(f"{_c('35', '[Site]')} {_c('1', rel)}: "
               f"{_c('2', url)}", file=sys.stderr)
 
+    # Upload individual episode pages (episodes/{slug}/index.html)
+    # R2 doesn't auto-resolve directory indexes, so upload at both keys
+    ep_pages = sorted(globmod.glob(
+            os.path.join(feed_dir, "episodes", "*", "index.html")))
+    print(f"{_c('35', '[Site]')} Uploading {len(ep_pages)} episode pages...",
+          file=sys.stderr)
+    for ep_page in ep_pages:
+        rel = os.path.relpath(ep_page, feed_dir)
+        slug_dir = os.path.dirname(rel)  # episodes/{slug}
+        upload_file(r2, ep_page, rel, content_type="text/html")
+        # Also upload as episodes/{slug}/ so bare URL works
+        upload_file(r2, ep_page, slug_dir + "/",
+                    content_type="text/html")
+    print(f"{_c('35', '[Site]')} {len(ep_pages)} episode pages uploaded",
+          file=sys.stderr)
+
     # Upload all viz HTML files
     viz_dir = os.path.join(project_root, "viz")
     if os.path.isdir(viz_dir):
@@ -533,8 +549,11 @@ def _publish_episode(config, draft=None):
         stem = os.path.splitext(audio)[0]
         for src in glob.glob(f"{stem}.*"):
             dst = public_dir / os.path.basename(src)
-            shutil.copy2(src, dst)
-            print(f"[Publish] Copied → {dst}", file=sys.stderr)
+            try:
+                shutil.copy2(src, dst)
+                print(f"[Publish] Copied → {dst}", file=sys.stderr)
+            except shutil.SameFileError:
+                print(f"[Publish] Already at {dst}", file=sys.stderr)
 
         # Update DB so audio/image point to public/ (needed for feed)
         if "/drafts/" in audio:

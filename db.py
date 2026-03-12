@@ -172,8 +172,8 @@ def insert_podcast(conn, title, publish_date, elevenlabs_project_id=None,
 
 
 def update_podcast(conn, podcast_id, **kwargs):
-    valid_fields = {"title", "spotify_url", "elevenlabs_project_id", "audio_file",
-                     "description", "image_file"}
+    valid_fields = {"title", "publish_date", "spotify_url", "elevenlabs_project_id",
+                     "audio_file", "description", "image_file"}
     updates = {k: v for k, v in kwargs.items() if k in valid_fields}
     if not updates:
         return
@@ -343,6 +343,6 @@ def list_podcasts(conn):
         FROM podcasts p
         LEFT JOIN podcast_papers pp ON p.id = pp.podcast_id
         GROUP BY p.id
-        ORDER BY p.created_at DESC
+        ORDER BY p.publish_date DESC, p.created_at DESC
     """).fetchall()
     return [dict(row) for row in rows]

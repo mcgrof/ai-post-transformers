@@ -113,6 +113,7 @@ def _call_claude_cli(model, prompt, max_tokens):
            "--max-turns", "3"]
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions
     # Scale timeout with prompt size and max_tokens: large prompts
     # (editorial pass, multi-paper scripts) need more time
     prompt_factor = len(prompt) // 5000 * 30  # ~30s per 5K chars
