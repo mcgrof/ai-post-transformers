@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Intelligent AI Delegation — Interactive Visualization</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;color:#e5e5e5;font-family:-apple-system,system-ui,sans-serif;overflow-x:hidden}
+.hero{text-align:center;padding:40px 20px 20px;background:linear-gradient(180deg,#1a1a3e 0%,#0a0a1a 100%)}
+.hero h1{font-size:2em;background:linear-gradient(135deg,#e94560,#ff6b6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+.hero p{color:#888;font-size:0.95em;max-width:700px;margin:0 auto}
+.container{max-width:1100px;margin:0 auto;padding:20px}
+
+/* Delegation Flow Diagram */
+.flow{display:flex;justify-content:center;align-items:center;gap:0;margin:30px 0;flex-wrap:wrap}
+.flow-node{background:#1a1a2e;border:2px solid #333;border-radius:12px;padding:16px 20px;min-width:140px;text-align:center;cursor:pointer;transition:all 0.3s}
+.flow-node:hover{border-color:#e94560;transform:scale(1.05);box-shadow:0 0 20px rgba(233,69,96,0.3)}
+.flow-node.active{border-color:#2ecc71;background:#1a2e1a}
+.flow-node h3{font-size:0.9em;color:#e94560;margin-bottom:4px}
+.flow-node p{font-size:0.75em;color:#999}
+.flow-arrow{color:#555;font-size:1.5em;padding:0 8px}
+
+/* Trust Meter */
+.trust-section{margin:40px 0}
+.trust-meter{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:20px 0}
+.trust-bar{width:120px;text-align:center}
+.trust-bar-label{font-size:0.75em;color:#888;margin-bottom:6px}
+.trust-bar-fill{height:120px;width:40px;margin:0 auto;border-radius:20px;background:#222;position:relative;overflow:hidden}
+.trust-bar-level{position:absolute;bottom:0;width:100%;border-radius:20px;transition:height 1s ease}
+.trust-bar-value{font-size:0.85em;color:#fff;margin-top:6px;font-weight:bold}
+
+/* Agent Network */
+.network{position:relative;height:400px;margin:30px 0;background:#0d0d1f;border-radius:16px;overflow:hidden}
+.agent{position:absolute;width:70px;height:70px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.8em;cursor:pointer;transition:all 0.3s;border:3px solid #333}
+.agent:hover{transform:scale(1.2);z-index:10}
+.agent.human{border-color:#3498db;background:rgba(52,152,219,0.15)}
+.agent.ai{border-color:#e94560;background:rgba(233,69,96,0.15)}
+.agent.verifier{border-color:#2ecc71;background:rgba(46,204,113,0.15)}
+.agent-label{position:absolute;bottom:-20px;font-size:0.65em;color:#888;white-space:nowrap;text-align:center;width:100px;left:50%;transform:translateX(-50%)}
+.connection{position:absolute;height:2px;background:linear-gradient(90deg,#333,#e94560,#333);transform-origin:left center;opacity:0.4;animation:pulse-line 3s infinite}
+@keyframes pulse-line{0%,100%{opacity:0.2}50%{opacity:0.6}}
+
+/* Safety Protocols */
+.protocols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:30px 0}
+.protocol-card{background:#1a1a2e;border-radius:12px;padding:20px;border-left:4px solid #e94560;transition:transform 0.3s}
+.protocol-card:hover{transform:translateY(-4px)}
+.protocol-card h4{color:#e94560;font-size:0.95em;margin-bottom:8px}
+.protocol-card p{color:#999;font-size:0.82em;line-height:1.5}
+.protocol-card .icon{font-size:1.5em;margin-bottom:8px}
+
+/* Financial Layer */
+.finance{background:#1a1a2e;border-radius:16px;padding:24px;margin:30px 0}
+.finance h3{color:#f39c12;margin-bottom:16px}
+.tx-flow{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin:16px 0}
+.tx-node{background:#0d0d1f;padding:12px 20px;border-radius:10px;text-align:center;border:1px solid #333}
+.tx-node.usdc{border-color:#2775ca}
+.tx-node .label{font-size:0.7em;color:#888;display:block}
+.tx-node .value{font-size:1.1em;font-weight:bold}
+.tx-arrow{color:#f39c12;font-size:1.2em}
+
+/* Interactive Info Panel */
+.info-panel{background:#111;border:1px solid #333;border-radius:12px;padding:20px;margin:20px 0;min-height:80px;transition:all 0.3s}
+.info-panel h4{color:#e94560;margin-bottom:8px}
+.info-panel p{color:#bbb;font-size:0.9em;line-height:1.6}
+
+section{margin:40px 0}
+section h2{font-size:1.4em;margin-bottom:4px;color:#fff}
+section .subtitle{color:#666;font-size:0.85em;margin-bottom:16px}
+
+.source{background:#1a1a2e;padding:12px 16px;border-radius:8px;margin-top:30px;font-size:0.8em;color:#888}
+.source a{color:#e94560}
+</style>
+</head>
+<body>
+
+<div class="hero">
+<h1>Intelligent AI Delegation</h1>
+<p>Google DeepMind · February 2026 · How autonomous agents distribute tasks, calibrate trust, and maintain accountability</p>
+</div>
+
+<div class="container">
+
+<section>
+<h2>Delegation Flow</h2>
+<p class="subtitle">Click each stage to learn more</p>
+<div class="flow">
+<div class="flow-node" onclick="showInfo('task','A human or system originates a task with clear objectives, constraints, and accountability requirements. The delegator must specify what success looks like.')">
+<h3>📋 Task Origin</h3><p>Human/System</p>
+</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node" onclick="showInfo('trust','The framework evaluates each potential agent\'s competence history, resource access, and safety track record. Trust scores are dynamic — updated after every interaction.')">
+<h3>🎯 Trust Calibration</h3><p>Score Agents</p>
+</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node" onclick="showInfo('assign','Tasks are matched to agents based on capability, trust level, and current load. High-stakes tasks require higher trust thresholds and may need human approval gates.')">
+<h3>🤖 Assignment</h3><p>Match & Delegate</p>
+</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node" onclick="showInfo('exec','Agents execute within sandboxed environments using Confidential Computing. All actions are logged immutably. Financial transactions use USDC for verifiable payment trails.')">
+<h3>⚡ Execution</h3><p>Sandboxed Run</p>
+</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node" onclick="showInfo('verify','Independent verification agents check outputs against specifications. Results feed back into trust scores. Failed verifications trigger escalation protocols.')">
+<h3>✅ Verification</h3><p>Audit & Update</p>
+</div>
+</div>
+<div class="info-panel" id="info-panel">
+<h4>👆 Click a stage above</h4>
+<p>Each stage in the delegation pipeline has specific safety mechanisms and accountability structures.</p>
+</div>
+</section>
+
+<section class="trust-section">
+<h2>Dynamic Trust Calibration</h2>
+<p class="subtitle">Trust scores adapt based on agent performance history</p>
+<div class="trust-meter">
+<div class="trust-bar">
+<div class="trust-bar-label">Code Agent</div>
+<div class="trust-bar-fill"><div class="trust-bar-level" style="height:85%;background:linear-gradient(0deg,#2ecc71,#27ae60)"></div></div>
+<div class="trust-bar-value" style="color:#2ecc71">85%</div>
+</div>
+<div class="trust-bar">
+<div class="trust-bar-label">Research Agent</div>
+<div class="trust-bar-fill"><div class="trust-bar-level" style="height:72%;background:linear-gradient(0deg,#3498db,#2980b9)"></div></div>
+<div class="trust-bar-value" style="color:#3498db">72%</div>
+</div>
+<div class="trust-bar">
+<div class="trust-bar-label">Finance Agent</div>
+<div class="trust-bar-fill"><div class="trust-bar-level" style="height:91%;background:linear-gradient(0deg,#2ecc71,#27ae60)"></div></div>
+<div class="trust-bar-value" style="color:#2ecc71">91%</div>
+</div>
+<div class="trust-bar">
+<div class="trust-bar-label">New Agent</div>
+<div class="trust-bar-fill"><div class="trust-bar-level" style="height:30%;background:linear-gradient(0deg,#e74c3c,#c0392b)"></div></div>
+<div class="trust-bar-value" style="color:#e74c3c">30%</div>
+</div>
+<div class="trust-bar">
+<div class="trust-bar-label">Human Overseer</div>
+<div class="trust-bar-fill"><div class="trust-bar-level" style="height:95%;background:linear-gradient(0deg,#f1c40f,#f39c12)"></div></div>
+<div class="trust-bar-value" style="color:#f1c40f">95%</div>
+</div>
+</div>
+</section>
+
+<section>
+<h2>Multi-Agent Network</h2>
+<p class="subtitle">Hover over agents to see their role</p>
+<div class="network" id="network">
+<div class="agent human" style="left:50%;top:10%;transform:translateX(-50%)" title="Human Delegator">👤<span class="agent-label">Human Delegator</span></div>
+<div class="agent ai" style="left:15%;top:40%" title="Code Agent — generates and reviews code">💻<span class="agent-label">Code Agent</span></div>
+<div class="agent ai" style="left:38%;top:55%" title="Research Agent — searches and synthesizes information">🔍<span class="agent-label">Research Agent</span></div>
+<div class="agent ai" style="left:62%;top:55%" title="Finance Agent — handles USDC transactions">💰<span class="agent-label">Finance Agent</span></div>
+<div class="agent ai" style="left:85%;top:40%" title="Planning Agent — decomposes complex tasks">📊<span class="agent-label">Planner</span></div>
+<div class="agent verifier" style="left:30%;top:80%" title="Verification Agent — audits outputs">🛡️<span class="agent-label">Verifier</span></div>
+<div class="agent verifier" style="left:65%;top:80%" title="Safety Monitor — enforces constraints">⚠️<span class="agent-label">Safety Monitor</span></div>
+</div>
+</section>
+
+<section>
+<h2>Safety Protocols</h2>
+<p class="subtitle">Key mechanisms ensuring reliable delegation</p>
+<div class="protocols">
+<div class="protocol-card">
+<div class="icon">🔒</div>
+<h4>Confidential Computing</h4>
+<p>Agent execution happens in hardware-isolated enclaves (TEEs). Even the infrastructure operator can't observe or tamper with computations. Ensures integrity of delegated work.</p>
+</div>
+<div class="protocol-card">
+<div class="icon">📝</div>
+<h4>Immutable Audit Trail</h4>
+<p>Every delegation, execution step, and outcome is logged to an append-only ledger. Enables post-hoc accountability and dispute resolution across agent chains.</p>
+</div>
+<div class="protocol-card">
+<div class="icon">🚨</div>
+<h4>Escalation Triggers</h4>
+<p>When trust scores drop below thresholds or unexpected behaviors are detected, tasks automatically escalate to human oversight. No silent failures.</p>
+</div>
+<div class="protocol-card">
+<div class="icon">🔄</div>
+<h4>Dynamic Trust Updates</h4>
+<p>Trust isn't static. Every completed task updates the agent's reliability score. Bayesian updating ensures both successes and failures are weighted by recency and severity.</p>
+</div>
+<div class="protocol-card">
+<div class="icon">💎</div>
+<h4>USDC Financial Rails</h4>
+<p>Automated payments via Circle's USDC stablecoin create verifiable financial trails. Agents can be compensated for work, creating economic incentives aligned with quality.</p>
+</div>
+<div class="protocol-card">
+<div class="icon">🏗️</div>
+<h4>Sandboxed Execution</h4>
+<p>Each agent operates within resource-constrained sandboxes. Network access, file system, and compute are limited to what the task requires. Principle of least privilege.</p>
+</div>
+</div>
+</section>
+
+<section class="finance">
+<h3>💰 Financial Transaction Flow</h3>
+<div class="tx-flow">
+<div class="tx-node"><span class="label">Delegator</span><span class="value">👤 Human</span></div>
+<div class="tx-arrow">→ escrow →</div>
+<div class="tx-node usdc"><span class="label">Smart Contract</span><span class="value">📄 USDC Escrow</span></div>
+<div class="tx-arrow">→ verify →</div>
+<div class="tx-node"><span class="label">Verifier</span><span class="value">🛡️ Audit</span></div>
+<div class="tx-arrow">→ release →</div>
+<div class="tx-node usdc"><span class="label">Agent Payment</span><span class="value">💰 USDC</span></div>
+</div>
+<p style="color:#888;font-size:0.82em;text-align:center;margin-top:12px">Escrow-based payments ensure agents are only compensated after successful verification</p>
+</section>
+
+<div class="source">
+<strong>Sources:</strong><br>
+1. Intelligent AI Delegation — Nenad Tomašev, Matija Franklin, Simon Osindero · Google DeepMind · Feb 12, 2026 · <a href="https://arxiv.org/pdf/2602.11865">arxiv.org/pdf/2602.11865</a><br>
+2. USDC Terms — Circle Internet Financial, LLC · Dec 12, 2025 · <a href="https://www.circle.com/legal/usdc-terms">circle.com/legal/usdc-terms</a>
+</div>
+
+</div>
+
+<script>
+function showInfo(stage, text) {
+  var panel = document.getElementById('info-panel');
+  var titles = {task:'📋 Task Origination',trust:'🎯 Trust Calibration',assign:'🤖 Task Assignment',exec:'⚡ Sandboxed Execution',verify:'✅ Verification & Audit'};
+  panel.innerHTML = '<h4>' + (titles[stage]||stage) + '</h4><p>' + text + '</p>';
+  // Highlight active node
+  document.querySelectorAll('.flow-node').forEach(function(n,i){
+    n.classList.remove('active');
+    if((['task','trust','assign','exec','verify'])[i] === stage) n.classList.add('active');
+  });
+}
+
+// Animate trust bars on scroll
+var observed = false;
+var observer = new IntersectionObserver(function(entries){
+  if(entries[0].isIntersecting && !observed){
+    observed = true;
+    document.querySelectorAll('.trust-bar-level').forEach(function(el){
+      var h = el.style.height;
+      el.style.height = '0%';
+      setTimeout(function(){ el.style.height = h; }, 100);
+    });
+  }
+});
+var trustSection = document.querySelector('.trust-section');
+if(trustSection) observer.observe(trustSection);
+
+// Draw connections in network (using CSS pseudo-elements would be better, but this is simpler)
+var canvas = document.createElement('canvas');
+var net = document.getElementById('network');
+canvas.width = net.offsetWidth;
+canvas.height = net.offsetHeight;
+canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none';
+net.appendChild(canvas);
+var ctx = canvas.getContext('2d');
+function drawLine(x1,y1,x2,y2,color){
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+  ctx.strokeStyle=color||'rgba(233,69,96,0.2)';ctx.lineWidth=1.5;ctx.stroke();
+}
+setTimeout(function(){
+  var agents = net.querySelectorAll('.agent');
+  var cx = [], cy = [];
+  agents.forEach(function(a){ var r=a.getBoundingClientRect(); var nr=net.getBoundingClientRect(); cx.push(r.left-nr.left+35); cy.push(r.top-nr.top+35); });
+  // Human to all AI agents
+  for(var i=1;i<5;i++) drawLine(cx[0],cy[0],cx[i],cy[i],'rgba(52,152,219,0.25)');
+  // AI agents to verifiers
+  for(var i=1;i<5;i++) for(var j=5;j<7;j++) drawLine(cx[i],cy[i],cx[j],cy[j],'rgba(46,204,113,0.15)');
+  // Cross-agent connections
+  drawLine(cx[1],cy[1],cx[2],cy[2],'rgba(233,69,96,0.15)');
+  drawLine(cx[2],cy[2],cx[3],cy[3],'rgba(233,69,96,0.15)');
+  drawLine(cx[3],cy[3],cx[4],cy[4],'rgba(233,69,96,0.15)');
+}, 500);
+</script>
+</body>
+</html>
