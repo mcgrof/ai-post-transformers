@@ -2,6 +2,9 @@ github:
   repo: "mcgrof/ai-post-transformers"
 queue:
   top_n: 30
+  fetch_mode: extended    # "standard" (48h) or "extended" (6 months)
+  days_back: 180          # how many days to look back in extended mode
+  max_arxiv_results: 5000 # max papers to fetch from arXiv in extended mode
 arxiv_categories:
 - cs.LG
 - cs.AI
@@ -217,6 +220,18 @@ sister_podcasts:
     image: images/ai-ax.jpg
     spotify_url: https://open.spotify.com/show/3YrceHROrdD9oeu2o78U44
     status: complete
+social_signals:
+  enabled: true
+  pwc_enabled: true          # Papers With Code trending
+  pwc_boost: 0.10            # boost for PWC trending papers
+  influencer_weight: 1.0     # multiplier for influencer author matching
+  # Custom influencers can be added here; otherwise uses built-in defaults.
+  # influencers:
+  #   - name: "Custom Researcher"
+  #     arxiv_names: ["Custom Researcher"]
+  #     type: "author"
+  #     weight: 0.9
+  #     platforms: ["twitter/x"]
 editorial:
   enabled: true
   lenses_file: editorial_lenses.yaml

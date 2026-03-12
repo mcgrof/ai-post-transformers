@@ -110,8 +110,13 @@ class EditorialScorer:
             data = yaml.safe_load(f)
         return [s.strip() for s in data.get("seeds", []) if s.strip()]
 
-    def score_papers(self, papers):
+    def score_papers(self, papers, social_signals=None):
         """Score all papers through the first-pass editorial pipeline.
+
+        Args:
+            papers: List of paper dicts from sources
+            social_signals: Optional dict mapping arxiv_id -> social signal data
+                from sources/social_signals.py
 
         Returns a list of PaperRecord objects sorted by max_axis_score.
         """
@@ -120,6 +125,10 @@ class EditorialScorer:
 
         # Convert to PaperRecords
         records = [PaperRecord.from_paper_dict(p) for p in papers]
+
+        # Apply social signals to records
+        if social_signals:
+            self._apply_social_signals(records, social_signals)
 
         # Batch embed
         texts = [f"{r.title}. {r.abstract}" for r in records]
@@ -143,6 +152,27 @@ class EditorialScorer:
                  f"{_c('green', f'{records[0].max_axis_score:.3f}')} "
                  f"({records[0].title[:60]})")
         return records
+
+    def _apply_social_signals(self, records, social_signals):
+        """Apply social/influencer signal data to PaperRecords."""
+        matched = 0
+        for rec in records:
+            sig = social_signals.get(rec.arxiv_id)
+            if sig:
+                rec.influencer_boost = sig.get("influencer_boost", 0.0)
+                rec.pwc_trending_flag = sig.get("pwc_trending", False)
+                rec.social_score = sig.get("social_score", 0.0)
+                rec.scoring_sources.extend(
+                    sig.get("scoring_sources", []))
+                # Store influencer names
+                matches = sig.get("influencer_matches", [])
+                rec.influencer_matches = [
+                    m["name"] for m in matches
+                ] if isinstance(matches, list) and matches and isinstance(matches[0], dict) else matches
+                matched += 1
+        _log("[Editorial]",
+             f"Social signals applied to "
+             f"{_c('bold', str(matched))} papers")
 
     def _classify_taxonomy(self, records):
         """Classify scope_bucket, domain_bucket, paper_type."""
@@ -274,7 +304,7 @@ class EditorialScorer:
             # broad_relevance: driven by public similarity
             rec.broad_relevance = rec.sim_public
 
-            # momentum: HF trending + GitHub + citation velocity
+            # momentum: HF trending + GitHub + citation velocity + social + compound window
             momentum_parts = []
             if rec.hf_trending_flag:
                 momentum_parts.append(boosts.get("hf_trending", 0.12))
@@ -288,6 +318,31 @@ class EditorialScorer:
                 momentum_parts.append(
                     cit_norm * boosts.get(
                         "citation_velocity_max", 0.10))
+
+            # Social/influencer boost
+            if rec.social_score > 0:
+                momentum_parts.append(
+                    rec.social_score * boosts.get(
+                        "social_signal_weight", 0.80))
+                rec.scoring_sources.append("social_momentum")
+
+            # PWC trending (separate from HF)
+            if rec.pwc_trending_flag:
+                momentum_parts.append(
+                    boosts.get("pwc_trending", 0.10))
+                rec.scoring_sources.append("pwc_trending")
+
+            # Compound time-window boost:
+            # Papers from older windows that still have momentum
+            # (citations, social mentions) score higher
+            compound_boost = self._compute_compound_window_boost(
+                rec, boosts)
+            if compound_boost > 0:
+                momentum_parts.append(compound_boost)
+                rec.compound_window_boost = compound_boost
+                rec.scoring_sources.append(
+                    f"compound_window:{rec.time_window}")
+
             rec.momentum = min(1.0, sum(momentum_parts) / 0.30) \
                 if momentum_parts else 0.0
 
@@ -500,6 +555,55 @@ class EditorialScorer:
              f"Shortlist: {_c('bold', str(len(shortlist)))} papers "
              f"({_c('dim', f'from {len(eligible)} eligible')})")
         return shortlist
+
+
+    def _compute_compound_window_boost(self, rec, boosts):
+        """Compute a boost for papers that trend across time windows.
+
+        Papers from older time windows (90d, 180d) that still show
+        momentum signals (citations, social mentions, HF trending)
+        get a compound boost. The idea: a paper that's still being
+        discussed 3 months after publication is more noteworthy than
+        one that trended for a day.
+
+        Returns a float boost value (0.0 to compound_max).
+        """
+        window = rec.time_window
+        if not window or window == "30d":
+            # Recent papers don't get compound boost
+            return 0.0
+
+        compound_max = boosts.get("compound_window_max", 0.15)
+
+        # Count active momentum signals
+        signals = 0
+        if rec.citation_count > 5:
+            signals += 1
+        if rec.influential_citation_count > 0:
+            signals += 1
+        if rec.hf_trending_flag:
+            signals += 1
+        if rec.social_score > 0:
+            signals += 1
+        if rec.pwc_trending_flag:
+            signals += 1
+
+        if signals == 0:
+            return 0.0
+
+        # Older papers with more signals get bigger boost
+        if window == "180d":
+            # 6-month old paper still trending = very noteworthy
+            window_multiplier = 1.0
+        elif window == "90d":
+            window_multiplier = 0.7
+        else:
+            window_multiplier = 0.3
+
+        # Scale by number of active signals (diminishing returns)
+        signal_factor = min(1.0, signals * 0.3)
+
+        return compound_max * window_multiplier * signal_factor
 
 
 def clamp(v, lo=0.0, hi=1.0):

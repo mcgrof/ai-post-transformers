@@ -29,6 +29,9 @@ boosts:
   github_submission: 0.08
   citation_velocity_max: 0.10
   bridge_bonus: 0.10
+  social_signal_weight: 0.80    # how much social/influencer score contributes to momentum
+  pwc_trending: 0.10            # Papers With Code trending boost
+  compound_window_max: 0.15     # max boost for papers trending across time windows
 
 penalties:
   fatigue_max: 0.25

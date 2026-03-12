@@ -64,6 +64,9 @@ FIRST-PASS SCORES (from embedding similarity and heuristics):
   scope: {scope_bucket}, domain: {domain_bucket}, type: {paper_type}
   sim_public: {sim_public:.3f}, sim_memory: {sim_memory:.3f}
   sim_negative: {sim_negative:.3f}
+  social_score: {social_score:.3f}, influencer_boost: {influencer_boost:.3f}
+  time_window: {time_window}, compound_window_boost: {compound_window_boost:.3f}
+  scoring_sources: {scoring_sources}
 
 Answer these 7 questions, then produce your JSON verdict:
 
@@ -188,6 +191,11 @@ class LLMReviewer:
             sim_public=rec.sim_public,
             sim_memory=rec.sim_memory,
             sim_negative=rec.sim_negative,
+            social_score=rec.social_score,
+            influencer_boost=rec.influencer_boost,
+            time_window=rec.time_window or "30d",
+            compound_window_boost=rec.compound_window_boost,
+            scoring_sources=", ".join(rec.scoring_sources) if rec.scoring_sources else "none",
         )
 
         return llm_call(

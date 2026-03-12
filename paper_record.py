@@ -62,6 +62,18 @@ class PaperRecord:
     bridge_score: float = 0.0
     max_axis_score: float = 0.0
 
+    # Social / influencer signals (set by social_signals source)
+    influencer_boost: float = 0.0
+    influencer_matches: List[str] = field(default_factory=list)
+    pwc_trending_flag: bool = False
+    social_score: float = 0.0
+    scoring_sources: List[str] = field(default_factory=list)
+
+    # Time window tracking (set by extended arXiv fetch)
+    time_window: str = ""       # 30d|90d|180d
+    compound_window_boost: float = 0.0
+    first_seen_date: str = ""
+
     # Penalties
     fatigue_penalty: float = 0.0
     negative_profile_penalty: float = 0.0
@@ -104,6 +116,7 @@ class PaperRecord:
         rec.citation_count = d.get("citation_count", 0)
         rec.influential_citation_count = d.get(
             "influential_citation_count", 0)
+        rec.time_window = d.get("time_window", "")
         rec.source = d.get("source", "digest")
         rec.added = d.get("added", "")
         rec.issue_number = d.get("issue_number")
@@ -146,6 +159,18 @@ class PaperRecord:
             f"  penalties: fatigue={self.fatigue_penalty:.3f} "
             f"negative={self.negative_profile_penalty:.3f}",
         ]
+        if self.social_score > 0:
+            lines.append(
+                f"  social: score={self.social_score:.3f} "
+                f"influencer={self.influencer_boost:.3f} "
+                f"pwc={'Y' if self.pwc_trending_flag else 'N'}")
+        if self.scoring_sources:
+            lines.append(
+                f"  scoring_sources: {', '.join(self.scoring_sources)}")
+        if self.time_window:
+            lines.append(
+                f"  time_window: {self.time_window} "
+                f"compound_boost={self.compound_window_boost:.3f}")
         if self.badges:
             lines.append(f"  badges: {', '.join(self.badges)}")
         if self.status:

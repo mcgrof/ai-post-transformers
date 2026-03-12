@@ -21,9 +21,10 @@ from email.utils import format_datetime
 from pathlib import Path
 
 from db import get_connection, init_db, get_all_episode_arxiv_ids, get_covered_topics
-from sources.arxiv_source import fetch_arxiv_papers
+from sources.arxiv_source import fetch_arxiv_papers, fetch_arxiv_papers_extended
 from sources.hf_daily import fetch_hf_daily_papers
 from sources.semantic import enrich_papers
+from sources.social_signals import fetch_social_signals
 
 
 # --- Colored terminal output ---
@@ -73,10 +74,21 @@ def run_queue(config):
     categories = config.get("arxiv_categories", [])
     github_repo = config.get("github", {}).get("repo", "")
 
+    # Determine fetch mode: extended (6 months) or standard (48h)
+    fetch_mode = config.get("queue", {}).get("fetch_mode", "standard")
+    days_back = config.get("queue", {}).get("days_back", 180)
+    max_arxiv_results = config.get("queue", {}).get("max_arxiv_results", 5000)
+
     # --- Parallel fetch: arXiv + HF Daily + GitHub Issues + model preload ---
-    _log("[Queue]", "Fetching sources in parallel...", "magenta")
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        fut_arxiv = pool.submit(fetch_arxiv_papers, categories)
+    _log("[Queue]", f"Fetching sources in parallel "
+         f"(mode={_c('bold', fetch_mode)})...", "magenta")
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        if fetch_mode == "extended":
+            fut_arxiv = pool.submit(
+                fetch_arxiv_papers_extended, categories,
+                days_back=days_back, max_results=max_arxiv_results)
+        else:
+            fut_arxiv = pool.submit(fetch_arxiv_papers, categories)
         fut_hf = pool.submit(fetch_hf_daily_papers)
         fut_gh = pool.submit(
             fetch_github_issues, github_repo) if github_repo else None
@@ -105,6 +117,13 @@ def run_queue(config):
     # Semantic Scholar enrichment (sequential, rate-limited)
     papers = enrich_papers(papers)
 
+    # Social/influencer signals
+    social_signals = {}
+    if config.get("social_signals", {}).get("enabled", True):
+        social_signals = fetch_social_signals(papers, config)
+        _log("[Queue]", f"Social signals: {_c('bold', str(len(social_signals)))} "
+             f"papers with signals")
+
     # Merge GitHub Issues submissions
     if gh_papers:
         seen = {p["arxiv_id"] for p in papers}
@@ -131,7 +150,8 @@ def run_queue(config):
     base = Path(__file__).parent
 
     if editorial_enabled:
-        _run_editorial_queue(scorer, papers, config, date_str, base)
+        _run_editorial_queue(scorer, papers, config, date_str, base,
+                             social_signals=social_signals)
     else:
         _run_legacy_queue(scorer, papers, config, date_str, base)
 
@@ -157,12 +177,13 @@ def _run_legacy_queue(scorer, papers, config, date_str, base):
          f"{_c('green', str(len(top_papers)))} papers queued (legacy)")
 
 
-def _run_editorial_queue(scorer, papers, config, date_str, base):
+def _run_editorial_queue(scorer, papers, config, date_str, base,
+                         social_signals=None):
     """Two-pass editorial pipeline with dual lenses."""
     from llm_reviewer import LLMReviewer
 
-    # First pass: editorial scoring
-    records = scorer.score_papers(papers)
+    # First pass: editorial scoring (with social signals)
+    records = scorer.score_papers(papers, social_signals=social_signals)
     shortlist = scorer.select_shortlist(records)
 
     # Second pass: LLM review on shortlist
@@ -1311,6 +1332,35 @@ def _render_section_table(section_name, records, accent_color,
             tip_lines.append(
                 f'<div class="tip-line tip-keyword">'
                 f'{html.escape(rec.one_sentence_episode_hook)}'
+                f'</div>')
+        # Social/influencer signals
+        if rec.social_score > 0 or rec.influencer_matches:
+            tip_lines.append('<hr class="tip-divider">')
+            tip_lines.append(
+                f'<div class="tip-scores">Social: '
+                f'score={rec.social_score:.2f} '
+                f'influencer={rec.influencer_boost:.2f} '
+                f'pwc={"Y" if rec.pwc_trending_flag else "N"}'
+                f'</div>')
+            if rec.influencer_matches:
+                names = ", ".join(rec.influencer_matches[:5])
+                tip_lines.append(
+                    f'<div class="tip-line tip-hf">'
+                    f'Influencers: {html.escape(names)}'
+                    f'</div>')
+        # Time window + compound scoring
+        if rec.time_window and rec.time_window != "30d":
+            tip_lines.append(
+                f'<div class="tip-line tip-dim">'
+                f'Window: {html.escape(rec.time_window)} '
+                f'compound_boost={rec.compound_window_boost:.2f}'
+                f'</div>')
+        # Scoring sources transparency
+        if rec.scoring_sources:
+            sources_str = ", ".join(rec.scoring_sources[:8])
+            tip_lines.append(
+                f'<div class="tip-line" style="color:#666;">'
+                f'Sources: {html.escape(sources_str)}'
                 f'</div>')
         tooltip = "\n".join(tip_lines)
 
