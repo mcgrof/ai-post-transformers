@@ -32,6 +32,15 @@ def _truncate_sentence(text, max_len):
     return chunk.rstrip() + "..."
 
 
+def _slug_from_title(title):
+    """Create a URL-friendly slug from an episode title."""
+    slug = title.lower().strip()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r'[\s-]+', '-', slug)
+    slug = slug.strip('-')
+    return slug[:80].rstrip('-') or 'episode'
+
+
 def _parse_publish_date(date_str):
     """Convert YYYY-MM-DD to RFC 2822 format for <pubDate>.
 
@@ -479,7 +488,7 @@ def _extract_viz_links(desc):
     return viz
 
 
-def _render_card(ep, root_prefix=""):
+def _render_card(ep, root_prefix="", episode_url=""):
     """Render a single episode card HTML. root_prefix adjusts relative paths."""
     img_html = ""
     if ep["image_url"]:
@@ -497,6 +506,10 @@ def _render_card(ep, root_prefix=""):
     if ep["srt_url"]:
         links.append(
             f'<a href="{html.escape(ep["srt_url"])}">Subtitles</a>')
+    if episode_url:
+        links.append(
+            f'<a href="{html.escape(episode_url)}" title="Episode page">'
+            f'&#128279; Permalink</a>')
     links_html = " ".join(links)
 
     audio_html = ""
@@ -558,9 +571,22 @@ def generate_index(config, feed_path=None):
     episodes = _extract_episodes_from_feed(feed_path)
     total = len(episodes)
 
+    # Assign slugs to all episodes (ensure uniqueness)
+    seen_slugs = {}
+    for ep in episodes:
+        slug = _slug_from_title(ep["title"])
+        if slug in seen_slugs:
+            seen_slugs[slug] += 1
+            slug = f"{slug}-{seen_slugs[slug]}"
+        else:
+            seen_slugs[slug] = 1
+        ep["slug"] = slug
+
     # Latest 8 for index
     latest = episodes[:8]
-    cards_html = "\n".join(_render_card(ep) for ep in latest)
+    cards_html = "\n".join(
+        _render_card(ep, episode_url=f"episodes/{ep['slug']}/")
+        for ep in latest)
 
     # Group all episodes by year/month for archive
     by_month = defaultdict(list)
@@ -599,6 +625,7 @@ def generate_index(config, feed_path=None):
             "d": ep["date"],
             "m": month_href,
             "a": ep.get("audio_url", ""),
+            "s": ep.get("slug", ""),
         })
     search_json = json.dumps(search_index, separators=(",", ":"))
 
@@ -797,11 +824,22 @@ a:hover {{ text-decoration: underline; }}
               transform 0.25s cubic-bezier(.25,.46,.45,.94);
   pointer-events: none;
 }}
-.card:hover .card-body {{
+.card:hover .card-body,
+.card.active .card-body {{
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
   pointer-events: auto;
+}}
+.card.active .card-visual {{
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
+  z-index: 10;
+  border-radius: 6px 6px 0 0;
+}}
+.card.active .card-meta {{
+  transform: scale(1.05);
+  z-index: 11;
 }}
 .card-desc {{
   font-size: 0.82rem;
@@ -844,10 +882,12 @@ a:hover {{ text-decoration: underline; }}
   transform-origin: bottom center;
   transform: translate(-50%, 8px);
 }}
-.card.expand-up:hover .card-body {{
+.card.expand-up:hover .card-body,
+.card.expand-up.active .card-body {{
   transform: translate(-50%, 0);
 }}
-.card.expand-up:hover .card-visual {{
+.card.expand-up:hover .card-visual,
+.card.expand-up.active .card-visual {{
   border-radius: 0 0 6px 6px;
 }}
 
@@ -1020,8 +1060,9 @@ a:hover {{ text-decoration: underline; }}
   .card:hover .card-meta {{ transform: none; }}
   .card:hover .card-body {{ transform: translateY(100%);
     opacity: 0; visibility: hidden; }}
+  .card.active .card-body,
   .card.active:hover .card-body {{ transform: translateY(0);
-    opacity: 1; visibility: visible; }}
+    opacity: 1; visibility: visible; pointer-events: auto; }}
 }}
 </style>
 </head>
@@ -1074,15 +1115,17 @@ a:hover {{ text-decoration: underline; }}
   if (!cards.length) return;
 
   // Desktop: tag last-row cards to expand upward
-  var lastTop = cards[cards.length - 1].getBoundingClientRect().top;
-  for (var i = cards.length - 1; i >= 0; i--) {{
-    if (Math.abs(cards[i].getBoundingClientRect().top - lastTop) < 5)
-      cards[i].classList.add('expand-up');
-    else break;
+  function tagLastRow() {{
+    cards.forEach(function(c) {{ c.classList.remove('expand-up'); }});
+    var lastTop = cards[cards.length - 1].getBoundingClientRect().top;
+    for (var i = cards.length - 1; i >= 0; i--) {{
+      if (Math.abs(cards[i].getBoundingClientRect().top - lastTop) < 5)
+        cards[i].classList.add('expand-up');
+      else break;
+    }}
   }}
+  tagLastRow();
 
-  // Mobile: tap to toggle card detail as bottom sheet
-  var isMobile = window.matchMedia('(max-width: 600px)');
   var overlay = document.getElementById('card-overlay');
 
   function closeActive() {{
@@ -1091,10 +1134,9 @@ a:hover {{ text-decoration: underline; }}
     overlay.classList.remove('active');
   }}
 
+  // Click to toggle on both mobile and desktop
   cards.forEach(function(card) {{
     card.addEventListener('click', function(e) {{
-      if (!isMobile.matches) return;
-      // Don't intercept clicks on links/audio controls
       if (e.target.closest('a, audio, button')) return;
       e.stopPropagation();
       var wasActive = card.classList.contains('active');
@@ -1107,6 +1149,9 @@ a:hover {{ text-decoration: underline; }}
   }});
 
   overlay.addEventListener('click', closeActive);
+  document.addEventListener('keydown', function(e) {{
+    if (e.key === 'Escape') closeActive();
+  }});
 }})();
 </script>
 
@@ -1142,7 +1187,7 @@ a:hover {{ text-decoration: underline; }}
     var html = '<div class="search-count">' + hits.length + ' episode' +
                (hits.length === 1 ? '' : 's') + ' found</div>';
     hits.forEach(function(e) {{
-      var href = e.m || '#';
+      var href = e.s ? 'episodes/' + e.s + '/' : (e.m || '#');
       html += '<div class="search-result">' +
               '<span class="search-result-title">' +
               '<a href="' + href + '">' +
@@ -1165,6 +1210,9 @@ a:hover {{ text-decoration: underline; }}
           f"({_c('1', str(count))} episodes)",
           file=sys.stderr)
 
+    # Generate individual episode pages
+    _generate_episode_pages(episodes, show_title, feed_path.parent)
+
     # Generate per-month archive pages
     _generate_month_pages(sorted_months, show_title, feed_path.parent)
 
@@ -1174,13 +1222,172 @@ a:hover {{ text-decoration: underline; }}
     return str(index_path)
 
 
+def _generate_episode_pages(episodes, show_title, output_dir):
+    """Generate individual episode pages under episodes/{slug}/index.html."""
+    for ep in episodes:
+        slug = ep.get("slug", "")
+        if not slug:
+            continue
+
+        ep_dir = Path(output_dir) / "episodes" / slug
+        ep_dir.mkdir(parents=True, exist_ok=True)
+
+        img_html = ""
+        if ep["image_url"]:
+            img_html = (
+                f'<img class="ep-cover" src="{html.escape(ep["image_url"])}" '
+                f'alt="{html.escape(ep["title"])}" loading="lazy">')
+
+        audio_html = ""
+        if ep["audio_url"]:
+            audio_html = (
+                f'<audio controls preload="none" style="width:100%;margin:1.5rem 0;">'
+                f'<source src="{html.escape(ep["audio_url"])}" '
+                f'type="audio/mpeg"></audio>')
+
+        links = []
+        if ep["audio_url"]:
+            links.append(
+                f'<a href="{html.escape(ep["audio_url"])}" download>'
+                f'&#11015; Download MP3</a>')
+        if ep["srt_url"]:
+            links.append(
+                f'<a href="{html.escape(ep["srt_url"])}">'
+                f'&#128196; Subtitles</a>')
+        links_html = " &nbsp;&middot;&nbsp; ".join(links)
+
+        page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(ep["title"])} &mdash; {html.escape(show_title)}</title>
+<meta name="description" content="{html.escape(ep['title'])}">
+<meta property="og:title" content="{html.escape(ep['title'])}">
+<meta property="og:type" content="article">
+{"" if not ep["image_url"] else f'<meta property="og:image" content="{html.escape(ep["image_url"])}">' }
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Helvetica, Arial, sans-serif;
+  background: #141414;
+  color: #e5e5e5;
+  line-height: 1.6;
+  min-height: 100vh;
+}}
+a {{ color: #e50914; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+.container {{
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}}
+.back {{
+  font-size: 0.85rem;
+  color: #777;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}}
+.back:hover {{ color: #e5e5e5; }}
+.ep-cover {{
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  margin-bottom: 1.5rem;
+}}
+h1 {{
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.3rem;
+  line-height: 1.3;
+}}
+.ep-date {{
+  font-size: 0.85rem;
+  color: #777;
+  margin-bottom: 1rem;
+}}
+.ep-links {{
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+  color: #999;
+}}
+.ep-links a {{ color: #999; }}
+.ep-links a:hover {{ color: #e50914; }}
+.ep-desc {{
+  font-size: 0.92rem;
+  color: #e5e5e5;
+  line-height: 1.7;
+}}
+.ep-desc .card-sources {{
+  margin-top: 1.2rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #333;
+  font-size: 0.82rem;
+  color: #999;
+  line-height: 1.8;
+}}
+.ep-desc .card-sources a {{
+  color: #7ab;
+  word-break: break-all;
+}}
+.ep-desc .card-sources a:hover {{ color: #e50914; }}
+.ep-desc .card-viz-desc {{
+  font-size: 0.88rem;
+  margin-top: 0.8rem;
+  color: #5eeacd;
+}}
+.ep-desc .card-viz-desc a {{
+  color: #5eeacd;
+}}
+.ep-desc .card-viz-desc a:hover {{
+  color: #fff;
+}}
+.footer {{
+  text-align: center;
+  padding: 2rem;
+  color: #555;
+  font-size: 0.78rem;
+  border-top: 1px solid #222;
+  margin-top: 2rem;
+}}
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="../../index.html">&larr; All episodes</a>
+  {img_html}
+  <h1>{html.escape(ep["title"])}</h1>
+  <div class="ep-date">{html.escape(ep["date"])}</div>
+  {audio_html}
+  <div class="ep-links">{links_html}</div>
+  <div class="ep-desc">{ep["description"]}</div>
+</div>
+<div class="footer">
+  {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
+</div>
+</body>
+</html>
+"""
+        ep_path = ep_dir / "index.html"
+        ep_path.write_text(page)
+
+    print(f"{_c('34', '[HTML]')} Generated {_c('1', str(len(episodes)))} "
+          f"episode page(s)", file=sys.stderr)
+
+
 def _generate_month_pages(sorted_months, show_title, output_dir):
     """Generate per-month archive pages under YYYY/MM/index.html."""
     import calendar
 
     for (year, month), month_eps in sorted_months:
         label = f"{calendar.month_name[month]} {year}"
-        cards_html = "\n".join(_render_card(ep, root_prefix="../../") for ep in month_eps)
+        cards_html = "\n".join(
+            _render_card(ep, root_prefix="../../",
+                         episode_url=f"../../episodes/{ep['slug']}/")
+            for ep in month_eps)
 
         page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1324,11 +1531,22 @@ h1 {{
               transform 0.25s cubic-bezier(.25,.46,.45,.94);
   pointer-events: none;
 }}
-.card:hover .card-body {{
+.card:hover .card-body,
+.card.active .card-body {{
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
   pointer-events: auto;
+}}
+.card.active .card-visual {{
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
+  z-index: 10;
+  border-radius: 6px 6px 0 0;
+}}
+.card.active .card-meta {{
+  transform: scale(1.05);
+  z-index: 11;
 }}
 .card-desc {{
   font-size: 0.82rem;
@@ -1369,10 +1587,12 @@ h1 {{
   transform-origin: bottom center;
   transform: translate(-50%, 8px);
 }}
-.card.expand-up:hover .card-body {{
+.card.expand-up:hover .card-body,
+.card.expand-up.active .card-body {{
   transform: translate(-50%, 0);
 }}
-.card.expand-up:hover .card-visual {{
+.card.expand-up:hover .card-visual,
+.card.expand-up.active .card-visual {{
   border-radius: 0 0 6px 6px;
 }}
 .footer {{
@@ -1412,7 +1632,8 @@ h1 {{
   .card:hover .card-visual {{ transform: none; box-shadow: none; border-radius: 6px; }}
   .card:hover .card-meta {{ transform: none; }}
   .card:hover .card-body {{ transform: translateY(100%); opacity: 0; visibility: hidden; }}
-  .card.active:hover .card-body {{ transform: translateY(0); opacity: 1; visibility: visible; }}
+  .card.active .card-body,
+  .card.active:hover .card-body {{ transform: translateY(0); opacity: 1; visibility: visible; pointer-events: auto; }}
 }}
 </style>
 </head>
@@ -1445,7 +1666,6 @@ h1 {{
       cards[i].classList.add('expand-up');
     else break;
   }}
-  var isMobile = window.matchMedia('(max-width: 600px)');
   var overlay = document.getElementById('card-overlay');
   function closeActive() {{
     var a = document.querySelector('.card.active');
@@ -1454,7 +1674,6 @@ h1 {{
   }}
   cards.forEach(function(c) {{
     c.addEventListener('click', function(e) {{
-      if (!isMobile.matches) return;
       if (e.target.closest('a, audio, button')) return;
       e.stopPropagation();
       var w = c.classList.contains('active');
@@ -1463,6 +1682,9 @@ h1 {{
     }});
   }});
   overlay.addEventListener('click', closeActive);
+  document.addEventListener('keydown', function(e) {{
+    if (e.key === 'Escape') closeActive();
+  }});
 }})();
 </script>
 
