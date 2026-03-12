@@ -530,7 +530,8 @@ def _render_card(ep, root_prefix="", episode_url=""):
                 f'target="_blank">{html.escape(title)}</a>')
         viz_html = "\n    ".join(parts)
 
-    return f"""<div class="card">
+    ep_link = f' data-href="{html.escape(episode_url)}"' if episode_url else ''
+    return f"""<div class="card"{ep_link}>
   <div class="card-visual">
     {img_html}
   </div>
@@ -725,7 +726,7 @@ a:hover {{ text-decoration: underline; }}
   position: relative;
   border-radius: 6px;
   overflow: visible;
-  cursor: default;
+  cursor: pointer;
 }}
 .card-visual {{
   position: relative;
@@ -1141,8 +1142,8 @@ a:hover {{ text-decoration: underline; }}
       if (e.target.closest('a, audio, button')) return;
       e.preventDefault();
       e.stopPropagation();
-      var link = card.querySelector('a[href^="episodes/"]');
-      if (link) {{ window.location.href = link.href; return; }}
+      var href = card.getAttribute('data-href');
+      if (href) {{ window.location.href = href; return; }}
       // Fallback for legacy episodes without episode pages
       var wasActive = card.classList.contains('active');
       closeActive();
@@ -1450,7 +1451,7 @@ h1 {{
   position: relative;
   border-radius: 6px;
   overflow: visible;
-  cursor: default;
+  cursor: pointer;
 }}
 .card-visual {{
   position: relative;
