@@ -1689,14 +1689,29 @@ h1 {{
     if (a) a.classList.remove('active');
     overlay.classList.remove('active');
   }}
+  var isTouchDevice = 'ontouchstart' in window;
   cards.forEach(function(c) {{
     c.addEventListener('click', function(e) {{
       if (e.target.closest('a, audio, button')) return;
+      e.preventDefault();
       e.stopPropagation();
+      var href = c.getAttribute('data-href');
+      if (href) {{ window.location.href = href; return; }}
       var w = c.classList.contains('active');
       closeActive();
       if (!w) {{ c.classList.add('active'); overlay.classList.add('active'); }}
     }});
+    if (!isTouchDevice) {{
+      c.addEventListener('mouseenter', function() {{
+        closeActive();
+        c.classList.add('active');
+        overlay.classList.add('active');
+      }});
+      c.addEventListener('mouseleave', function() {{
+        c.classList.remove('active');
+        overlay.classList.remove('active');
+      }});
+    }}
   }});
   overlay.addEventListener('click', closeActive);
   document.addEventListener('keydown', function(e) {{
