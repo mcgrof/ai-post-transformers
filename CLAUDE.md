@@ -186,6 +186,32 @@ regenerates the RSS feed.
 - `inputs/YYYY/MM/DD/` — saved generation inputs per episode
 - `podcasts/` — RSS feed files (`feed.xml`, `anchor_feed.xml`)
 
+### Public repo vs local runtime state
+
+This repository is public. Do not accidentally commit local podcast
+runtime state, generated episode payloads, or machine-specific caches.
+
+The following paths are local-only and intentionally ignored by git:
+
+- `papers.db` / `*.db` — local SQLite cache of papers, podcasts, and
+  topic history. This is runtime state, not source.
+- `drafts/` — generated draft episodes and companion assets waiting for
+  review.
+- `public/` — local mirror of already-published episode files copied
+  from R2 or prepared for publication.
+- `inputs/` — saved prompt/URL bundles used to generate specific
+  episodes. Useful locally, but not source code.
+- `podcasts/` — generated RSS output and other publish artifacts.
+- `queue/` and `queue.yaml` — local editorial queue output.
+- `viz/`, `viz_cache/`, `generated_covers/` — generated visuals and
+  caches. Only commit visualization source/templates when explicitly
+  intended for publication.
+- `.claude/`, `.venv/`, `__pycache__/`, `*.pyc` — machine-local tool
+  state and Python cache files.
+
+Treat these as deploy/runtime artifacts. Sync them between hosts with
+`rsync` or explicit publish steps, not normal git commits.
+
 ### Episode filenames
 
 Episodes use unique filenames:

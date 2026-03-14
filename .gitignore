@@ -1,7 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Local database and generated runtime state.
 *.db
+papers.db
+queue/
 queue.yaml
 output/
 podcasts/
@@ -9,6 +13,8 @@ drafts/
 public/
 inputs/
 .claude/
+
+# Local generated assets and caches.
 viz/
 viz_cache/
 generated_covers/
