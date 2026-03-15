@@ -104,15 +104,26 @@ DEFAULT_INFLUENCERS = [
 
 
 def get_influencer_list(config):
-    """Get the influencer list from config, falling back to defaults.
+    """Get influencer list, extending defaults with any custom entries.
 
     Config format under social_signals.influencers is a list of dicts
     with the same structure as DEFAULT_INFLUENCERS.
+
+    Custom entries are additive, not a replacement for the defaults.
+    If a custom influencer reuses the same normalized name as a default,
+    the custom entry wins.
     """
-    custom = config.get("social_signals", {}).get("influencers")
-    if custom:
-        return custom
-    return DEFAULT_INFLUENCERS
+    custom = config.get("social_signals", {}).get("influencers") or []
+    if not custom:
+        return DEFAULT_INFLUENCERS
+
+    merged = {inf["name"].strip().lower(): inf for inf in DEFAULT_INFLUENCERS}
+    for inf in custom:
+        name = inf.get("name", "").strip().lower()
+        if not name:
+            continue
+        merged[name] = inf
+    return list(merged.values())
 
 
 def score_author_influence(papers, config):

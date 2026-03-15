@@ -226,12 +226,12 @@ social_signals:
   pwc_boost: 0.10            # boost for PWC trending papers
   influencer_weight: 1.0     # multiplier for influencer author matching
   # Custom influencers can be added here; otherwise uses built-in defaults.
-  # influencers:
-  #   - name: "Custom Researcher"
-  #     arxiv_names: ["Custom Researcher"]
-  #     type: "author"
-  #     weight: 0.9
-  #     platforms: ["twitter/x"]
+  influencers:
+    - name: "Omar Sanseviero"
+      arxiv_names: ["Omar Sanseviero"]
+      type: "reviewer"
+      weight: 0.7
+      platforms: ["twitter/x", "huggingface"]
 editorial:
   enabled: true
   lenses_file: editorial_lenses.yaml
