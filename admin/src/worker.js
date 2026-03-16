@@ -940,6 +940,7 @@ function baseHTML(title, content, activePage) {
           <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
           <a href="/drafts"${activePage === 'drafts' ? ' class="active"' : ''}>Drafts</a>
           <a href="/queue"${activePage === 'queue' ? ' class="active"' : ''}>Queue</a>
+          <a href="/conferences"${activePage === 'conferences' ? ' class="active"' : ''}>Conferences</a>
           <a href="/submit"${activePage === 'submit' ? ' class="active"' : ''}>Submit</a>
           <a href="/issues"${activePage === 'issues' ? ' class="active"' : ''}>Issues</a>
         </nav>
@@ -1090,46 +1091,141 @@ function queuePage() {
 }
 
 
-function conferenceFAST26Page() {
+// Conference data - centralized for easy updates
+const CONFERENCES = {
+  'neurips2025': {
+    id: 'neurips2025',
+    name: 'NeurIPS 2025',
+    fullName: 'Conference on Neural Information Processing Systems 2025',
+    color: '#a371f7',
+    badgeText: 'NeurIPS',
+    episodes: [
+      { id: 37, title: 'CARTRIDGE: Keys as Routers in KV Caches', date: '2025-01-15' },
+      { id: 39, title: 'Tokenization Bias in Language Models', date: '2025-01-22' }
+    ]
+  },
+  'icml2024': {
+    id: 'icml2024',
+    name: 'ICML 2024',
+    fullName: 'International Conference on Machine Learning 2024',
+    color: '#58a6ff',
+    badgeText: 'ICML',
+    episodes: [
+      { id: 34, title: 'Structured State Space Duality', date: '2024-12-10' }
+    ]
+  },
+  'iclr2026': {
+    id: 'iclr2026',
+    name: 'ICLR 2026',
+    fullName: 'International Conference on Learning Representations 2026',
+    color: '#3fb950',
+    badgeText: 'ICLR',
+    episodes: [
+      { id: 46, title: 'Gradient Descent at Inference Time', date: '2026-02-28' }
+    ]
+  },
+  'fast26': {
+    id: 'fast26',
+    name: "FAST '26",
+    fullName: 'USENIX Conference on File and Storage Technologies 2026',
+    color: '#c9302c',
+    badgeText: 'USENIX',
+    episodes: [],
+    status: 'generating',
+    papers: [
+      { name: 'fast26-liu-yang', authors: 'Liu et al.', url: 'https://www.usenix.org/system/files/fast26-liu-yang.pdf' },
+      { name: 'fast26-hu-shipeng', authors: 'Hu et al.', url: 'https://www.usenix.org/system/files/fast26-hu-shipeng.pdf' },
+      { name: 'fast26-zheng', authors: 'Zheng et al.', url: 'https://www.usenix.org/system/files/fast26-zheng.pdf' },
+      { name: 'fast26-liu-qingyuan', authors: 'Liu et al.', url: 'https://www.usenix.org/system/files/fast26-liu-qingyuan.pdf' },
+      { name: 'fast26-an', authors: 'An et al.', url: 'https://www.usenix.org/system/files/fast26-an.pdf' },
+      { name: 'fast26-liu-yubo', authors: 'Liu et al.', url: 'https://www.usenix.org/system/files/fast26-liu-yubo.pdf' }
+    ]
+  }
+};
+
+function conferencesPage() {
+  const conferenceCards = Object.values(CONFERENCES).map(conf => `
+    <a href="/conference/${conf.id}" class="conference-card" style="border-left: 4px solid ${conf.color};">
+      <div class="conf-badge" style="background: ${conf.color};">${conf.badgeText}</div>
+      <h3>${conf.name}</h3>
+      <p>${conf.fullName}</p>
+      <span class="conf-count" style="color: ${conf.color};">
+        ${conf.episodes.length} episode${conf.episodes.length !== 1 ? 's' : ''}
+        ${conf.status === 'generating' ? ' (generating)' : ''}
+      </span>
+    </a>
+  `).join('');
+
   return `
     <div class="page-header">
-      <h1 style="display:flex;align-items:center;gap:12px">
-        <span style="background:#c9302c;color:white;padding:4px 12px;border-radius:6px;font-size:0.7em;font-weight:700;letter-spacing:1px">USENIX</span>
-        FAST '26
-      </h1>
-      <p>File and Storage Technologies — 24th USENIX Conference</p>
+      <h1>Conferences</h1>
+      <p>Episodes organized by academic conference</p>
     </div>
 
-    <div class="card">
-      <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem">
-        <div>
-          <div style="font-size:2rem;font-weight:700;color:var(--accent)">6</div>
-          <div style="color:var(--text-secondary);font-size:0.813rem">Papers Submitted</div>
-        </div>
-        <div>
-          <div style="font-size:2rem;font-weight:700;color:var(--warning)" id="fast26-generated">0</div>
-          <div style="color:var(--text-secondary);font-size:0.813rem">Episodes Generated</div>
-        </div>
-        <div>
-          <div style="font-size:2rem;font-weight:700;color:var(--success)" id="fast26-published">0</div>
-          <div style="color:var(--text-secondary);font-size:0.813rem">Published</div>
-        </div>
+    <div class="stats-grid" style="margin-bottom: 2rem;">
+      <div class="stat-card">
+        <div class="stat-value">${Object.keys(CONFERENCES).length}</div>
+        <div class="stat-label">Tracked Conferences</div>
+        <div class="stat-icon">🎓</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${Object.values(CONFERENCES).reduce((sum, c) => sum + c.episodes.length, 0)}</div>
+        <div class="stat-label">Total Episodes</div>
+        <div class="stat-icon">🎙️</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${Object.values(CONFERENCES).filter(c => c.status === 'generating').length}</div>
+        <div class="stat-label">In Progress</div>
+        <div class="stat-icon">⏳</div>
       </div>
     </div>
 
-    <div class="card" style="margin-top:1.5rem">
-      <h2>Conference Papers</h2>
-      <p style="color:var(--text-secondary);margin-bottom:1rem">Episodes from USENIX FAST'26 papers — storage systems, file systems, and caching.</p>
-      <div id="fast26-episodes">
-        <div class="empty-state">
-          <div class="empty-state-icon">📄</div>
-          <h3>Episodes generating...</h3>
-          <p>FAST'26 paper podcasts are being generated. Check back soon.</p>
+    <h2>All Conferences</h2>
+    <div class="conference-grid">
+      ${conferenceCards}
+    </div>
+  `;
+}
+
+function conferenceDetailPage(confId) {
+  const conf = CONFERENCES[confId];
+  if (!conf) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state-icon">🔍</div>
+        <h3>Conference not found</h3>
+        <p><a href="/conferences">Back to conferences</a></p>
+      </div>
+    `;
+  }
+
+  const episodeCards = conf.episodes.length > 0 ? conf.episodes.map(ep => `
+    <div class="card" style="border-left: 4px solid ${conf.color};">
+      <div class="card-header">
+        <div>
+          <div class="card-title">${ep.title}</div>
+          <div class="card-subtitle">Episode ${ep.id} • ${ep.date}</div>
         </div>
       </div>
+      <div class="draft-actions">
+        <a href="${PODCAST_DOMAIN}/episodes/${ep.id}.html" target="_blank" class="btn btn-primary">
+          ▶ Play Episode
+        </a>
+        <a href="${PODCAST_DOMAIN}/episodes/${ep.id}.mp3" target="_blank" class="btn btn-secondary">
+          ⬇ Download MP3
+        </a>
+      </div>
     </div>
+  `).join('') : `
+    <div class="empty-state">
+      <div class="empty-state-icon">📄</div>
+      <h3>Episodes generating...</h3>
+      <p>Conference paper podcasts are being generated. Check back soon.</p>
+    </div>
+  `;
 
-    <div class="card" style="margin-top:1.5rem">
+  const papersSection = conf.papers ? `
+    <div class="card" style="margin-top: 1.5rem;">
       <h2>Submitted Papers</h2>
       <table style="width:100%;font-size:0.875rem">
         <thead>
@@ -1140,16 +1236,54 @@ function conferenceFAST26Page() {
           </tr>
         </thead>
         <tbody>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-yang.pdf" target="_blank">fast26-liu-yang</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-hu-shipeng.pdf" target="_blank">fast26-hu-shipeng</a></td><td>Hu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-zheng.pdf" target="_blank">fast26-zheng</a></td><td>Zheng et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-qingyuan.pdf" target="_blank">fast26-liu-qingyuan</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-an.pdf" target="_blank">fast26-an</a></td><td>An et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
-          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-yubo.pdf" target="_blank">fast26-liu-yubo</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          ${conf.papers.map(p => `
+            <tr>
+              <td style="padding:6px 0"><a href="${p.url}" target="_blank">${p.name}</a></td>
+              <td>${p.authors}</td>
+              <td><span class="badge badge-warning">Generating</span></td>
+            </tr>
+          `).join('')}
         </tbody>
       </table>
     </div>
+  ` : '';
+
+  return `
+    <div class="page-header">
+      <h1 style="display:flex;align-items:center;gap:12px">
+        <span style="background:${conf.color};color:white;padding:4px 12px;border-radius:6px;font-size:0.7em;font-weight:700;letter-spacing:1px">${conf.badgeText}</span>
+        ${conf.name}
+      </h1>
+      <p>${conf.fullName}</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem">
+        <div>
+          <div style="font-size:2rem;font-weight:700;color:${conf.color}">${conf.episodes.length}</div>
+          <div style="color:var(--text-secondary);font-size:0.813rem">Episodes</div>
+        </div>
+        ${conf.papers ? `
+        <div>
+          <div style="font-size:2rem;font-weight:700;color:var(--warning)">${conf.papers.length}</div>
+          <div style="color:var(--text-secondary);font-size:0.813rem">Papers Submitted</div>
+        </div>
+        ` : ''}
+      </div>
+      <a href="/conferences" class="btn btn-secondary">← Back to Conferences</a>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem">
+      <h2>Conference Episodes</h2>
+      ${episodeCards}
+    </div>
+
+    ${papersSection}
   `;
+}
+
+function conferenceFAST26Page() {
+  return conferenceDetailPage('fast26');
 }
 
 function submitPage() {
@@ -1255,7 +1389,7 @@ function showToast(message, type = 'success') {
 async function loadDrafts() {
   const container = document.getElementById('drafts-container');
   try {
-    const res = await fetch('/api/drafts');
+    const res = await fetch('/api/drafts', {credentials: 'same-origin'});
     const data = await res.json();
 
     if (!data.drafts || data.drafts.length === 0) {
@@ -1355,7 +1489,7 @@ async function confirmReject() {
 async function loadQueue() {
   const container = document.getElementById('queue-container');
   try {
-    const res = await fetch('/api/queue');
+    const res = await fetch('/api/queue', {credentials: 'same-origin'});
     const data = await res.json();
 
     if (!data.papers || data.papers.length === 0) {
@@ -1488,7 +1622,7 @@ async function handleSubmit(e) {
 async function loadIssues() {
   const container = document.getElementById('issues-container');
   try {
-    const res = await fetch('/api/issues');
+    const res = await fetch('/api/issues', {credentials: 'same-origin'});
     const data = await res.json();
 
     if (!data.issues || data.issues.length === 0) {
@@ -1550,6 +1684,10 @@ export default {
 
       // Page Routes
       let html;
+
+      // Handle dynamic conference routes
+      const confMatch = path.match(/^\/conference\/([a-z0-9]+)$/);
+
       switch (path) {
         case '/':
           const stats = await getDashboardStats(env);
@@ -1561,17 +1699,23 @@ export default {
         case '/queue':
           html = baseHTML('Queue', queuePage(), 'queue');
           break;
+        case '/conferences':
+          html = baseHTML('Conferences', conferencesPage(), 'conferences');
+          break;
         case '/submit':
           html = baseHTML('Submit', submitPage(), 'submit');
           break;
         case '/issues':
           html = baseHTML('Issues', issuesPage(), 'issues');
           break;
-        case '/conference/fast26':
-          html = baseHTML('FAST 26', conferenceFAST26Page(), 'submit');
-          break;
         default:
-          html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '');
+          if (confMatch) {
+            const confId = confMatch[1];
+            const conf = CONFERENCES[confId];
+            html = baseHTML(conf ? conf.name : 'Conference', conferenceDetailPage(confId), 'conferences');
+          } else {
+            html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '');
+          }
       }
 
       return new Response(html, {
@@ -1666,35 +1810,47 @@ async function getDashboardStats(env) {
   return stats;
 }
 
-// Get drafts from PODCAST_BUCKET
+// Get drafts from manifest.json in ADMIN_BUCKET
 async function getDrafts(env) {
   try {
+    // Read manifest.json for full episode metadata
+    const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+    let manifest = { episodes: [], conferences: [] };
+    if (manifestData) {
+      manifest = await manifestData.json();
+    }
+
+    // Get list of draft MP3s from PODCAST_BUCKET
     const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
     const drafts = [];
 
     for (const obj of list.objects) {
       if (!obj.key.endsWith('.mp3')) continue;
 
-      // Try to get metadata
-      const metaKey = obj.key.replace('.mp3', '.json');
-      let meta = {};
-      try {
-        const metaObj = await env.PODCAST_BUCKET.get(metaKey);
-        if (metaObj) {
-          meta = await metaObj.json();
-        }
-      } catch (e) {
-        // No metadata file
+      const filename = obj.key.split('/').pop();
+      const baseName = filename.replace('.mp3', '');
+
+      // Look up episode in manifest by matching filename or ID
+      let episode = null;
+      if (manifest.episodes) {
+        episode = manifest.episodes.find(ep => {
+          // Match by draft key, filename, or episode ID
+          if (ep.draft_key === obj.key) return true;
+          if (ep.filename === filename) return true;
+          if (ep.basename === baseName) return true;
+          if (baseName.includes(`ep${ep.id}`)) return true;
+          return false;
+        });
       }
 
-      const filename = obj.key.split('/').pop();
       drafts.push({
         key: obj.key,
-        title: meta.title || filename.replace('.mp3', ''),
-        date: meta.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
-        duration: meta.duration || 'Unknown',
-        description: meta.description || '',
-        audioUrl: `${PODCAST_DOMAIN}/${obj.key}`
+        title: episode?.title || baseName,
+        date: episode?.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
+        duration: episode?.duration || 'Unknown',
+        description: episode?.description ? episode.description.substring(0, 200) + (episode.description.length > 200 ? '...' : '') : '',
+        audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
+        episodeId: episode?.id || null
       });
     }
 

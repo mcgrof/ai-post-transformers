@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conference Coverage - AI Post Transformers</title>
+  <meta name="description" content="AI research podcast episodes organized by academic conference. Coverage of NeurIPS, ICML, ICLR, FAST and more.">
+  <link rel="icon" type="image/png" href="https://podcast.do-not-panic.com/favicon.png">
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --bg-hover: #30363d;
+      --border-color: #30363d;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #6e7681;
+      --accent: #58a6ff;
+      --accent-hover: #79b8ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --purple: #a371f7;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Hero Section */
+    .hero {
+      background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+      border-bottom: 1px solid var(--border-color);
+      padding: 4rem 0;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--purple), var(--accent), var(--success), var(--warning));
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, var(--text-primary), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      color: var(--text-secondary);
+      font-size: 1.125rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .hero-stats {
+      display: flex;
+      justify-content: center;
+      gap: 3rem;
+      margin-top: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    .hero-stat {
+      text-align: center;
+    }
+
+    .hero-stat-value {
+      font-size: 3rem;
+      font-weight: 700;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-stat-label {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      margin-top: 0.5rem;
+    }
+
+    /* Main Content */
+    main {
+      padding: 3rem 0;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      color: var(--text-primary);
+    }
+
+    /* Coverage Chart */
+    .coverage-chart {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .coverage-chart h2 {
+      margin-bottom: 2rem;
+    }
+
+    .chart-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .chart-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .chart-label {
+      width: 120px;
+      font-weight: 600;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .chart-bar-container {
+      flex: 1;
+      height: 32px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chart-bar {
+      height: 100%;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 12px;
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: white;
+      min-width: 50px;
+      transition: width 0.5s ease;
+    }
+
+    .chart-count {
+      width: 60px;
+      text-align: right;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    /* Conference Cards Grid */
+    .conference-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+
+    .conference-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .conference-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+      border-color: var(--bg-hover);
+    }
+
+    .conf-header {
+      padding: 1.5rem;
+      position: relative;
+    }
+
+    .conf-header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+    }
+
+    .conf-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: white;
+      margin-bottom: 0.75rem;
+    }
+
+    .conf-name {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .conf-full-name {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+
+    .conf-stats {
+      display: flex;
+      gap: 2rem;
+      padding: 1rem 1.5rem;
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border-color);
+    }
+
+    .conf-stat {
+      text-align: center;
+    }
+
+    .conf-stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .conf-stat-label {
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+    }
+
+    .conf-episodes {
+      padding: 1.5rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .conf-episodes h4 {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .episode-link {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+      transition: background 0.2s;
+    }
+
+    .episode-link:hover {
+      background: var(--bg-hover);
+    }
+
+    .play-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .episode-title {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+
+    .conf-generating {
+      padding: 1.5rem;
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border-color);
+      text-align: center;
+    }
+
+    .generating-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(210, 153, 34, 0.15);
+      color: var(--warning);
+      border-radius: 20px;
+      font-size: 0.813rem;
+      font-weight: 500;
+    }
+
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Timeline */
+    .timeline {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .timeline-row {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .timeline-row:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .timeline-date {
+      width: 100px;
+      flex-shrink: 0;
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+
+    .timeline-content {
+      flex: 1;
+    }
+
+    .timeline-conf {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: white;
+      margin-right: 0.5rem;
+    }
+
+    .timeline-title {
+      font-weight: 500;
+      margin-top: 0.25rem;
+    }
+
+    /* Footer */
+    footer {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
+      padding: 2rem 0;
+      text-align: center;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .footer-copy {
+      color: var(--text-muted);
+      font-size: 0.813rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .hero h1 {
+        font-size: 1.75rem;
+      }
+
+      .hero-stats {
+        gap: 1.5rem;
+      }
+
+      .hero-stat-value {
+        font-size: 2rem;
+      }
+
+      .conference-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-label {
+        width: 80px;
+        font-size: 0.75rem;
+      }
+
+      .timeline-row {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .timeline-date {
+        width: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <h1>Conference Coverage</h1>
+      <p>Academic AI research distilled into engaging podcast episodes. Stay current with the latest papers from top conferences.</p>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="hero-stat-value">4</div>
+          <div class="hero-stat-label">Conferences Tracked</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-value">4</div>
+          <div class="hero-stat-label">Episodes Published</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-value">6</div>
+          <div class="hero-stat-label">Papers In Progress</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main>
+    <div class="container">
+      <!-- Coverage Chart -->
+      <div class="coverage-chart">
+        <h2>Coverage by Conference</h2>
+        <div class="chart-bars">
+          <div class="chart-row">
+            <div class="chart-label">NeurIPS 2025</div>
+            <div class="chart-bar-container">
+              <div class="chart-bar" style="width: 100%; background: linear-gradient(90deg, #a371f7, #c9a0ff);">2</div>
+            </div>
+            <div class="chart-count">2 episodes</div>
+          </div>
+          <div class="chart-row">
+            <div class="chart-label">ICML 2024</div>
+            <div class="chart-bar-container">
+              <div class="chart-bar" style="width: 50%; background: linear-gradient(90deg, #58a6ff, #79b8ff);">1</div>
+            </div>
+            <div class="chart-count">1 episode</div>
+          </div>
+          <div class="chart-row">
+            <div class="chart-label">ICLR 2026</div>
+            <div class="chart-bar-container">
+              <div class="chart-bar" style="width: 50%; background: linear-gradient(90deg, #3fb950, #56d364);">1</div>
+            </div>
+            <div class="chart-count">1 episode</div>
+          </div>
+          <div class="chart-row">
+            <div class="chart-label">FAST '26</div>
+            <div class="chart-bar-container">
+              <div class="chart-bar" style="width: 10%; background: linear-gradient(90deg, #c9302c, #e55a50); min-width: 60px;">0</div>
+            </div>
+            <div class="chart-count">6 generating</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conference Cards -->
+      <h2>All Conferences</h2>
+      <div class="conference-grid">
+        <!-- NeurIPS 2025 -->
+        <div class="conference-card">
+          <div class="conf-header" style="border-top: 4px solid #a371f7;">
+            <div class="conf-badge" style="background: #a371f7;">NeurIPS</div>
+            <div class="conf-name">NeurIPS 2025</div>
+            <div class="conf-full-name">Conference on Neural Information Processing Systems</div>
+          </div>
+          <div class="conf-stats">
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: #a371f7;">2</div>
+              <div class="conf-stat-label">Episodes</div>
+            </div>
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: var(--text-secondary);">2</div>
+              <div class="conf-stat-label">Papers Covered</div>
+            </div>
+          </div>
+          <div class="conf-episodes">
+            <h4>Latest Episodes</h4>
+            <a href="https://podcast.do-not-panic.com/episodes/37.html" class="episode-link">
+              <div class="play-icon" style="background: rgba(163, 113, 247, 0.2); color: #a371f7;">▶</div>
+              <span class="episode-title">CARTRIDGE: Keys as Routers in KV Caches</span>
+            </a>
+            <a href="https://podcast.do-not-panic.com/episodes/39.html" class="episode-link">
+              <div class="play-icon" style="background: rgba(163, 113, 247, 0.2); color: #a371f7;">▶</div>
+              <span class="episode-title">Tokenization Bias in Language Models</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- ICML 2024 -->
+        <div class="conference-card">
+          <div class="conf-header" style="border-top: 4px solid #58a6ff;">
+            <div class="conf-badge" style="background: #58a6ff;">ICML</div>
+            <div class="conf-name">ICML 2024</div>
+            <div class="conf-full-name">International Conference on Machine Learning</div>
+          </div>
+          <div class="conf-stats">
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: #58a6ff;">1</div>
+              <div class="conf-stat-label">Episode</div>
+            </div>
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: var(--text-secondary);">1</div>
+              <div class="conf-stat-label">Paper Covered</div>
+            </div>
+          </div>
+          <div class="conf-episodes">
+            <h4>Latest Episodes</h4>
+            <a href="https://podcast.do-not-panic.com/episodes/34.html" class="episode-link">
+              <div class="play-icon" style="background: rgba(88, 166, 255, 0.2); color: #58a6ff;">▶</div>
+              <span class="episode-title">Structured State Space Duality</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- ICLR 2026 -->
+        <div class="conference-card">
+          <div class="conf-header" style="border-top: 4px solid #3fb950;">
+            <div class="conf-badge" style="background: #3fb950;">ICLR</div>
+            <div class="conf-name">ICLR 2026</div>
+            <div class="conf-full-name">International Conference on Learning Representations</div>
+          </div>
+          <div class="conf-stats">
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: #3fb950;">1</div>
+              <div class="conf-stat-label">Episode</div>
+            </div>
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: var(--text-secondary);">1</div>
+              <div class="conf-stat-label">Paper Covered</div>
+            </div>
+          </div>
+          <div class="conf-episodes">
+            <h4>Latest Episodes</h4>
+            <a href="https://podcast.do-not-panic.com/episodes/46.html" class="episode-link">
+              <div class="play-icon" style="background: rgba(63, 185, 80, 0.2); color: #3fb950;">▶</div>
+              <span class="episode-title">Gradient Descent at Inference Time</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- FAST '26 -->
+        <div class="conference-card">
+          <div class="conf-header" style="border-top: 4px solid #c9302c;">
+            <div class="conf-badge" style="background: #c9302c;">USENIX</div>
+            <div class="conf-name">FAST '26</div>
+            <div class="conf-full-name">USENIX Conference on File and Storage Technologies</div>
+          </div>
+          <div class="conf-stats">
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: #c9302c;">0</div>
+              <div class="conf-stat-label">Episodes</div>
+            </div>
+            <div class="conf-stat">
+              <div class="conf-stat-value" style="color: var(--warning);">6</div>
+              <div class="conf-stat-label">Generating</div>
+            </div>
+          </div>
+          <div class="conf-generating">
+            <div class="generating-badge">
+              <span class="pulse">●</span> 6 episodes generating...
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Episodes Timeline -->
+      <div class="timeline">
+        <h2>Recent Episode Timeline</h2>
+        <div class="timeline-row">
+          <div class="timeline-date">Feb 2026</div>
+          <div class="timeline-content">
+            <span class="timeline-conf" style="background: #3fb950;">ICLR</span>
+            <a href="https://podcast.do-not-panic.com/episodes/46.html">
+              <div class="timeline-title">Gradient Descent at Inference Time</div>
+            </a>
+          </div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Jan 2025</div>
+          <div class="timeline-content">
+            <span class="timeline-conf" style="background: #a371f7;">NeurIPS</span>
+            <a href="https://podcast.do-not-panic.com/episodes/39.html">
+              <div class="timeline-title">Tokenization Bias in Language Models</div>
+            </a>
+          </div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Jan 2025</div>
+          <div class="timeline-content">
+            <span class="timeline-conf" style="background: #a371f7;">NeurIPS</span>
+            <a href="https://podcast.do-not-panic.com/episodes/37.html">
+              <div class="timeline-title">CARTRIDGE: Keys as Routers in KV Caches</div>
+            </a>
+          </div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Dec 2024</div>
+          <div class="timeline-content">
+            <span class="timeline-conf" style="background: #58a6ff;">ICML</span>
+            <a href="https://podcast.do-not-panic.com/episodes/34.html">
+              <div class="timeline-title">Structured State Space Duality</div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://podcast.do-not-panic.com">Home</a>
+        <a href="https://podcast.do-not-panic.com/about">About</a>
+        <a href="https://github.com/mcgrof/ai-post-transformers">GitHub</a>
+        <a href="https://podcast.do-not-panic.com/feed.xml">RSS Feed</a>
+      </div>
+      <div class="footer-copy">
+        AI Post Transformers Podcast
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
