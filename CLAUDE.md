@@ -305,6 +305,71 @@ is created without a cover image.
 Do not use the word "comprehensive". It is overused and explains
 nothing. Be terse and to the point.
 
+## Episode Numbering: NEVER Use Internal IDs
+
+The podcast has been published across multiple platforms over its
+lifetime. The internal database `id` column in the `podcasts` table
+is a local auto-increment counter specific to this repository's
+SQLite database. It does NOT correspond to any public episode number
+and has NO meaning to listeners.
+
+**Rules:**
+- NEVER reference an episode by its database ID in descriptions,
+  transcripts, or any listener-facing text. Do not write "Episode 43"
+  or "episode 47" or any variant.
+- When referring to a previous episode, use the episode TITLE instead.
+  Example: "as we discussed in 'Why CARTRIDGE Works: Keys as Routers
+  in KV Caches'" — not "as we discussed in episode 37."
+- This applies to ALL generated text: episode descriptions stored in
+  the database, transcript dialogue, SRT subtitles, and RSS feed
+  content.
+- When generating podcast scripts, instruct the LLM that the hosts
+  must refer to prior episodes by title, never by number. If the
+  script generation prompt allows cross-references to earlier
+  episodes, those references must use the episode title verbatim.
+- If you find existing episodes with numbered references in their
+  descriptions or transcripts, fix them by replacing the number with
+  the episode title.
+
+## Content Isolation: No External Private Context
+
+The podcast content must be derived ONLY from:
+1. The source paper(s) provided as input URLs
+2. Published academic literature cited by or related to those papers
+3. General public knowledge about the research field
+4. Previously published episodes of this podcast (referenced by title)
+
+**Strictly forbidden in generated scripts, descriptions, and
+transcripts:**
+- Any private research, experiments, or unpublished results that the
+  podcast operator or contributors are working on independently
+- Internal project names, experiment codenames, or proprietary
+  methodologies not described in the source papers
+- References to private conversations, internal discussions, or
+  personal R&D agendas
+- Any knowledge that could only come from the operator's own
+  unpublished work rather than from the source paper or public
+  literature
+
+The podcast is a PUBLIC artifact. The operator's own research
+interests and ongoing experiments are PRIVATE and must never leak
+into episode content. If a source paper happens to be related to
+the operator's private work, the episode must discuss the paper
+strictly on its own published merits — never connecting it to
+unpublished internal projects, using internal terminology, or
+revealing that the operator has related work in progress.
+
+This separation must be maintained even when the generation prompt
+or system context contains information about the operator's private
+research. That context exists for the agent's awareness only and
+must NEVER flow into the podcast output.
+
+When generating scripts, the LLM prompt must explicitly instruct
+the hosts to discuss papers based solely on their published content,
+public citations, and the broader academic landscape. No insider
+knowledge, no proprietary framing, no "our earlier work on X"
+unless X is a previously published episode of this podcast.
+
 ## Cross-Agent Access
 
 To avoid other agents missing these guidelines, ensure every agent
