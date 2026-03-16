@@ -1033,6 +1033,41 @@ function dashboardPage(stats) {
   `;
 }
 
+
+function draftsPageWithData(data) {
+  const drafts = data.drafts || [];
+  if (drafts.length === 0) {
+    return `<div class="page-header"><h1>Draft Review</h1><p>Review and approve pending episodes</p></div>
+    <div class="empty-state"><div class="empty-state-icon">🎧</div><h3>No pending drafts</h3><p>All caught up!</p></div>`;
+  }
+
+  const cards = drafts.map(d => `
+    <div class="card" style="margin-bottom:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3 style="margin:0 0 4px">${d.title || d.key}</h3>
+          <div style="color:var(--text-secondary);font-size:0.813rem">
+            📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}
+          </div>
+        </div>
+        <span class="badge badge-pending">Pending Review</span>
+      </div>
+      <p style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0">${d.description || ''}</p>
+      <div style="margin:0.75rem 0">
+        <audio controls preload="none" style="width:100%;height:40px">
+          <source src="${d.audioUrl}" type="audio/mpeg">
+        </audio>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:0.75rem">
+        <button class="btn btn-success" onclick="approveDraft('${d.key}')">✓ Approve</button>
+        <button class="btn btn-danger" onclick="rejectDraft('${d.key}')">✗ Reject</button>
+      </div>
+    </div>
+  `).join('');
+
+  return `<div class="page-header"><h1>Draft Review</h1><p>${drafts.length} episodes pending review</p></div>${cards}`;
+}
+
 function draftsPage() {
   return `
     <div class="page-header">
@@ -1694,7 +1729,8 @@ export default {
           html = baseHTML('Dashboard', dashboardPage(stats), 'dashboard');
           break;
         case '/drafts':
-          html = baseHTML('Drafts', draftsPage(), 'drafts');
+          const draftsData = await getDrafts(env);
+          html = baseHTML('Drafts', draftsPageWithData(draftsData), 'drafts');
           break;
         case '/queue':
           html = baseHTML('Queue', queuePage(), 'queue');
@@ -1815,7 +1851,7 @@ async function getDrafts(env) {
   try {
     // Read manifest.json for full episode metadata
     const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
-    let manifest = { episodes: [], conferences: [] };
+    let manifest = { drafts: [], conferences: {} };
     if (manifestData) {
       manifest = await manifestData.json();
     }
@@ -1832,13 +1868,13 @@ async function getDrafts(env) {
 
       // Look up episode in manifest by matching filename or ID
       let episode = null;
-      if (manifest.episodes) {
-        episode = manifest.episodes.find(ep => {
+      if (manifest.drafts) {
+        episode = manifest.drafts.find(ep => {
           // Match by draft key, filename, or episode ID
           if (ep.draft_key === obj.key) return true;
           if (ep.filename === filename) return true;
           if (ep.basename === baseName) return true;
-          if (baseName.includes(`ep${ep.id}`)) return true;
+          if (baseName === `ep${ep.id}`) return true;
           return false;
         });
       }
