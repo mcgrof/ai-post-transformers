@@ -1,0 +1,1756 @@
+// AI Post Transformers Admin Dashboard
+// Cloudflare Worker with inline HTML
+
+const GITHUB_REPO = 'mcgrof/ai-post-transformers';
+const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
+
+// ============================================================================
+// STYLES - Dark theme matching dash.do-not-panic.com
+// ============================================================================
+const styles = `
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #30363d;
+  --border-color: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #58a6ff;
+  --accent-hover: #79b8ff;
+  --success: #3fb950;
+  --warning: #d29922;
+  --danger: #f85149;
+  --purple: #a371f7;
+  --gradient-start: #58a6ff;
+  --gradient-end: #a371f7;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Header */
+header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 1rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  font-size: 1.25rem;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+
+nav {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+nav a {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+nav a:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+nav a.active {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+}
+
+/* Main content */
+main {
+  padding: 2rem 0;
+  min-height: calc(100vh - 140px);
+}
+
+h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header p {
+  color: var(--text-secondary);
+}
+
+/* Cards */
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  gap: 1rem;
+}
+
+.card-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.card-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--gradient-start), var(--gradient-end));
+}
+
+.stat-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.stat-icon {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 3rem;
+  opacity: 0.1;
+}
+
+/* Quick links */
+.quick-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.quick-link {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: all 0.2s;
+}
+
+.quick-link:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(88, 166, 255, 0.15);
+}
+
+.quick-link-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.quick-link-text h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.quick-link-text p {
+  color: var(--text-secondary);
+  font-size: 0.813rem;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-success {
+  background: var(--success);
+  color: white;
+}
+
+.btn-success:hover {
+  background: #46c35f;
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+input[type="text"],
+input[type="url"],
+textarea,
+select {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  transition: border-color 0.2s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-family: inherit;
+}
+
+/* Draft list */
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.draft-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: border-color 0.2s;
+}
+
+.draft-item:hover {
+  border-color: var(--bg-hover);
+}
+
+.draft-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.draft-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.draft-meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.draft-meta span {
+  color: var(--text-secondary);
+  font-size: 0.813rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.draft-description {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.draft-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Audio player */
+.audio-player {
+  width: 100%;
+  margin: 1rem 0;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+audio {
+  width: 100%;
+  height: 40px;
+}
+
+audio::-webkit-media-controls-panel {
+  background: var(--bg-tertiary);
+}
+
+/* Queue items */
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.queue-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.queue-item:hover {
+  border-color: var(--bg-hover);
+}
+
+.queue-item-header {
+  padding: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.queue-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-item-title {
+  font-weight: 600;
+  margin-bottom: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.queue-item-source {
+  color: var(--text-secondary);
+  font-size: 0.813rem;
+}
+
+.queue-item-score {
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  color: white;
+  padding: 0.375rem 0.75rem;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.queue-item-body {
+  padding: 0 1.25rem 1.25rem;
+  display: none;
+  border-top: 1px solid var(--border-color);
+}
+
+.queue-item.expanded .queue-item-body {
+  display: block;
+  padding-top: 1.25rem;
+}
+
+.queue-item-abstract {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.score-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.score-item {
+  background: var(--bg-tertiary);
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.813rem;
+}
+
+.score-item-label {
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.score-item-value {
+  font-weight: 600;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.badge-success {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.badge-danger {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--danger);
+}
+
+.badge-purple {
+  background: rgba(163, 113, 247, 0.15);
+  color: var(--purple);
+}
+
+.badge-blue {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Submissions */
+.submission-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.submission-url {
+  word-break: break-all;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.813rem;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+.submission-time {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* Issues */
+.issue-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 0.75rem;
+  transition: border-color 0.2s;
+}
+
+.issue-item:hover {
+  border-color: var(--bg-hover);
+}
+
+.issue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.issue-title {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.issue-title a {
+  color: var(--text-primary);
+}
+
+.issue-title a:hover {
+  color: var(--accent);
+}
+
+.issue-number {
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.issue-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.issue-label {
+  padding: 0.125rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.issue-meta {
+  color: var(--text-secondary);
+  font-size: 0.813rem;
+}
+
+.issue-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-secondary);
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+/* Loading */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 0.75rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Toast notifications */
+.toast-container {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toast {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  animation: slideIn 0.3s ease;
+  max-width: 350px;
+}
+
+.toast-success {
+  border-left: 3px solid var(--success);
+}
+
+.toast-error {
+  border-left: 3px solid var(--danger);
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  nav {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stat-value {
+    font-size: 2rem;
+  }
+
+  .draft-header {
+    flex-direction: column;
+  }
+
+  .draft-actions {
+    width: 100%;
+  }
+
+  .draft-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .container {
+    padding: 0 1rem;
+  }
+
+  main {
+    padding: 1.5rem 0;
+  }
+}
+
+/* Footer */
+footer {
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  padding: 1.5rem 0;
+  margin-top: auto;
+}
+
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.813rem;
+  color: var(--text-secondary);
+}
+
+.footer-links {
+  display: flex;
+  gap: 1.5rem;
+}
+
+/* Expand icon */
+.expand-icon {
+  transition: transform 0.2s;
+  color: var(--text-muted);
+}
+
+.queue-item.expanded .expand-icon {
+  transform: rotate(180deg);
+}
+`;
+
+// ============================================================================
+// HTML TEMPLATES
+// ============================================================================
+function baseHTML(title, content, activePage) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - AI Post Transformers Admin</title>
+  <style>${styles}</style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-content">
+        <a href="/" class="logo">
+          <div class="logo-icon">🎙️</div>
+          <span>Admin Dashboard</span>
+        </a>
+        <nav>
+          <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
+          <a href="/drafts"${activePage === 'drafts' ? ' class="active"' : ''}>Drafts</a>
+          <a href="/queue"${activePage === 'queue' ? ' class="active"' : ''}>Queue</a>
+          <a href="/submit"${activePage === 'submit' ? ' class="active"' : ''}>Submit</a>
+          <a href="/issues"${activePage === 'issues' ? ' class="active"' : ''}>Issues</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="container">
+      ${content}
+    </div>
+  </main>
+  <footer>
+    <div class="container">
+      <div class="footer-content">
+        <span>AI Post Transformers Admin</span>
+        <div class="footer-links">
+          <a href="https://podcast.do-not-panic.com" target="_blank">Main Site</a>
+          <a href="https://github.com/${GITHUB_REPO}" target="_blank">GitHub</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+  <div id="toast-container" class="toast-container"></div>
+  <script>${clientScript}</script>
+</body>
+</html>`;
+}
+
+function dashboardPage(stats) {
+  return `
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <p>Overview of your podcast administration</p>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">${stats.pendingDrafts}</div>
+        <div class="stat-label">Pending Drafts</div>
+        <div class="stat-icon">📋</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.queueSize}</div>
+        <div class="stat-label">Queue Size</div>
+        <div class="stat-icon">📚</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.submissions}</div>
+        <div class="stat-label">Submissions</div>
+        <div class="stat-icon">📨</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.openIssues}</div>
+        <div class="stat-label">Open Issues</div>
+        <div class="stat-icon">💬</div>
+      </div>
+    </div>
+
+    <h2>Quick Actions</h2>
+    <div class="quick-links">
+      <a href="/drafts" class="quick-link">
+        <div class="quick-link-icon">🎧</div>
+        <div class="quick-link-text">
+          <h3>Review Drafts</h3>
+          <p>Listen and approve pending episodes</p>
+        </div>
+      </a>
+      <a href="/queue" class="quick-link">
+        <div class="quick-link-icon">📰</div>
+        <div class="quick-link-text">
+          <h3>Editorial Queue</h3>
+          <p>Browse papers ranked by relevance</p>
+        </div>
+      </a>
+      <a href="/submit" class="quick-link">
+        <div class="quick-link-icon">🔗</div>
+        <div class="quick-link-text">
+          <h3>Submit Papers</h3>
+          <p>Add new papers for processing</p>
+        </div>
+      </a>
+      <a href="/issues" class="quick-link">
+        <div class="quick-link-icon">💡</div>
+        <div class="quick-link-text">
+          <h3>Community Issues</h3>
+          <p>Review feedback and requests</p>
+        </div>
+      </a>
+    </div>
+  `;
+}
+
+function draftsPage() {
+  return `
+    <div class="page-header">
+      <h1>Draft Episodes</h1>
+      <p>Review and approve podcast drafts</p>
+    </div>
+
+    <div id="drafts-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        Loading drafts...
+      </div>
+    </div>
+
+    <div id="reject-modal" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Reject Draft</h3>
+          <button class="modal-close" onclick="closeRejectModal()">&times;</button>
+        </div>
+        <div class="form-group">
+          <label for="reject-reason">Reason for rejection</label>
+          <textarea id="reject-reason" placeholder="Enter the reason for rejecting this draft..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="confirmReject()">Reject Draft</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      loadDrafts();
+    </script>
+  `;
+}
+
+function queuePage() {
+  return `
+    <div class="page-header">
+      <h1>Editorial Queue</h1>
+      <p>Papers ranked by relevance score</p>
+    </div>
+
+    <div id="queue-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        Loading queue...
+      </div>
+    </div>
+
+    <script>
+      loadQueue();
+    </script>
+  `;
+}
+
+function submitPage() {
+  return `
+    <div class="page-header">
+      <h1>Submit Papers</h1>
+      <p>Add paper URLs for processing</p>
+    </div>
+
+    <div class="card">
+      <h2>New Submission</h2>
+      <form id="submit-form" onsubmit="handleSubmit(event)">
+        <div class="form-group">
+          <label for="urls">Paper URLs (one per line)</label>
+          <textarea id="urls" placeholder="https://arxiv.org/abs/2401.12345
+https://arxiv.org/pdf/2401.12345.pdf
+https://example.com/paper.pdf" rows="6"></textarea>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.813rem; margin-bottom: 1rem;">
+          Accepts: arXiv PDF links, arXiv abstract pages, direct PDF URLs, HTML paper pages
+        </p>
+        <button type="submit" class="btn btn-primary">Submit Papers</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem;">
+      <h2>Recent Submissions</h2>
+      <div id="submissions-container">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading submissions...
+        </div>
+      </div>
+    </div>
+
+    <script>
+      loadSubmissions();
+    </script>
+  `;
+}
+
+function issuesPage() {
+  return `
+    <div class="page-header">
+      <h1>Community Issues</h1>
+      <p>GitHub issues and feature requests</p>
+    </div>
+
+    <div id="issues-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        Loading issues...
+      </div>
+    </div>
+
+    <script>
+      loadIssues();
+    </script>
+  `;
+}
+
+// ============================================================================
+// CLIENT-SIDE JAVASCRIPT
+// ============================================================================
+const clientScript = `
+let rejectingDraftKey = null;
+
+// Toast notifications
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.innerHTML = '<span>' + (type === 'success' ? '✓' : '✕') + '</span><span>' + message + '</span>';
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+// Drafts
+async function loadDrafts() {
+  const container = document.getElementById('drafts-container');
+  try {
+    const res = await fetch('/api/drafts');
+    const data = await res.json();
+
+    if (!data.drafts || data.drafts.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎧</div><h3>No pending drafts</h3><p>All caught up! No drafts waiting for review.</p></div>';
+      return;
+    }
+
+    container.innerHTML = '<div class="draft-list">' + data.drafts.map(draft => \`
+      <div class="draft-item" data-key="\${draft.key}">
+        <div class="draft-header">
+          <div>
+            <div class="draft-title">\${draft.title || draft.key}</div>
+            <div class="draft-meta">
+              <span>📅 \${draft.date || 'Unknown date'}</span>
+              <span>⏱️ \${draft.duration || 'Unknown duration'}</span>
+            </div>
+          </div>
+        </div>
+        <p class="draft-description">\${draft.description || 'No description available'}</p>
+        <div class="audio-player">
+          <audio controls preload="none">
+            <source src="\${draft.audioUrl}" type="audio/mpeg">
+            Your browser does not support the audio element.
+          </audio>
+        </div>
+        <div class="draft-actions">
+          <button class="btn btn-success" onclick="approveDraft('\${draft.key}')">
+            ✓ Approve
+          </button>
+          <button class="btn btn-danger" onclick="openRejectModal('\${draft.key}')">
+            ✕ Reject
+          </button>
+        </div>
+      </div>
+    \`).join('') + '</div>';
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Failed to load drafts</h3><p>' + err.message + '</p></div>';
+  }
+}
+
+async function approveDraft(key) {
+  try {
+    const res = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, action: 'approve' })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Draft approved successfully');
+      loadDrafts();
+    } else {
+      showToast(data.error || 'Failed to approve draft', 'error');
+    }
+  } catch (err) {
+    showToast('Failed to approve draft: ' + err.message, 'error');
+  }
+}
+
+function openRejectModal(key) {
+  rejectingDraftKey = key;
+  document.getElementById('reject-modal').style.display = 'flex';
+  document.getElementById('reject-reason').value = '';
+}
+
+function closeRejectModal() {
+  rejectingDraftKey = null;
+  document.getElementById('reject-modal').style.display = 'none';
+}
+
+async function confirmReject() {
+  const reason = document.getElementById('reject-reason').value.trim();
+  if (!reason) {
+    showToast('Please provide a reason for rejection', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: rejectingDraftKey, action: 'reject', reason })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Draft rejected');
+      closeRejectModal();
+      loadDrafts();
+    } else {
+      showToast(data.error || 'Failed to reject draft', 'error');
+    }
+  } catch (err) {
+    showToast('Failed to reject draft: ' + err.message, 'error');
+  }
+}
+
+// Queue
+async function loadQueue() {
+  const container = document.getElementById('queue-container');
+  try {
+    const res = await fetch('/api/queue');
+    const data = await res.json();
+
+    if (!data.papers || data.papers.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📚</div><h3>Queue is empty</h3><p>No papers in the editorial queue.</p></div>';
+      return;
+    }
+
+    container.innerHTML = '<div class="queue-list">' + data.papers.map((paper, i) => \`
+      <div class="queue-item" onclick="toggleQueueItem(this)">
+        <div class="queue-item-header">
+          <div class="queue-item-main">
+            <div class="queue-item-title">
+              <span>\${i + 1}.</span>
+              \${paper.title}
+            </div>
+            <div class="badges">
+              \${(paper.taxonomy || []).map(t => '<span class="badge badge-purple">' + t + '</span>').join('')}
+              \${(paper.badges || []).map(b => '<span class="badge badge-blue">' + b + '</span>').join('')}
+            </div>
+            <div class="queue-item-source">\${paper.source || 'Unknown source'}</div>
+          </div>
+          <div class="queue-item-score">\${paper.score || 0}</div>
+          <span class="expand-icon">▼</span>
+        </div>
+        <div class="queue-item-body">
+          <p class="queue-item-abstract">\${paper.abstract || 'No abstract available.'}</p>
+          \${paper.scoring ? \`
+            <div class="score-breakdown">
+              \${Object.entries(paper.scoring).map(([k, v]) => \`
+                <div class="score-item">
+                  <div class="score-item-label">\${k}</div>
+                  <div class="score-item-value">\${v}</div>
+                </div>
+              \`).join('')}
+            </div>
+          \` : ''}
+          <button class="btn btn-primary" onclick="event.stopPropagation(); generatePodcast('\${paper.id}')">
+            🎙️ Generate Podcast
+          </button>
+        </div>
+      </div>
+    \`).join('') + '</div>';
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Failed to load queue</h3><p>' + err.message + '</p></div>';
+  }
+}
+
+function toggleQueueItem(el) {
+  el.classList.toggle('expanded');
+}
+
+async function generatePodcast(paperId) {
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paperId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Podcast generation queued');
+    } else {
+      showToast(data.error || 'Failed to queue generation', 'error');
+    }
+  } catch (err) {
+    showToast('Failed to queue generation: ' + err.message, 'error');
+  }
+}
+
+// Submissions
+async function loadSubmissions() {
+  const container = document.getElementById('submissions-container');
+  try {
+    const res = await fetch('/api/submissions');
+    const data = await res.json();
+
+    if (!data.submissions || data.submissions.length === 0) {
+      container.innerHTML = '<div class="empty-state" style="padding: 2rem 0;"><p style="color: var(--text-secondary);">No submissions yet</p></div>';
+      return;
+    }
+
+    container.innerHTML = data.submissions.map(sub => \`
+      <div class="submission-item">
+        <div class="submission-url">\${sub.url}</div>
+        <div class="submission-time">\${new Date(sub.timestamp).toLocaleString()}</div>
+      </div>
+    \`).join('');
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><p style="color: var(--danger);">Failed to load submissions</p></div>';
+  }
+}
+
+async function handleSubmit(e) {
+  e.preventDefault();
+  const urls = document.getElementById('urls').value.trim().split('\\n').filter(u => u.trim());
+
+  if (urls.length === 0) {
+    showToast('Please enter at least one URL', 'error');
+    return;
+  }
+
+  // Basic URL validation
+  const validUrlPattern = /^https?:\\/\\/.+/;
+  const invalidUrls = urls.filter(u => !validUrlPattern.test(u.trim()));
+  if (invalidUrls.length > 0) {
+    showToast('Invalid URL format detected', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Papers submitted successfully');
+      document.getElementById('urls').value = '';
+      loadSubmissions();
+    } else {
+      showToast(data.error || 'Failed to submit papers', 'error');
+    }
+  } catch (err) {
+    showToast('Failed to submit: ' + err.message, 'error');
+  }
+}
+
+// Issues
+async function loadIssues() {
+  const container = document.getElementById('issues-container');
+  try {
+    const res = await fetch('/api/issues');
+    const data = await res.json();
+
+    if (!data.issues || data.issues.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💬</div><h3>No open issues</h3><p>All community issues have been addressed.</p></div>';
+      return;
+    }
+
+    container.innerHTML = data.issues.map(issue => \`
+      <div class="issue-item">
+        <div class="issue-header">
+          <div class="issue-title">
+            <a href="\${issue.html_url}" target="_blank">\${issue.title}</a>
+            <span class="issue-number">#\${issue.number}</span>
+          </div>
+        </div>
+        <div class="issue-labels">
+          \${(issue.labels || []).map(label => \`
+            <span class="issue-label" style="background: #\${label.color}22; color: #\${label.color};">\${label.name}</span>
+          \`).join('')}
+        </div>
+        <div class="issue-meta">
+          Opened by \${issue.user?.login || 'unknown'} • \${new Date(issue.created_at).toLocaleDateString()}
+        </div>
+      </div>
+    \`).join('');
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Failed to load issues</h3><p>' + err.message + '</p></div>';
+  }
+}
+`;
+
+// ============================================================================
+// WORKER HANDLER
+// ============================================================================
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // CORS headers for API
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    try {
+      // API Routes
+      if (path.startsWith('/api/')) {
+        const apiResponse = await handleAPI(path, request, env);
+        return new Response(JSON.stringify(apiResponse), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      // Page Routes
+      let html;
+      switch (path) {
+        case '/':
+          const stats = await getDashboardStats(env);
+          html = baseHTML('Dashboard', dashboardPage(stats), 'dashboard');
+          break;
+        case '/drafts':
+          html = baseHTML('Drafts', draftsPage(), 'drafts');
+          break;
+        case '/queue':
+          html = baseHTML('Queue', queuePage(), 'queue');
+          break;
+        case '/submit':
+          html = baseHTML('Submit', submitPage(), 'submit');
+          break;
+        case '/issues':
+          html = baseHTML('Issues', issuesPage(), 'issues');
+          break;
+        default:
+          html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '');
+      }
+
+      return new Response(html, {
+        headers: { 'Content-Type': 'text/html' }
+      });
+
+    } catch (error) {
+      console.error('Worker error:', error);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }
+};
+
+// ============================================================================
+// API HANDLERS
+// ============================================================================
+async function handleAPI(path, request, env) {
+  switch (path) {
+    case '/api/drafts':
+      return await getDrafts(env);
+
+    case '/api/queue':
+      return await getQueue(env);
+
+    case '/api/submissions':
+      return await getSubmissions(env);
+
+    case '/api/issues':
+      return await getIssues();
+
+    case '/api/submit':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await submitPapers(request, env);
+
+    case '/api/review':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await reviewDraft(request, env);
+
+    case '/api/generate':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await generatePodcast(request, env);
+
+    default:
+      return { error: 'Not found' };
+  }
+}
+
+// Dashboard stats
+async function getDashboardStats(env) {
+  const stats = {
+    pendingDrafts: 0,
+    queueSize: 0,
+    submissions: 0,
+    openIssues: 0
+  };
+
+  try {
+    // Count drafts
+    const drafts = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    stats.pendingDrafts = drafts.objects.filter(o => o.key.endsWith('.mp3')).length;
+
+    // Count queue
+    const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');
+    if (queueData) {
+      const queue = await queueData.json();
+      stats.queueSize = queue.papers?.length || 0;
+    }
+
+    // Count submissions
+    const submissions = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+    stats.submissions = submissions.objects.length;
+
+    // Count open issues (from GitHub)
+    try {
+      const issuesRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues?state=open&per_page=100`, {
+        headers: { 'User-Agent': 'AI-Post-Transformers-Admin' }
+      });
+      if (issuesRes.ok) {
+        const issues = await issuesRes.json();
+        stats.openIssues = issues.length;
+      }
+    } catch (e) {
+      // Ignore GitHub errors for stats
+    }
+  } catch (e) {
+    console.error('Stats error:', e);
+  }
+
+  return stats;
+}
+
+// Get drafts from PODCAST_BUCKET
+async function getDrafts(env) {
+  try {
+    const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    const drafts = [];
+
+    for (const obj of list.objects) {
+      if (!obj.key.endsWith('.mp3')) continue;
+
+      // Try to get metadata
+      const metaKey = obj.key.replace('.mp3', '.json');
+      let meta = {};
+      try {
+        const metaObj = await env.PODCAST_BUCKET.get(metaKey);
+        if (metaObj) {
+          meta = await metaObj.json();
+        }
+      } catch (e) {
+        // No metadata file
+      }
+
+      const filename = obj.key.split('/').pop();
+      drafts.push({
+        key: obj.key,
+        title: meta.title || filename.replace('.mp3', ''),
+        date: meta.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
+        duration: meta.duration || 'Unknown',
+        description: meta.description || '',
+        audioUrl: `${PODCAST_DOMAIN}/${obj.key}`
+      });
+    }
+
+    return { drafts };
+  } catch (error) {
+    return { error: error.message, drafts: [] };
+  }
+}
+
+// Get editorial queue
+async function getQueue(env) {
+  try {
+    const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');
+    if (!queueData) {
+      return { papers: [] };
+    }
+    const queue = await queueData.json();
+    return { papers: queue.papers || [] };
+  } catch (error) {
+    return { error: error.message, papers: [] };
+  }
+}
+
+// Get submissions
+async function getSubmissions(env) {
+  try {
+    const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+    const submissions = [];
+
+    for (const obj of list.objects) {
+      try {
+        const data = await env.ADMIN_BUCKET.get(obj.key);
+        if (data) {
+          const sub = await data.json();
+          if (sub.urls) {
+            for (const url of sub.urls) {
+              submissions.push({ url, timestamp: sub.timestamp });
+            }
+          }
+        }
+      } catch (e) {
+        // Skip invalid entries
+      }
+    }
+
+    // Sort by timestamp descending
+    submissions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return { submissions: submissions.slice(0, 50) };
+  } catch (error) {
+    return { error: error.message, submissions: [] };
+  }
+}
+
+// Get GitHub issues
+async function getIssues() {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues?state=open&per_page=50`, {
+      headers: { 'User-Agent': 'AI-Post-Transformers-Admin' }
+    });
+
+    if (!res.ok) {
+      return { error: 'Failed to fetch issues', issues: [] };
+    }
+
+    const issues = await res.json();
+    return { issues };
+  } catch (error) {
+    return { error: error.message, issues: [] };
+  }
+}
+
+// Submit papers
+async function submitPapers(request, env) {
+  try {
+    const { urls } = await request.json();
+
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return { error: 'No URLs provided' };
+    }
+
+    // Validate URLs
+    const validUrlPattern = /^https?:\/\/.+/;
+    for (const url of urls) {
+      if (!validUrlPattern.test(url)) {
+        return { error: `Invalid URL: ${url}` };
+      }
+    }
+
+    const timestamp = new Date().toISOString();
+    const key = `submissions/${timestamp.replace(/[:.]/g, '-')}.json`;
+
+    await env.ADMIN_BUCKET.put(key, JSON.stringify({
+      urls,
+      timestamp,
+      status: 'pending'
+    }));
+
+    return { success: true, count: urls.length };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+// Review draft (approve/reject)
+async function reviewDraft(request, env) {
+  try {
+    const { key, action, reason } = await request.json();
+
+    if (!key || !action) {
+      return { error: 'Missing key or action' };
+    }
+
+    if (action !== 'approve' && action !== 'reject') {
+      return { error: 'Invalid action' };
+    }
+
+    const timestamp = new Date().toISOString();
+    const actionKey = `actions/review-${timestamp.replace(/[:.]/g, '-')}.json`;
+
+    await env.ADMIN_BUCKET.put(actionKey, JSON.stringify({
+      type: 'review',
+      draftKey: key,
+      action,
+      reason: reason || null,
+      timestamp
+    }));
+
+    return { success: true, action };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+// Queue podcast generation
+async function generatePodcast(request, env) {
+  try {
+    const { paperId } = await request.json();
+
+    if (!paperId) {
+      return { error: 'Missing paper ID' };
+    }
+
+    const timestamp = new Date().toISOString();
+    const actionKey = `actions/generate-${timestamp.replace(/[:.]/g, '-')}.json`;
+
+    await env.ADMIN_BUCKET.put(actionKey, JSON.stringify({
+      type: 'generate',
+      paperId,
+      timestamp,
+      status: 'queued'
+    }));
+
+    return { success: true, paperId };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
