@@ -1105,6 +1105,34 @@ function draftsPage() {
   `;
 }
 
+
+function queuePageWithData(data) {
+  const papers = data.papers || [];
+  if (papers.length === 0) {
+    return `<div class="page-header"><h1>Editorial Queue</h1><p>Papers ranked by the editorial scoring algorithm</p></div>
+    <div class="card"><div class="empty-state"><div class="empty-state-icon">📊</div><h3>Queue is empty</h3><p>Run <code>make queue</code> in the podcast repo to generate the editorial queue, then upload queue.json to the admin bucket.</p></div></div>
+    <div class="card" style="margin-top:1rem"><h3>How to populate</h3><pre style="background:var(--background);padding:1rem;border-radius:8px;font-size:0.813rem;overflow-x:auto">cd ~/devel/ai-post-transformers
+source .venv/bin/activate
+make queue
+# Then upload queue/queue.json to podcast-admin R2 bucket</pre></div>`;
+  }
+
+  const cards = papers.map((p, i) => `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3 style="margin:0 0 4px">#${i+1} ${p.title || 'Untitled'}</h3>
+          <div style="color:var(--text-secondary);font-size:0.813rem">${p.authors || ''} · ${p.date || ''}</div>
+        </div>
+        <span style="font-weight:700;color:var(--accent)">${(p.score || 0).toFixed(2)}</span>
+      </div>
+      <p style="color:var(--text-secondary);font-size:0.875rem;margin:0.5rem 0">${(p.abstract || '').substring(0, 300)}${(p.abstract || '').length > 300 ? '...' : ''}</p>
+    </div>
+  `).join('');
+
+  return `<div class="page-header"><h1>Editorial Queue</h1><p>${papers.length} papers ranked</p></div>${cards}`;
+}
+
 function queuePage() {
   return `
     <div class="page-header">
@@ -1382,6 +1410,33 @@ Other ideas:
       loadSubmissions();
     </script>
   `;
+}
+
+
+function issuesPageWithData(data) {
+  const issues = data.issues || [];
+  if (issues.length === 0) {
+    return `<div class="page-header"><h1>Community Issues</h1><p>Issues from <a href="https://github.com/mcgrof/ai-post-transformers/issues" target="_blank">GitHub</a></p></div>
+    <div class="card"><div class="empty-state"><div class="empty-state-icon">📝</div><h3>No open issues</h3><p><a href="https://github.com/mcgrof/ai-post-transformers/issues/new" target="_blank">Create one on GitHub</a></p></div></div>`;
+  }
+
+  const cards = issues.map(i => `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3 style="margin:0 0 4px"><a href="${i.html_url}" target="_blank" style="color:var(--accent);text-decoration:none">#${i.number} ${i.title}</a></h3>
+          <div style="color:var(--text-secondary);font-size:0.813rem">
+            by ${i.user?.login || 'unknown'} · ${new Date(i.created_at).toLocaleDateString()}
+            ${i.comments > 0 ? ' · 💬 ' + i.comments : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:4px">${(i.labels || []).map(l => '<span class="badge" style="background:' + (l.color ? '#' + l.color + '33' : 'var(--surface)') + ';color:' + (l.color ? '#' + l.color : 'var(--text)') + ';font-size:0.7rem;padding:2px 6px;border-radius:4px">' + l.name + '</span>').join('')}</div>
+      </div>
+      ${i.body ? '<p style="color:var(--text-secondary);font-size:0.875rem;margin:0.5rem 0 0">' + (i.body.substring(0, 200) + (i.body.length > 200 ? '...' : '')) + '</p>' : ''}
+    </div>
+  `).join('');
+
+  return `<div class="page-header"><h1>Community Issues</h1><p>${issues.length} open issues from <a href="https://github.com/mcgrof/ai-post-transformers/issues" target="_blank">GitHub</a></p></div>${cards}`;
 }
 
 function issuesPage() {
@@ -1733,7 +1788,8 @@ export default {
           html = baseHTML('Drafts', draftsPageWithData(draftsData), 'drafts');
           break;
         case '/queue':
-          html = baseHTML('Queue', queuePage(), 'queue');
+          const queueData = await getQueue(env);
+          html = baseHTML('Queue', queuePageWithData(queueData), 'queue');
           break;
         case '/conferences':
           html = baseHTML('Conferences', conferencesPage(), 'conferences');
@@ -1742,7 +1798,8 @@ export default {
           html = baseHTML('Submit', submitPage(), 'submit');
           break;
         case '/issues':
-          html = baseHTML('Issues', issuesPage(), 'issues');
+          const issuesData = await getIssues();
+          html = baseHTML('Issues', issuesPageWithData(issuesData), 'issues');
           break;
         default:
           if (confMatch) {
