@@ -918,7 +918,15 @@ function baseHTML(title, content, activePage) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} - AI Post Transformers Admin</title>
-  <style>${styles}</style>
+  <style>${styles}
+    .conference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+    .conference-card { display: block; padding: 1.25rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: inherit; transition: border-color 0.2s; }
+    .conference-card:hover { border-color: var(--accent); }
+    .conf-badge { display: inline-block; background: #c9302c; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .conference-card h3 { margin: 4px 0; font-size: 1.1rem; }
+    .conference-card p { color: var(--text-secondary); font-size: 0.813rem; margin: 4px 0; }
+    .conf-count { color: var(--accent); font-size: 0.813rem; font-weight: 600; }
+</style>
 </head>
 <body>
   <header>
@@ -1081,11 +1089,74 @@ function queuePage() {
   `;
 }
 
+
+function conferenceFAST26Page() {
+  return `
+    <div class="page-header">
+      <h1 style="display:flex;align-items:center;gap:12px">
+        <span style="background:#c9302c;color:white;padding:4px 12px;border-radius:6px;font-size:0.7em;font-weight:700;letter-spacing:1px">USENIX</span>
+        FAST '26
+      </h1>
+      <p>File and Storage Technologies — 24th USENIX Conference</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem">
+        <div>
+          <div style="font-size:2rem;font-weight:700;color:var(--accent)">6</div>
+          <div style="color:var(--text-secondary);font-size:0.813rem">Papers Submitted</div>
+        </div>
+        <div>
+          <div style="font-size:2rem;font-weight:700;color:var(--warning)" id="fast26-generated">0</div>
+          <div style="color:var(--text-secondary);font-size:0.813rem">Episodes Generated</div>
+        </div>
+        <div>
+          <div style="font-size:2rem;font-weight:700;color:var(--success)" id="fast26-published">0</div>
+          <div style="color:var(--text-secondary);font-size:0.813rem">Published</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem">
+      <h2>Conference Papers</h2>
+      <p style="color:var(--text-secondary);margin-bottom:1rem">Episodes from USENIX FAST'26 papers — storage systems, file systems, and caching.</p>
+      <div id="fast26-episodes">
+        <div class="empty-state">
+          <div class="empty-state-icon">📄</div>
+          <h3>Episodes generating...</h3>
+          <p>FAST'26 paper podcasts are being generated. Check back soon.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem">
+      <h2>Submitted Papers</h2>
+      <table style="width:100%;font-size:0.875rem">
+        <thead>
+          <tr style="text-align:left;color:var(--text-secondary)">
+            <th style="padding:8px 0">Paper</th>
+            <th>Authors</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-yang.pdf" target="_blank">fast26-liu-yang</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-hu-shipeng.pdf" target="_blank">fast26-hu-shipeng</a></td><td>Hu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-zheng.pdf" target="_blank">fast26-zheng</a></td><td>Zheng et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-qingyuan.pdf" target="_blank">fast26-liu-qingyuan</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-an.pdf" target="_blank">fast26-an</a></td><td>An et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+          <tr><td style="padding:6px 0"><a href="https://www.usenix.org/system/files/fast26-liu-yubo.pdf" target="_blank">fast26-liu-yubo</a></td><td>Liu et al.</td><td><span class="badge badge-pending">Generating</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function submitPage() {
   return `
     <div class="page-header">
       <h1>Submit Papers</h1>
-      <p>Add paper URLs for processing</p>
+      <p>Add paper URLs for podcast generation — include special instructions for how episodes should be produced</p>
     </div>
 
     <div class="card">
@@ -1094,14 +1165,38 @@ function submitPage() {
         <div class="form-group">
           <label for="urls">Paper URLs (one per line)</label>
           <textarea id="urls" placeholder="https://arxiv.org/abs/2401.12345
-https://arxiv.org/pdf/2401.12345.pdf
+https://www.usenix.org/system/files/fast26-example.pdf
 https://example.com/paper.pdf" rows="6"></textarea>
         </div>
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="instructions">Special Instructions (optional)</label>
+          <textarea id="instructions" placeholder="Example: These papers are from USENIX FAST'26. Use the prefix 'FAST26:' in the episode title. Cover them serially so later episodes can reference earlier ones by title. Create a conference page to track all FAST26 episodes together.
+
+Other ideas:
+• Group related papers into a series
+• Request specific analysis angles
+• Ask for cross-references to prior episodes
+• Specify a conference or workshop theme" rows="6" style="font-size: 0.875rem;"></textarea>
+        </div>
         <p style="color: var(--text-secondary); font-size: 0.813rem; margin-bottom: 1rem;">
-          Accepts: arXiv PDF links, arXiv abstract pages, direct PDF URLs, HTML paper pages
+          <strong>Accepts:</strong> arXiv PDFs, arXiv abstract pages, USENIX/ACM/IEEE paper PDFs, direct PDF URLs, HTML paper pages.<br>
+          <strong>Instructions:</strong> Add context like conference names, series ordering, title prefixes, or analysis focus. Papers from the same submission are processed together.
         </p>
         <button type="submit" class="btn btn-primary">Submit Papers</button>
       </form>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem;">
+      <h2>Conference Pages</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1rem;">Track all episodes from a conference or event in one place.</p>
+      <div class="conference-grid">
+        <a href="/conference/fast26" class="conference-card">
+          <div class="conf-badge">USENIX</div>
+          <h3>FAST '26</h3>
+          <p>File and Storage Technologies</p>
+          <span class="conf-count" id="fast26-count">0 episodes</span>
+        </a>
+      </div>
     </div>
 
     <div class="card" style="margin-top: 1.5rem;">
@@ -1374,7 +1469,7 @@ async function handleSubmit(e) {
     const res = await fetch('/api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls })
+      body: JSON.stringify({ urls, instructions: document.getElementById('instructions').value.trim() || null })
     });
     const data = await res.json();
     if (data.success) {
@@ -1471,6 +1566,9 @@ export default {
           break;
         case '/issues':
           html = baseHTML('Issues', issuesPage(), 'issues');
+          break;
+        case '/conference/fast26':
+          html = baseHTML('FAST 26', conferenceFAST26Page(), 'submit');
           break;
         default:
           html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '');
