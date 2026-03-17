@@ -1106,32 +1106,64 @@ function draftsPage() {
 }
 
 
+
+
 function queuePageWithData(data) {
-  const papers = data.papers || [];
-  if (papers.length === 0) {
-    return `<div class="page-header"><h1>Editorial Queue</h1><p>Papers ranked by the editorial scoring algorithm</p></div>
-    <div class="card"><div class="empty-state"><div class="empty-state-icon">📊</div><h3>Queue is empty</h3><p>Run <code>make queue</code> in the podcast repo to generate the editorial queue, then upload queue.json to the admin bucket.</p></div></div>
-    <div class="card" style="margin-top:1rem"><h3>How to populate</h3><pre style="background:var(--background);padding:1rem;border-radius:8px;font-size:0.813rem;overflow-x:auto">cd ~/devel/ai-post-transformers
-source .venv/bin/activate
-make queue
-# Then upload queue/queue.json to podcast-admin R2 bucket</pre></div>`;
-  }
-
-  const cards = papers.map((p, i) => `
-    <div class="card" style="margin-bottom:1rem">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <h3 style="margin:0 0 4px">#${i+1} ${p.title || 'Untitled'}</h3>
-          <div style="color:var(--text-secondary);font-size:0.813rem">${p.authors || ''} · ${p.date || ''}</div>
-        </div>
-        <span style="font-weight:700;color:var(--accent)">${(p.score || 0).toFixed(2)}</span>
+  return `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h1>Editorial Queue</h1>
+        <p>Shared with <a href="https://podcast.do-not-panic.com/queue.html" target="_blank">public queue</a> — admin controls below</p>
       </div>
-      <p style="color:var(--text-secondary);font-size:0.875rem;margin:0.5rem 0">${(p.abstract || '').substring(0, 300)}${(p.abstract || '').length > 300 ? '...' : ''}</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="document.getElementById('queue-frame').contentWindow.location.reload()">↻ Refresh</button>
+        <a href="https://podcast.do-not-panic.com/queue.html" target="_blank" class="btn btn-secondary">Open Public ↗</a>
+      </div>
     </div>
-  `).join('');
 
-  return `<div class="page-header"><h1>Editorial Queue</h1><p>${papers.length} papers ranked</p></div>${cards}`;
+    <div class="card" style="padding:0;overflow:hidden;border-radius:12px">
+      <iframe id="queue-frame" src="https://podcast.do-not-panic.com/queue.html" 
+        style="width:100%;height:80vh;border:none;border-radius:12px" 
+        loading="lazy"></iframe>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem">
+      <h2>Admin Actions</h2>
+      <p style="color:var(--text-secondary);margin-bottom:1rem">Select papers from the queue above, then use these controls:</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success" onclick="showToast('Enter an arXiv ID or paper title to generate')">🎙️ Generate Podcast</button>
+        <button class="btn btn-warning" onclick="showToast('Defer moves a paper to next cycle')">⏸️ Defer</button>
+        <button class="btn btn-danger" onclick="showToast('Skip permanently removes from queue')">⏭️ Skip</button>
+        <button class="btn btn-primary" onclick="showToast('Pin keeps a paper at the top')">📌 Pin to Top</button>
+      </div>
+      <div style="margin-top:1rem">
+        <label style="color:var(--text-secondary);font-size:0.813rem;display:block;margin-bottom:4px">Quick Generate — paste arXiv URL:</label>
+        <div style="display:flex;gap:8px">
+          <input id="quick-gen-url" placeholder="https://arxiv.org/pdf/2401.12345" style="flex:1;padding:8px 12px;background:var(--background);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.875rem">
+          <button class="btn btn-success" onclick="quickGenerate()">Generate</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    async function quickGenerate() {
+      const url = document.getElementById('quick-gen-url').value.trim();
+      if (!url) { showToast('Enter a URL', 'error'); return; }
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({urls: [url], action: 'generate'}),
+          credentials: 'same-origin'
+        });
+        showToast('Queued for generation!');
+        document.getElementById('quick-gen-url').value = '';
+      } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+    }
+    </script>
+  `;
 }
+
 
 function queuePage() {
   return `
@@ -1477,6 +1509,10 @@ function showToast(message, type = 'success') {
 
 // Drafts
 async function loadDrafts() {
+  // Skip if server-rendered content already present
+  const dc = document.getElementById("drafts-container");
+  if (!dc || !dc.querySelector(".loading")) return;
+
   const container = document.getElementById('drafts-container');
   try {
     const res = await fetch('/api/drafts', {credentials: 'same-origin'});
@@ -1577,6 +1613,10 @@ async function confirmReject() {
 
 // Queue
 async function loadQueue() {
+  // Skip if server-rendered content already present
+  const qc = document.getElementById("queue-container");
+  if (!qc || !qc.querySelector(".loading")) return;
+
   const container = document.getElementById('queue-container');
   try {
     const res = await fetch('/api/queue', {credentials: 'same-origin'});
@@ -1710,6 +1750,10 @@ async function handleSubmit(e) {
 
 // Issues
 async function loadIssues() {
+  // Skip if server-rendered content already present
+  const ic = document.getElementById("issues-container");
+  if (!ic || !ic.querySelector(".loading")) return;
+
   const container = document.getElementById('issues-container');
   try {
     const res = await fetch('/api/issues', {credentials: 'same-origin'});
