@@ -1053,10 +1053,12 @@ function draftsPageWithData(data) {
         <span class="badge badge-pending">Pending Review</span>
       </div>
       <p style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0">${d.description || ''}</p>
-      <div style="margin:0.75rem 0">
-        <audio controls preload="none" style="width:100%;height:40px">
+      <div style="margin:0.75rem 0;display:flex;align-items:center;gap:8px">
+        <button onclick="var a=this.parentElement.querySelector('audio');a.currentTime=Math.max(0,a.currentTime-15)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text);font-size:0.8rem" title="Rewind 15s">⏪15</button>
+        <audio controls preload="metadata" style="flex:1;height:40px">
           <source src="${d.audioUrl}" type="audio/mpeg">
         </audio>
+        <button onclick="var a=this.parentElement.querySelector('audio');a.currentTime=Math.min(a.duration,a.currentTime+15)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text);font-size:0.8rem" title="Forward 15s">15⏩</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:0.75rem">
         <button class="btn btn-success" onclick="approveDraft('${d.key}')">✓ Approve</button>
@@ -2127,28 +2129,28 @@ async function submitPapers(request, env) {
 // Review draft (approve/reject)
 async function reviewDraft(request, env) {
   try {
-    const { key, action, reason } = await request.json();
-
-    if (!key || !action) {
-      return { error: 'Missing key or action' };
-    }
-
-    if (action !== 'approve' && action !== 'reject') {
-      return { error: 'Invalid action' };
-    }
-
-    const timestamp = new Date().toISOString();
-    const actionKey = `actions/review-${timestamp.replace(/[:.]/g, '-')}.json`;
-
-    await env.ADMIN_BUCKET.put(actionKey, JSON.stringify({
-      type: 'review',
-      draftKey: key,
-      action,
-      reason: reason || null,
-      timestamp
+    const body = await request.json();
+    const { key, action, reason } = body;
+    const ts = Date.now();
+    
+    // Write review (append-only, race-free)
+    const reviewKey = `reviews/${key.replace(/\//g, '_')}/${ts}.json`;
+    await env.ADMIN_BUCKET.put(reviewKey, JSON.stringify({
+      key, action, reason: reason || '',
+      timestamp: new Date().toISOString(),
     }));
-
-    return { success: true, action };
+    
+    // If approved, add to publish queue
+    if (action === 'approve') {
+      const queueKey = `publish-queue/${ts}-${key.replace(/\//g, '_')}.json`;
+      await env.ADMIN_BUCKET.put(queueKey, JSON.stringify({
+        key, 
+        approved_at: new Date().toISOString(),
+        status: 'pending_publish'
+      }));
+    }
+    
+    return { success: true, action, key };
   } catch (error) {
     return { error: error.message };
   }
