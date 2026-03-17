@@ -634,32 +634,42 @@ def generate_index(config, feed_path=None):
         ((ym, eps) for ym, eps in by_month.items() if ym != (0, 0)),
         key=lambda x: x[0], reverse=True)
     archive_links = []
+    feed_months = set()
     for (year, month), month_eps in sorted_months:
+        feed_months.add((year, month))
         label = f"{calendar.month_name[month]} {year}"
         href = f"{year}/{month:02d}/index.html"
         archive_links.append(
             f'<a class="archive-link" href="{href}">'
             f'{html.escape(label)} '
             f'<span class="ep-count">({len(month_eps)})</span></a>')
+
+    # Add legacy archive months that aren't already covered by feed episodes
+    legacy_months_path = Path("/tmp/r2_archive_months.json")
+    if legacy_months_path.exists():
+        try:
+            legacy_months = json.loads(legacy_months_path.read_text())
+            for yr, mo in sorted(legacy_months, reverse=True):
+                if (yr, mo) not in feed_months:
+                    label = f"{calendar.month_name[mo]} {yr}"
+                    href = f"{yr}/{mo:02d}/index.html"
+                    archive_links.append(
+                        f'<a class="archive-link" href="{href}">'
+                        f'{html.escape(label)}</a>')
+        except Exception:
+            pass
+
+    # Sort all archive links newest first
+    archive_links.sort(key=lambda x: x, reverse=True)
     archive_html = "\n    ".join(archive_links)
 
-    # Load legacy episodes from R2 slug list
+    # Load legacy episodes from R2 slug list for search index
     legacy_slugs = _load_legacy_slugs()
     # Filter out slugs that already exist in feed episodes
     feed_slugs = {ep.get("slug", "") for ep in episodes}
     legacy_slugs = [s for s in legacy_slugs if s not in feed_slugs]
     legacy_slugs.sort()
     legacy_count = len(legacy_slugs)
-
-    # Build legacy archive HTML (alphabetical list linking to episodes/{slug}/)
-    legacy_links = []
-    for slug in legacy_slugs:
-        title = _title_from_slug(slug)
-        href = f"episodes/{slug}/"
-        legacy_links.append(
-            f'<a class="legacy-link" href="{href}">'
-            f'{html.escape(title)}</a>')
-    legacy_html = "\n    ".join(legacy_links)
 
     count = total + legacy_count
 
@@ -1050,34 +1060,11 @@ a:hover {{ text-decoration: underline; }}
   font-size: 0.75rem;
 }}
 
-/* --- Legacy archive --- */
-.legacy-section {{
-  border-top: 1px solid #222;
-}}
-.legacy-title {{
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #999;
-  margin-bottom: 1rem;
-}}
-.legacy-grid {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}}
-.legacy-link {{
-  display: inline-block;
-  padding: 0.3rem 0.7rem;
-  background: #1a1a1a;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  color: #888;
-  transition: background 0.2s, color 0.2s;
-}}
-.legacy-link:hover {{
-  background: #2a2a2a;
-  text-decoration: none;
-  color: #ccc;
+/* --- Archive hint --- */
+.archive-hint {{
+  margin-top: 1rem;
+  font-size: 0.82rem;
+  color: #666;
 }}
 
 /* --- Suggest link --- */
@@ -1191,14 +1178,9 @@ a:hover {{ text-decoration: underline; }}
   <div class="archive-grid">
     {archive_html}
   </div>
+  <p class="archive-hint">Use search to find older topics by keyword.</p>
 </div>
 
-{f'''<div class="section legacy-section">
-  <div class="legacy-title">Legacy Episodes ({legacy_count})</div>
-  <div class="legacy-grid">
-    {legacy_html}
-  </div>
-</div>''' if legacy_count > 0 else ''}
 
 <div class="footer">
   {html.escape(show_title)}
