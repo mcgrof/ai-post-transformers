@@ -25,33 +25,72 @@ def get_api_key():
     return key
 
 
-def tts_segment(text, voice_id, output_path):
-    """Generate speech — tries ElevenLabs first, falls back to Piper."""
+_tts_config = None  # Module-level config for TTS backend selection
+
+
+def tts_segment(text, voice_id, output_path, config=None):
+    """Generate speech using configured TTS backend with fallback chain.
+
+    Backend selection (from config.yaml podcast.tts_backend):
+      - 'elevenlabs': Use ElevenLabs only
+      - 'kokoro': Use Kokoro only
+      - 'piper': Use Piper only
+      - 'auto' (default): Try ElevenLabs -> Kokoro -> Piper
+    """
+    global _tts_config
+    if config is not None:
+        _tts_config = config
+
+    backend = "auto"
+    if _tts_config:
+        backend = _tts_config.get("podcast", {}).get("tts_backend", "auto")
+
+    if backend == "piper":
+        return _tts_piper(text, voice_id, output_path)
+
+    if backend == "kokoro":
+        return _tts_kokoro(text, voice_id, output_path)
+
+    if backend == "elevenlabs":
+        return _tts_elevenlabs(text, voice_id, output_path)
+
+    # 'auto' mode: ElevenLabs -> Kokoro -> Piper fallback chain
     try:
-        key = get_api_key()
-        resp = requests.post(
-            f"{BASE_URL}/text-to-speech/{voice_id}",
-            headers={"xi-api-key": key, "Content-Type": "application/json"},
-            json={
-                "text": text,
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
-            },
-            stream=True
-        )
-        if resp.status_code == 200:
-            with open(output_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=4096):
-                    f.write(chunk)
-            return output_path
-        if "quota_exceeded" not in resp.text:
-            raise RuntimeError(f"TTS failed ({resp.status_code}): {resp.text[:200]}")
-        print(f"[TTS] ElevenLabs quota exceeded, falling back to Piper", file=sys.stderr)
+        return _tts_elevenlabs(text, voice_id, output_path)
     except Exception as e:
         if "quota_exceeded" not in str(e) and "API key" not in str(e):
             raise
-        print(f"[TTS] ElevenLabs unavailable, using Piper", file=sys.stderr)
+        print(f"[TTS] ElevenLabs unavailable, trying Kokoro", file=sys.stderr)
+
+    try:
+        return _tts_kokoro(text, voice_id, output_path)
+    except Exception as e:
+        print(f"[TTS] Kokoro failed ({e}), falling back to Piper", file=sys.stderr)
+
     return _tts_piper(text, voice_id, output_path)
+
+
+def _tts_elevenlabs(text, voice_id, output_path):
+    """Generate speech using ElevenLabs API."""
+    key = get_api_key()
+    resp = requests.post(
+        f"{BASE_URL}/text-to-speech/{voice_id}",
+        headers={"xi-api-key": key, "Content-Type": "application/json"},
+        json={
+            "text": text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+        },
+        stream=True
+    )
+    if resp.status_code == 200:
+        with open(output_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=4096):
+                f.write(chunk)
+        return output_path
+    if "quota_exceeded" in resp.text:
+        raise RuntimeError("quota_exceeded")
+    raise RuntimeError(f"TTS failed ({resp.status_code}): {resp.text[:200]}")
 
 
 def _tts_piper(text, voice_id, output_path):
@@ -78,6 +117,88 @@ def _tts_piper(text, voice_id, output_path):
     if os.path.exists(wav_path):
         os.unlink(wav_path)
     return output_path
+
+
+def _tts_kokoro(text, voice_id, output_path):
+    """Generate TTS using Kokoro via Docker.
+
+    Kokoro runs in a Docker container with Python 3.12. This function writes
+    a temporary Python script, executes it inside the container, and converts
+    the resulting wav to mp3.
+    """
+    import subprocess
+    import tempfile
+    import uuid
+
+    # Map ElevenLabs voice IDs to Kokoro voices
+    # Female voice IDs (Ada Shannon) -> af_kore, male -> bm_george
+    female_ids = {"HBQuDIqftrmAQQAHSWnF"}
+    kokoro_voice = "af_kore" if voice_id in female_ids else "bm_george"
+
+    # Create unique temp paths
+    script_id = uuid.uuid4().hex[:8]
+    script_path = f"/tmp/kokoro_tts_{script_id}.py"
+    wav_path = f"/tmp/kokoro_out_{script_id}.wav"
+
+    # Write the Python script for Kokoro
+    # Escape backslashes first, then quotes, to avoid double-escaping
+    escaped_text = text.replace("\\", "\\\\").replace('"', '\\"')
+    script_content = f'''#!/usr/bin/env python3
+import soundfile as sf
+from kokoro import KPipeline
+
+text = """{escaped_text}"""
+voice = "{kokoro_voice}"
+output_path = "{wav_path}"
+
+p = KPipeline(lang_code='a')  # American English
+audio_chunks = []
+for _, _, audio in p(text, voice=voice):
+    audio_chunks.append(audio.detach().cpu().numpy())
+
+import numpy as np
+full_audio = np.concatenate(audio_chunks)
+sf.write(output_path, full_audio, 24000)
+print(f"Wrote {{len(full_audio)}} samples to {{output_path}}")
+'''
+
+    try:
+        # Write script to /tmp (shared with container)
+        with open(script_path, "w") as f:
+            f.write(script_content)
+
+        # Run Kokoro via Docker
+        # sg docker -c 'docker run --rm -v /tmp:/tmp kokoro-tts python /tmp/script.py'
+        proc = subprocess.run(
+            ["sg", "docker", "-c",
+             f"docker run --rm -v /tmp:/tmp kokoro-tts python {script_path}"],
+            capture_output=True, text=True, timeout=300
+        )
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"Kokoro TTS failed: {proc.stderr[:200]}")
+
+        if not os.path.exists(wav_path):
+            raise RuntimeError(f"Kokoro TTS did not produce output: {wav_path}")
+
+        # Convert wav to mp3
+        conv_proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "64k", output_path],
+            capture_output=True, timeout=60
+        )
+        if conv_proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg conversion failed: {conv_proc.stderr[:200]}")
+
+        return output_path
+
+    finally:
+        # Cleanup temp files
+        for path in [script_path, wav_path]:
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -1414,7 +1535,8 @@ def create_podcast(text, config, covered_topics=None):
     import subprocess
 
     # Countdown: 3 (Hal), 2 (Ada), 1 (Hal)
-    tts_segment("three", voice_a, os.path.join(tmpdir, "countdown_3.mp3"))
+    # Pass config on first call to set module-level TTS backend
+    tts_segment("three", voice_a, os.path.join(tmpdir, "countdown_3.mp3"), config)
     tts_segment("two", voice_b, os.path.join(tmpdir, "countdown_2.mp3"))
     tts_segment("one", voice_a, os.path.join(tmpdir, "countdown_1.mp3"))
     time.sleep(0.3)
