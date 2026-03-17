@@ -26,23 +26,57 @@ def get_api_key():
 
 
 def tts_segment(text, voice_id, output_path):
-    """Generate speech for a single segment."""
-    key = get_api_key()
-    resp = requests.post(
-        f"{BASE_URL}/text-to-speech/{voice_id}",
-        headers={"xi-api-key": key, "Content-Type": "application/json"},
-        json={
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
-        },
-        stream=True
+    """Generate speech — tries ElevenLabs first, falls back to Piper."""
+    try:
+        key = get_api_key()
+        resp = requests.post(
+            f"{BASE_URL}/text-to-speech/{voice_id}",
+            headers={"xi-api-key": key, "Content-Type": "application/json"},
+            json={
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+            },
+            stream=True
+        )
+        if resp.status_code == 200:
+            with open(output_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=4096):
+                    f.write(chunk)
+            return output_path
+        if "quota_exceeded" not in resp.text:
+            raise RuntimeError(f"TTS failed ({resp.status_code}): {resp.text[:200]}")
+        print(f"[TTS] ElevenLabs quota exceeded, falling back to Piper", file=sys.stderr)
+    except Exception as e:
+        if "quota_exceeded" not in str(e) and "API key" not in str(e):
+            raise
+        print(f"[TTS] ElevenLabs unavailable, using Piper", file=sys.stderr)
+    return _tts_piper(text, voice_id, output_path)
+
+
+def _tts_piper(text, voice_id, output_path):
+    """Generate TTS using local Piper voices."""
+    import subprocess, os
+    # Female voice IDs (Ada Shannon)
+    female_ids = {"HBQuDIqftrmAQQAHSWnF"}
+    if voice_id in female_ids:
+        model = os.path.expanduser("~/.cache/huggingface/hub/models--rhasspy--piper-voices/"
+            "snapshots/834f23262168a7e809179465e4113f23f5a7d1f7/en/en_US/amy/medium/en_US-amy-medium.onnx")
+    else:
+        model = os.path.expanduser("~/devel/piper-voices/lessac.onnx")
+    wav_path = output_path + ".wav"
+    proc = subprocess.run(
+        ["piper", "--model", model, "--output_file", wav_path],
+        input=text, capture_output=True, text=True, timeout=120
     )
-    if resp.status_code != 200:
-        raise RuntimeError(f"TTS failed ({resp.status_code}): {resp.text[:200]}")
-    with open(output_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=4096):
-            f.write(chunk)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Piper TTS failed: {proc.stderr[:200]}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "64k", output_path],
+        capture_output=True, timeout=60
+    )
+    if os.path.exists(wav_path):
+        os.unlink(wav_path)
     return output_path
 
 
