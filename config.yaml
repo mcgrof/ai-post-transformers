@@ -101,6 +101,7 @@ image_generation:
     Professional tech-forward aesthetic.
 podcast:
   audio_dir: drafts
+  tts_backend: auto  # 'elevenlabs', 'kokoro', 'piper', or 'auto' (try in order)
   max_words: 3800
   max_words_multi: 4500
   min_minutes: 15
