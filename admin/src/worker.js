@@ -1109,46 +1109,79 @@ function draftsPage() {
 
 
 function queuePageWithData(data) {
-  return `
-    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
+  const papers = data.papers || {};
+  const sections = [
+    {key: 'bridge', label: '🌉 Bridge Papers', desc: 'Papers connecting memory/storage with broader AI interest'},
+    {key: 'public', label: '🌍 Public Interest', desc: 'High-impact papers for general AI audience'},
+    {key: 'memory', label: '💾 Memory / Storage', desc: 'Papers directly relevant to memory and storage systems'},
+    {key: 'monitor', label: '👀 Monitor', desc: 'Worth tracking, not yet podcast-ready'},
+    {key: 'deferred', label: '⏸️ Deferred', desc: 'Pushed to next cycle'},
+  ];
+
+  let totalPapers = 0;
+  sections.forEach(s => { totalPapers += (papers[s.key] || []).length; });
+
+  let html = `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
       <div>
         <h1>Editorial Queue</h1>
-        <p>Shared with <a href="https://podcast.do-not-panic.com/queue.html" target="_blank">public queue</a> — admin controls below</p>
+        <p>${totalPapers} papers scored and ranked by the editorial algorithm</p>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="document.getElementById('queue-frame').contentWindow.location.reload()">↻ Refresh</button>
-        <a href="https://podcast.do-not-panic.com/queue.html" target="_blank" class="btn btn-secondary">Open Public ↗</a>
+        <a href="https://podcast.do-not-panic.com/queue.html" target="_blank" class="btn btn-primary">📊 Full Queue ↗</a>
+        <a href="/submit" class="btn btn-secondary">+ Submit</a>
       </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;border-radius:12px">
-      <iframe id="queue-frame" src="https://podcast.do-not-panic.com/queue.html" 
-        style="width:100%;height:80vh;border:none;border-radius:12px" 
-        loading="lazy"></iframe>
-    </div>
-
-    <div class="card" style="margin-top:1.5rem">
-      <h2>Admin Actions</h2>
-      <p style="color:var(--text-secondary);margin-bottom:1rem">Select papers from the queue above, then use these controls:</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-success" onclick="showToast('Enter an arXiv ID or paper title to generate')">🎙️ Generate Podcast</button>
-        <button class="btn btn-warning" onclick="showToast('Defer moves a paper to next cycle')">⏸️ Defer</button>
-        <button class="btn btn-danger" onclick="showToast('Skip permanently removes from queue')">⏭️ Skip</button>
-        <button class="btn btn-primary" onclick="showToast('Pin keeps a paper at the top')">📌 Pin to Top</button>
+    <div class="card">
+      <label style="color:var(--text-secondary);font-size:0.813rem;display:block;margin-bottom:6px">Quick generate from URL:</label>
+      <div style="display:flex;gap:8px">
+        <input id="quick-gen-url" placeholder="https://arxiv.org/pdf/2401.12345" style="flex:1;padding:10px 14px;background:var(--background);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.875rem">
+        <button class="btn btn-success" onclick="quickGenerate()" style="white-space:nowrap">🎙️ Generate</button>
       </div>
-      <div style="margin-top:1rem">
-        <label style="color:var(--text-secondary);font-size:0.813rem;display:block;margin-bottom:4px">Quick Generate — paste arXiv URL:</label>
-        <div style="display:flex;gap:8px">
-          <input id="quick-gen-url" placeholder="https://arxiv.org/pdf/2401.12345" style="flex:1;padding:8px 12px;background:var(--background);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.875rem">
-          <button class="btn btn-success" onclick="quickGenerate()">Generate</button>
+    </div>`;
+
+  sections.forEach(s => {
+    const items = papers[s.key] || [];
+    if (items.length === 0) return;
+
+    html += `<div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <h2 style="margin:0">${s.label} <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${items.length})</span></h2>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">${s.desc}</p>
         </div>
-      </div>
-    </div>
+      </div>`;
 
-    <script>
+    items.forEach((p, i) => {
+      const title = p.title || 'Untitled';
+      const abstract = (p.abstract || '').substring(0, 200) + ((p.abstract || '').length > 200 ? '...' : '');
+      const arxivUrl = p.arxiv_id ? 'https://arxiv.org/abs/' + p.arxiv_id : '#';
+      const pdfUrl = p.arxiv_id ? 'https://arxiv.org/pdf/' + p.arxiv_id : '#';
+
+      html += `
+        <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <div style="flex:1">
+              <a href="${arxivUrl}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:0.95rem">${title}</a>
+              <p style="color:var(--text-secondary);font-size:0.813rem;margin:4px 0 0">${abstract}</p>
+            </div>
+            <button class="btn btn-success" onclick="quickGenerateUrl('${pdfUrl}')" style="font-size:0.75rem;padding:4px 10px;white-space:nowrap">🎙️</button>
+          </div>
+        </div>`;
+    });
+
+    html += '</div>';
+  });
+
+  html += `<script>
     async function quickGenerate() {
       const url = document.getElementById('quick-gen-url').value.trim();
       if (!url) { showToast('Enter a URL', 'error'); return; }
+      quickGenerateUrl(url);
+      document.getElementById('quick-gen-url').value = '';
+    }
+    async function quickGenerateUrl(url) {
       try {
         const res = await fetch('/api/generate', {
           method: 'POST',
@@ -1157,11 +1190,11 @@ function queuePageWithData(data) {
           credentials: 'same-origin'
         });
         showToast('Queued for generation!');
-        document.getElementById('quick-gen-url').value = '';
       } catch(e) { showToast('Failed: ' + e.message, 'error'); }
     }
-    </script>
-  `;
+  </script>`;
+
+  return html;
 }
 
 
@@ -2005,7 +2038,7 @@ async function getQueue(env) {
       return { papers: [] };
     }
     const queue = await queueData.json();
-    return { papers: queue.papers || [] };
+    return { papers: queue };
   } catch (error) {
     return { error: error.message, papers: [] };
   }
