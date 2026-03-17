@@ -12,6 +12,9 @@ from pathlib import Path
 
 from db import get_connection, init_db, list_podcasts
 
+# Path to cached legacy episode slugs (generated from R2 listing)
+LEGACY_SLUGS_PATH = Path("/tmp/r2_legacy_slugs.json")
+
 ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
 
 
@@ -39,6 +42,34 @@ def _slug_from_title(title):
     slug = re.sub(r'[\s-]+', '-', slug)
     slug = slug.strip('-')
     return slug[:80].rstrip('-') or 'episode'
+
+
+def _title_from_slug(slug):
+    """Convert a URL slug back to a display title.
+
+    Replaces hyphens with spaces and applies title case.
+    """
+    return slug.replace('-', ' ').title()
+
+
+def _load_legacy_slugs():
+    """Load legacy episode slugs from the cached JSON file.
+
+    Returns a list of slug strings. Returns empty list if file
+    doesn't exist or can't be parsed.
+    """
+    if not LEGACY_SLUGS_PATH.exists():
+        return []
+    try:
+        with open(LEGACY_SLUGS_PATH) as f:
+            slugs = json.load(f)
+        if isinstance(slugs, list):
+            return [s for s in slugs if isinstance(s, str)]
+        return []
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[RSS] Warning: Could not load legacy slugs: {e}",
+              file=sys.stderr)
+        return []
 
 
 def _parse_publish_date(date_str):
@@ -612,7 +643,25 @@ def generate_index(config, feed_path=None):
             f'<span class="ep-count">({len(month_eps)})</span></a>')
     archive_html = "\n    ".join(archive_links)
 
-    count = total
+    # Load legacy episodes from R2 slug list
+    legacy_slugs = _load_legacy_slugs()
+    # Filter out slugs that already exist in feed episodes
+    feed_slugs = {ep.get("slug", "") for ep in episodes}
+    legacy_slugs = [s for s in legacy_slugs if s not in feed_slugs]
+    legacy_slugs.sort()
+    legacy_count = len(legacy_slugs)
+
+    # Build legacy archive HTML (alphabetical list linking to episodes/{slug}/)
+    legacy_links = []
+    for slug in legacy_slugs:
+        title = _title_from_slug(slug)
+        href = f"episodes/{slug}/"
+        legacy_links.append(
+            f'<a class="legacy-link" href="{href}">'
+            f'{html.escape(title)}</a>')
+    legacy_html = "\n    ".join(legacy_links)
+
+    count = total + legacy_count
 
     # Build search index: all episodes with title, date, archive page link
     search_index = []
@@ -627,6 +676,16 @@ def generate_index(config, feed_path=None):
             "m": month_href,
             "a": ep.get("audio_url", ""),
             "s": ep.get("slug", ""),
+        })
+    # Add legacy episodes to search index
+    for slug in legacy_slugs:
+        title = _title_from_slug(slug)
+        search_index.append({
+            "t": title,
+            "d": "Legacy",
+            "m": "",
+            "a": "",
+            "s": slug,
         })
     search_json = json.dumps(search_index, separators=(",", ":"))
 
@@ -991,6 +1050,36 @@ a:hover {{ text-decoration: underline; }}
   font-size: 0.75rem;
 }}
 
+/* --- Legacy archive --- */
+.legacy-section {{
+  border-top: 1px solid #222;
+}}
+.legacy-title {{
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #999;
+  margin-bottom: 1rem;
+}}
+.legacy-grid {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}}
+.legacy-link {{
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  background: #1a1a1a;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #888;
+  transition: background 0.2s, color 0.2s;
+}}
+.legacy-link:hover {{
+  background: #2a2a2a;
+  text-decoration: none;
+  color: #ccc;
+}}
+
 /* --- Suggest link --- */
 .suggest-link {{
   display: inline-block;
@@ -1103,6 +1192,13 @@ a:hover {{ text-decoration: underline; }}
     {archive_html}
   </div>
 </div>
+
+{f'''<div class="section legacy-section">
+  <div class="legacy-title">Legacy Episodes ({legacy_count})</div>
+  <div class="legacy-grid">
+    {legacy_html}
+  </div>
+</div>''' if legacy_count > 0 else ''}
 
 <div class="footer">
   {html.escape(show_title)}
