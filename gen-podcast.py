@@ -427,9 +427,7 @@ def _publish_site(config):
     feed_dir = os.path.dirname(feed_path)
 
     static_files = [
-        # Prefer slim index2.html over generated index.html
-        ("index2.html" if os.path.exists(os.path.join(feed_dir, "index2.html")) else "index.html",
-         "index.html", "text/html"),
+        ("index.html", "index.html", "text/html"),
         ("sister-podcasts.html",      "sister-podcasts.html",      "text/html"),
         ("queue.html",                "queue.html",                "text/html"),
         ("queue.xml",                 "queue.xml",                 "application/xml"),
@@ -610,15 +608,11 @@ def _publish_episode(config, draft=None):
     feed_dir = os.path.dirname(feed_path)
     r2 = get_r2_client()
 
-    # Prefer slim index2.html if it exists, fall back to generated index.html
-    index2_path = os.path.join(feed_dir, "index2.html")
     index_path = os.path.join(feed_dir, "index.html")
-    chosen_index = index2_path if os.path.exists(index2_path) else index_path
-    if os.path.exists(chosen_index):
-        idx_url = upload_file(r2, chosen_index, "index.html",
+    if os.path.exists(index_path):
+        idx_url = upload_file(r2, index_path, "index.html",
                               content_type="text/html")
-        print(f"[Publish] Index: {idx_url} (from {os.path.basename(chosen_index)})",
-              file=sys.stderr)
+        print(f"[Publish] Index: {idx_url}", file=sys.stderr)
 
     bg_path = os.path.join(feed_dir, "images", "podcast-bg.png")
     if os.path.exists(bg_path):

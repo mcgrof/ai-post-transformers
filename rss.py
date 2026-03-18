@@ -386,6 +386,7 @@ def generate_feed(config):
     return str(feed_path)
 
 
+
 def _extract_episodes_from_feed(feed_path):
     """Parse a generated feed.xml and return episode dicts for HTML rendering.
 
@@ -579,17 +580,82 @@ def _render_card(ep, root_prefix="", episode_url=""):
 </div>"""
 
 
+def _generate_thumbnail(image_url, stem, output_dir):
+    """Generate a 128x128 WebP thumbnail from an episode image.
+
+    Args:
+        image_url: URL of the original image (on R2).
+        stem: File stem to use for thumbnail filename.
+        output_dir: Directory to write thumbnail to.
+
+    Returns:
+        Path to the generated thumbnail, or None on failure.
+    """
+    import subprocess
+    import tempfile
+    import urllib.request
+
+    if not image_url:
+        return None
+
+    # Download original image to temp file
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        urllib.request.urlretrieve(image_url, tmp_path)
+    except Exception as e:
+        print(f"[Thumb] Failed to download {image_url}: {e}", file=sys.stderr)
+        return None
+
+    # Generate thumbnail using ImageMagick
+    thumb_path = Path(output_dir) / "thumbs" / f"{stem}.webp"
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.run([
+            "magick", tmp_path, "-resize", "128x128",
+            "-quality", "80", str(thumb_path)
+        ], check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        print(f"[Thumb] ImageMagick failed for {stem}: {e}", file=sys.stderr)
+        os.unlink(tmp_path)
+        return None
+    except FileNotFoundError:
+        print("[Thumb] ImageMagick not found, skipping thumbnail generation",
+              file=sys.stderr)
+        os.unlink(tmp_path)
+        return None
+
+    os.unlink(tmp_path)
+    return thumb_path
+
+
+def _upload_thumbnail(thumb_path):
+    """Upload a thumbnail to R2 under thumbs/ prefix.
+
+    Returns the public URL, or None on failure.
+    """
+    try:
+        from r2_upload import get_r2_client, upload_file
+        r2 = get_r2_client()
+        r2_key = f"thumbs/{thumb_path.name}"
+        url = upload_file(r2, str(thumb_path), r2_key,
+                          content_type="image/webp")
+        return url
+    except Exception as e:
+        print(f"[Thumb] Upload failed for {thumb_path.name}: {e}",
+              file=sys.stderr)
+        return None
+
+
 def generate_index(config, feed_path=None):
-    """Generate index.html (latest 8 episodes) and per-month archive pages."""
+    """Generate slim index.html (Netflix-style grid) and per-month archives."""
     import calendar
     from collections import defaultdict
 
     spotify = config.get("spotify", {})
     show = spotify.get("show", {})
     show_title = show.get("title", "AI Post Transformers")
-    show_desc = show.get("description", "")
-    show_image = show.get("image_url", "")
-    anchor_rss = spotify.get("anchor_rss", "")
     github_repo = config.get("github", {}).get("repo", "")
 
     if feed_path is None:
@@ -614,12 +680,6 @@ def generate_index(config, feed_path=None):
             seen_slugs[slug] = 1
         ep["slug"] = slug
 
-    # Latest 8 for index
-    latest = episodes[:8]
-    cards_html = "\n".join(
-        _render_card(ep, episode_url=f"episodes/{ep['slug']}/")
-        for ep in latest)
-
     # Group all episodes by year/month for archive
     by_month = defaultdict(list)
     for ep in episodes:
@@ -637,12 +697,9 @@ def generate_index(config, feed_path=None):
     feed_months = set()
     for (year, month), month_eps in sorted_months:
         feed_months.add((year, month))
-        label = f"{calendar.month_name[month]} {year}"
+        label = f"{calendar.month_abbr[month]} {year}"
         href = f"{year}/{month:02d}/index.html"
-        archive_links.append(
-            f'<a class="archive-link" href="{href}">'
-            f'{html.escape(label)} '
-            f'<span class="ep-count">({len(month_eps)})</span></a>')
+        archive_links.append(f'<a href="{href}">{html.escape(label)}</a>')
 
     # Add legacy archive months that aren't already covered by feed episodes
     legacy_months_path = Path("/tmp/r2_archive_months.json")
@@ -651,16 +708,12 @@ def generate_index(config, feed_path=None):
             legacy_months = json.loads(legacy_months_path.read_text())
             for yr, mo in sorted(legacy_months, reverse=True):
                 if (yr, mo) not in feed_months:
-                    label = f"{calendar.month_name[mo]} {yr}"
+                    label = f"{calendar.month_abbr[mo]} {yr}"
                     href = f"{yr}/{mo:02d}/index.html"
-                    archive_links.append(
-                        f'<a class="archive-link" href="{href}">'
-                        f'{html.escape(label)}</a>')
+                    archive_links.append(f'<a href="{href}">{html.escape(label)}</a>')
         except Exception:
             pass
 
-    # Sort all archive links newest first
-    archive_links.sort(key=lambda x: x, reverse=True)
     archive_html = "\n    ".join(archive_links)
 
     # Load legacy episodes from R2 slug list for search index
@@ -673,31 +726,66 @@ def generate_index(config, feed_path=None):
 
     count = total + legacy_count
 
-    # Build search index: all episodes with title, date, archive page link
-    search_index = []
+    # Search index for legacy + current episodes
+    search_idx = []
     for ep in episodes:
-        dt = ep.get("date_dt")
-        month_href = ""
-        if dt:
-            month_href = f"{dt.year}/{dt.month:02d}/index.html"
-        search_index.append({
-            "t": ep["title"],
-            "d": ep["date"],
-            "m": month_href,
-            "a": ep.get("audio_url", ""),
+        search_idx.append({
+            "t": ep.get("title", ""),
+            "d": ep.get("date", ""),
             "s": ep.get("slug", ""),
+            "m": ep.get("audio_url", ""),
         })
-    # Add legacy episodes to search index
     for slug in legacy_slugs:
-        title = _title_from_slug(slug)
-        search_index.append({
-            "t": title,
+        search_idx.append({
+            "t": _title_from_slug(slug),
             "d": "Legacy",
-            "m": "",
-            "a": "",
             "s": slug,
+            "m": f"episodes/{slug}/",
         })
-    search_json = json.dumps(search_index, separators=(",", ":"))
+    search_json = json.dumps(search_idx)
+
+    # Latest 6 episodes for homepage (ordered by publish_date DESC)
+    # Episodes are already sorted from feed extraction
+    latest = episodes[:6]
+
+    # Generate slim card HTML for each episode
+    thumb_base = "https://podcast.do-not-panic.com/thumbs"
+    cards_html_parts = []
+    for ep in latest:
+        slug = ep.get("slug", "")
+        title = ep.get("title", "")
+        date = ep.get("date", "")
+        desc = ep.get("description", "")
+        # Strip HTML tags from description for data attribute
+        desc_plain = re.sub(r"<[^>]+>", "", desc)
+        desc_plain = html.unescape(desc_plain)[:200]
+
+        # Build thumbnail URL from image URL
+        # Extract stem from audio URL or image URL
+        img_url = ep.get("image_url", "")
+        thumb_url = ""
+        if img_url:
+            # Image filename is like: 2026-03-16-title-hash.png
+            img_name = os.path.basename(img_url)
+            stem = os.path.splitext(img_name)[0]
+            thumb_url = f"{thumb_base}/{stem}.webp"
+
+        # Search keywords
+        search_terms = title.lower()
+
+        card = f'''
+  <a class="card" href="episodes/{slug}/" data-t="{html.escape(search_terms)}" data-desc="{html.escape(desc_plain)}">
+    <img class="card-img" src="{html.escape(thumb_url)}" alt="" loading="lazy">
+    <div class="card-meta"><div class="card-title">{html.escape(title)}</div><div class="card-date">{html.escape(date)}</div></div>
+  </a>'''
+        cards_html_parts.append(card)
+
+    cards_html = "\n".join(cards_html_parts)
+
+    # GitHub link for nav
+    github_html = ""
+    if github_repo:
+        github_html = f'<a href="https://github.com/{html.escape(github_repo)}" target="_blank">GitHub</a>'
 
     page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -705,596 +793,97 @@ def generate_index(config, feed_path=None):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(show_title)}</title>
-<meta name="description" content="{html.escape(show_desc[:200])}">
 <style>
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-               Helvetica, Arial, sans-serif;
-  background: #141414;
-  color: #e5e5e5;
-  line-height: 1.5;
-  min-height: 100vh;
-}}
-a {{ color: #e50914; text-decoration: none; }}
-a:hover {{ text-decoration: underline; }}
-
-/* --- Hero --- */
-.hero {{
-  position: relative;
-  padding: 4rem 2rem 3rem;
-  text-align: center;
-  background: url("images/podcast-bg.png") center bottom / cover no-repeat,
-              linear-gradient(180deg, #1a1a2e 0%, #141414 100%);
-  overflow: hidden;
-}}
-.hero::before {{
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(20,20,20,0.45) 0%, #141414 100%),
-              radial-gradient(ellipse at 50% 0%, rgba(229,9,20,0.12) 0%, transparent 70%);
-  pointer-events: none;
-}}
-.hero-art {{
-  width: 220px; height: 220px;
-  border-radius: 16px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
-  margin-bottom: 1.5rem;
-  position: relative;
-}}
-.hero p {{
-  max-width: 580px;
-  margin: 0 auto 1.2rem;
-  color: #999;
-  font-size: 0.95rem;
-  position: relative;
-}}
-.hero-links {{
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  flex-wrap: wrap;
-  position: relative;
-}}
-.hero-links a {{
-  display: inline-block;
-  transition: transform 0.2s, opacity 0.2s;
-}}
-.hero-links a:hover {{
-  transform: scale(1.1);
-  opacity: 0.85;
-  text-decoration: none;
-}}
-.hero-links img {{
-  height: 180px;
-  width: auto;
-  border-radius: 8px;
-}}
-
-/* --- Grid --- */
-.section {{
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem;
-}}
-.section-title {{
-  font-size: 1.3rem;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 1.2rem;
-}}
-.grid {{
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 1.2rem;
-}}
-
-/* --- Card: fixed-size tile, overlay on hover --- */
-.card {{
-  position: relative;
-  border-radius: 6px;
-  overflow: visible;
-  cursor: pointer;
-}}
-.card-visual {{
-  position: relative;
-  aspect-ratio: 1 / 1;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #222;
-  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94),
-              box-shadow 0.3s ease;
-  z-index: 1;
-}}
-.card:hover .card-visual {{
-  transform: scale(1.05);
-  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
-  z-index: 10;
-  border-radius: 6px 6px 0 0;
-}}
-.card-img {{
-  width: 100%; height: 100%;
-  object-fit: cover;
-  transition: transform 0.4s ease;
-}}
-.card:hover .card-img {{ transform: scale(1.1); }}
-.card-img-placeholder {{
-  width: 100%; height: 100%;
-  background: linear-gradient(135deg, #1a1a2e, #2d2d44);
-}}
-.card-meta {{
-  position: relative;
-  padding: 0.6rem 0.5rem 0.3rem;
-  background: #1a1a1a;
-  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94);
-  z-index: 2;
-}}
-.card:hover .card-meta {{
-  transform: scale(1.05);
-  z-index: 11;
-}}
-.card-title {{
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #e5e5e5;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}}
-.card-date {{
-  font-size: 0.72rem;
-  color: #777;
-  margin-top: 0.15rem;
-}}
-.card-viz {{
-  display: block;
-  font-size: 0.7rem;
-  color: #5eeacd;
-  margin-top: 0.25rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}}
-.card-viz:hover {{
-  color: #fff;
-  text-decoration: underline;
-}}
-.card-viz-desc {{
-  font-size: 0.8rem;
-  margin-top: 0.6rem;
-  color: #5eeacd;
-}}
-.card-viz-desc a {{
-  color: #5eeacd;
-}}
-.card-viz-desc a:hover {{
-  color: #fff;
-}}
-
-/* Expanded body: wider centered overlay below the visual */
-.card-body {{
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  width: 520px;
-  max-width: 90vw;
-  background: #1c1c1c;
-  border-radius: 0 0 6px 6px;
-  padding: 1rem 1.2rem;
-  z-index: 9;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-  opacity: 0;
-  visibility: hidden;
-  transform: translate(-50%, -8px);
-  transform-origin: top center;
-  transition: opacity 0.25s ease, visibility 0.25s ease,
-              transform 0.25s cubic-bezier(.25,.46,.45,.94);
-  pointer-events: none;
-}}
-.card:hover .card-body,
-.card.active .card-body {{
-  opacity: 1;
-  visibility: visible;
-  transform: translate(-50%, 0);
-  pointer-events: auto;
-}}
-.card.active .card-visual {{
-  transform: scale(1.05);
-  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
-  z-index: 10;
-  border-radius: 6px 6px 0 0;
-}}
-.card.active .card-meta {{
-  transform: scale(1.05);
-  z-index: 11;
-}}
-.card-desc {{
-  font-size: 0.82rem;
-  color: #e5e5e5;
-  line-height: 1.6;
-  margin-bottom: 0.6rem;
-}}
-.card-sources {{
-  margin-top: 0.8rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid #333;
-  font-size: 0.75rem;
-  color: #999;
-  line-height: 1.7;
-}}
-.card-sources a {{
-  color: #7ab;
-  word-break: break-all;
-}}
-.card-sources a:hover {{ color: #e50914; }}
-.card-body audio {{
-  width: 100%;
-  height: 34px;
-  margin-bottom: 0.4rem;
-  border-radius: 4px;
-}}
-.card-links {{
-  display: flex;
-  gap: 1rem;
-  font-size: 0.75rem;
-}}
-.card-links a {{ color: #999; }}
-.card-links a:hover {{ color: #e50914; text-decoration: none; }}
-
-/* Last row: expand upward instead of downward to avoid overflow */
-.card.expand-up .card-body {{
-  top: auto;
-  bottom: 100%;
-  border-radius: 6px 6px 0 0;
-  transform-origin: bottom center;
-  transform: translate(-50%, 8px);
-}}
-.card.expand-up:hover .card-body,
-.card.expand-up.active .card-body {{
-  transform: translate(-50%, 0);
-}}
-.card.expand-up:hover .card-visual,
-.card.expand-up.active .card-visual {{
-  border-radius: 0 0 6px 6px;
-}}
-
-/* --- Search --- */
-.search-section {{
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem 0;
-}}
-.search-box {{
-  width: 100%;
-  padding: 0.7rem 1rem 0.7rem 2.6rem;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
-  color: #e5e5e5;
-  font-size: 0.9rem;
-  outline: none;
-  transition: border-color 0.2s;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: 0.8rem center;
-}}
-.search-box:focus {{
-  border-color: #e50914;
-}}
-.search-box::placeholder {{
-  color: #666;
-}}
-.search-results {{
-  margin-top: 0.8rem;
-  display: none;
-}}
-.search-results.active {{
-  display: block;
-}}
-.search-result {{
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 0.5rem 0.6rem;
-  border-radius: 4px;
-  transition: background 0.15s;
-}}
-.search-result:hover {{
-  background: #1a1a1a;
-}}
-.search-result-title {{
-  font-size: 0.85rem;
-  color: #e5e5e5;
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}}
-.search-result-title a {{
-  color: #e5e5e5;
-}}
-.search-result-title a:hover {{
-  color: #e50914;
-}}
-.search-result-date {{
-  font-size: 0.72rem;
-  color: #777;
-  margin-left: 1rem;
-  white-space: nowrap;
-}}
-.search-count {{
-  font-size: 0.78rem;
-  color: #666;
-  margin-bottom: 0.5rem;
-}}
-
-/* --- Archive --- */
-.archive-section {{
-  border-top: 1px solid #222;
-}}
-.archive-grid {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-}}
-.archive-link {{
-  display: inline-block;
-  padding: 0.4rem 0.9rem;
-  background: #1a1a1a;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #ccc;
-  transition: background 0.2s;
-}}
-.archive-link:hover {{
-  background: #2a2a2a;
-  text-decoration: none;
-  color: #fff;
-}}
-.ep-count {{
-  color: #666;
-  font-size: 0.75rem;
-}}
-
-/* --- Archive hint --- */
-.archive-hint {{
-  margin-top: 1rem;
-  font-size: 0.82rem;
-  color: #666;
-}}
-
-/* --- Suggest link --- */
-.suggest-link {{
-  display: inline-block;
-  margin-top: 0.8rem;
-  font-size: 0.85rem;
-  color: #777;
-  position: relative;
-}}
-.suggest-link:hover {{ color: #e50914; }}
-
-/* --- Footer --- */
-.footer {{
-  text-align: center;
-  padding: 2rem;
-  color: #555;
-  font-size: 0.78rem;
-  border-top: 1px solid #222;
-  margin-top: 0;
-}}
-
-@media (max-width: 600px) {{
-  .hero {{ padding: 2.5rem 1rem 2rem; }}
-  .hero-art {{ width: 160px; height: 160px; }}
-  .hero-links img {{ height: 120px; }}
-  .grid {{
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 0.8rem;
-  }}
-  /* Mobile: card body hidden by default, shown on tap via .active */
-  .card-body {{
-    position: fixed;
-    top: auto;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    max-width: 100vw;
-    max-height: 70vh;
-    overflow-y: auto;
-    border-radius: 12px 12px 0 0;
-    transform: translateY(100%);
-    opacity: 0;
-    visibility: hidden;
-    z-index: 1000;
-    pointer-events: none;
-    transition: transform 0.3s ease, opacity 0.25s ease,
-                visibility 0.25s ease;
-  }}
-  .card.active .card-body {{
-    transform: translateY(0);
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-  }}
-  .card-overlay {{
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    z-index: 999;
-  }}
-  .card.active + .card-overlay,
-  .card-overlay.active {{
-    display: block;
-  }}
-  .card-visual {{ border-radius: 6px; }}
-  .card:hover .card-visual {{ transform: none; box-shadow: none;
-    border-radius: 6px; }}
-  .card:hover .card-meta {{ transform: none; }}
-  .card:hover .card-body {{ transform: translateY(100%);
-    opacity: 0; visibility: hidden; }}
-  .card.active .card-body,
-  .card.active:hover .card-body {{ transform: translateY(0);
-    opacity: 1; visibility: visible; pointer-events: auto; }}
-}}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #141414; color: #e0e0e0; line-height: 1.6; }}
+.hero {{ position: relative; padding: 3rem 2rem 2rem; text-align: center; background: url("images/podcast-bg-sm.webp") center bottom / cover no-repeat, linear-gradient(180deg, #1a1a2e 0%, #141414 100%); overflow: visible; }}
+.hero::before {{ content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20,20,20,0.45) 0%, #141414 100%), radial-gradient(ellipse at 50% 0%, rgba(229,9,20,0.12) 0%, transparent 70%); pointer-events: none; }}
+.hero * {{ position: relative; }}
+.hero h1 {{ font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem; }}
+.hero .tagline {{ color: #999; font-size: 0.85rem; max-width: 460px; margin: 0 auto 0.8rem; }}
+.hero-nav {{ display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }}
+.hero-nav a, .hero-nav .dd-btn {{ color: #aaa; text-decoration: none; font-size: 0.78rem; padding: 0.25rem 0.6rem; border: 1px solid #333; border-radius: 20px; cursor: pointer; transition: all 0.15s; display: inline-block; background: none; font-family: inherit; }}
+.hero-nav a:hover, .hero-nav .dd-btn:hover {{ color: #fff; border-color: #e50914; }}
+.dd-wrap {{ position: relative; display: inline-block; }}
+.dd-menu {{ display: none; position: absolute; top: calc(100% + 8px); left: 0; background: #1c1c2e; border: 1px solid #555; border-radius: 10px; padding: 0.5rem 0; min-width: 160px; box-shadow: 0 12px 32px rgba(0,0,0,0.9); z-index: 9999; overflow: visible !important; }}
+.dd-menu.open {{ display: block !important; }}
+.dd-menu a {{ display: block; padding: 0.6rem 1.2rem; color: #ddd; text-decoration: none; font-size: 0.9rem; border: none; border-radius: 0; }}
+.dd-menu a:hover, .dd-menu a:active {{ background: #333; color: #fff; }}
+.search-wrap {{ max-width: 800px; margin: 0 auto; padding: 1.2rem 1.5rem 0; }}
+.search-wrap input {{ width: 100%; background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 8px; padding: 0.5rem 0.9rem; color: #e0e0e0; font-size: 0.85rem; outline: none; }}
+.search-wrap input:focus {{ border-color: #e50914; }}
+.search-wrap input::placeholder {{ color: #555; }}
+.section-title {{ max-width: 800px; margin: 1.2rem auto 0.6rem; padding: 0 1.5rem; font-size: 1rem; font-weight: 700; color: #e0e0e0; }}
+.grid {{ max-width: 800px; margin: 0 auto; padding: 0 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; }}
+.card {{ background: #1a1a2a; border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; text-decoration: none; color: inherit; display: block; }}
+.card:hover {{ transform: scale(1.05); box-shadow: 0 8px 30px rgba(229,9,20,0.2); z-index: 10; }}
+.card-img {{ width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #222; }}
+.card-meta {{ padding: 0.5rem 0.6rem 0.6rem; }}
+.card-title {{ font-size: 0.78rem; font-weight: 600; color: #e0e0e0; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }}
+.card:hover .card-title {{ color: #fff; }}
+.card-date {{ font-size: 0.65rem; color: #666; margin-top: 0.25rem; }}
+.card-overlay {{ display: none; position: fixed; z-index: 100; background: #1c1c2e; border: 1px solid #333; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); max-width: 340px; padding: 1rem; pointer-events: none; }}
+.card-overlay.active {{ display: block; }}
+.card-overlay .ol-title {{ font-size: 0.9rem; font-weight: 700; margin-bottom: 0.3rem; }}
+.card-overlay .ol-date {{ font-size: 0.72rem; color: #888; margin-bottom: 0.5rem; }}
+.card-overlay .ol-desc {{ font-size: 0.78rem; color: #bbb; line-height: 1.4; max-height: 120px; overflow: hidden; }}
+.archive {{ max-width: 800px; margin: 1.5rem auto 0; padding: 0.5rem 1.5rem 0; }}
+.archive h2 {{ font-size: 0.8rem; font-weight: 600; color: #555; margin-bottom: 0.5rem; }}
+.archive-months {{ display: flex; flex-wrap: wrap; gap: 0.35rem; }}
+.archive-months a {{ font-size: 0.75rem; color: #888; text-decoration: none; padding: 0.2rem 0.5rem; border: 1px solid #252525; border-radius: 4px; transition: all 0.15s; }}
+.archive-months a:hover {{ border-color: #e50914; color: #fff; }}
+footer {{ max-width: 800px; margin: 1.5rem auto; padding: 1rem 1.5rem; border-top: 1px solid #1e1e1e; color: #444; font-size: 0.72rem; text-align: center; }}
+footer a {{ color: #666; text-decoration: none; }}
+footer a:hover {{ color: #ccc; }}
+.card.hidden {{ display: none; }}
+@media (max-width: 480px) {{ .grid {{ grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.6rem; }} }}
 </style>
 </head>
 <body>
-
 <div class="hero">
-  <img class="hero-art" src="{html.escape(show_image)}" alt="{html.escape(show_title)}" width="220" height="220">
-  <p>{html.escape(_truncate_sentence(show_desc, 200))}</p>
-  <div class="hero-links">
-    <a href="{html.escape(anchor_rss)}" title="Spotify"><img src="images/spotify.png" alt="Spotify"></a>
-    <a href="https://podcasts.apple.com/us/podcast/ai-post-transformers/id1835878324" title="Apple Podcasts"><img src="images/apple-podcasts.png" alt="Apple Podcasts"></a>
-    <a href="https://music.amazon.com/podcasts/bad34c42-bf59-4b9a-8085-5742fd63e011/ai-post-transformers" title="Amazon Podcasts"><img src="images/amazon-podcasts.png" alt="Amazon Podcasts"></a>
-    <a href="feed.xml" title="RSS Feed"><img src="images/rss-feed.png" alt="RSS Feed"></a>
-    <a href="queue.html" title="Paper Queue"><img src="images/paper-queue.png" alt="Paper Queue"></a>
-    <a href="sister-podcasts.html" title="Sister Podcasts"><img src="images/sister-podcasts.png" alt="Sister Podcasts"></a>
-{"" if not github_repo else f'    <a href="https://github.com/{html.escape(github_repo)}" title="GitHub"><img src="images/github.png" alt="GitHub"></a>'}
+  <h1>{html.escape(show_title)}</h1>
+  <p class="tagline">Honest analysis of AI research papers</p>
+  <div class="hero-nav">
+    <span class="dd-wrap">
+      <button class="dd-btn" id="btn-listen" onclick="event.stopPropagation(); document.getElementById('dd-listen').classList.toggle('open')">Listen &#9662;</button>
+      <div class="dd-menu" id="dd-listen">
+        <a href="https://open.spotify.com/show/48ygM4upvm6noxCbmhlz8i" target="_blank">&#127911; Spotify</a>
+        <a href="https://podcasts.apple.com/us/podcast/ai-post-transformers/id1835878324" target="_blank">&#127822; Apple Podcasts</a>
+        <a href="https://music.amazon.com/podcasts/bad34c42-bf59-4b9a-8085-5742fd63e011/ai-post-transformers" target="_blank">&#128309; Amazon Music</a>
+        <a href="/feed.xml" target="_blank">&#128225; RSS Feed</a>
+      </div>
+    </span>
+    <a href="/queue.html">Queue</a>
+    <a href="/sister-podcasts.html">More Shows</a>
+    {github_html}
   </div>
-{"" if not github_repo else f'  <a class="suggest-link" href="https://github.com/{html.escape(github_repo)}/issues/new?template=paper-submission.yml" target="_blank">Know a paper we should cover? Suggest it &rarr;</a>'}
 </div>
-
-<div class="search-section">
-  <input class="search-box" type="text" id="ep-search"
-         placeholder="Search {count} episodes..." autocomplete="off">
-  <div class="search-results" id="search-results"></div>
-</div>
-
-<div class="section" id="latest-section">
-  <div class="section-title">Latest Episodes</div>
-  <div class="grid">
+<div class="search-wrap"><input type="text" id="search" placeholder="Search episodes..." autocomplete="off"></div>
+<div class="section-title">Latest Episodes</div>
+<div class="grid" id="episodes">
 {cards_html}
-  </div>
 </div>
-
-<div class="section archive-section">
-  <div class="section-title">Archive ({count} episodes)</div>
-  <div class="archive-grid">
+<div id="overlay" class="card-overlay"></div>
+<div class="archive">
+  <h2>Archive</h2>
+  <div class="archive-months">
     {archive_html}
   </div>
-  <p class="archive-hint">Use search to find older topics by keyword.</p>
 </div>
-
-
-<div class="footer">
-  {html.escape(show_title)}
-</div>
-
-<div class="card-overlay" id="card-overlay"></div>
-
+<footer>{html.escape(show_title)} &middot; <a href="https://github.com/{html.escape(github_repo) if github_repo else 'mcgrof/ai-post-transformers'}">source</a> &middot; <a href="/feed.xml">rss</a></footer>
 <script>
-(function() {{
-  var cards = document.querySelectorAll('.card');
-  if (!cards.length) return;
-
-  // Desktop: tag last-row cards to expand upward
-  function tagLastRow() {{
-    cards.forEach(function(c) {{ c.classList.remove('expand-up'); }});
-    var lastTop = cards[cards.length - 1].getBoundingClientRect().top;
-    for (var i = cards.length - 1; i >= 0; i--) {{
-      if (Math.abs(cards[i].getBoundingClientRect().top - lastTop) < 5)
-        cards[i].classList.add('expand-up');
-      else break;
-    }}
-  }}
-  tagLastRow();
-
-  var overlay = document.getElementById('card-overlay');
-
-  function closeActive() {{
-    var active = document.querySelector('.card.active');
-    if (active) active.classList.remove('active');
-    overlay.classList.remove('active');
-  }}
-
-  // Click navigates to episode page; hover shows description (desktop only)
-  var isTouchDevice = 'ontouchstart' in window;
-  cards.forEach(function(card) {{
-    card.addEventListener('click', function(e) {{
-      if (e.target.closest('a, audio, button')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      var href = card.getAttribute('data-href');
-      if (href) {{ window.location.href = href; return; }}
-      // Fallback for legacy episodes without episode pages
-      var wasActive = card.classList.contains('active');
-      closeActive();
-      if (!wasActive) {{
-        card.classList.add('active');
-        overlay.classList.add('active');
-      }}
-    }});
-    if (!isTouchDevice) {{
-      card.addEventListener('mouseenter', function() {{
-        closeActive();
-        card.classList.add('active');
-        overlay.classList.add('active');
-      }});
-      card.addEventListener('mouseleave', function() {{
-        card.classList.remove('active');
-        overlay.classList.remove('active');
-      }});
-    }}
-  }});
-
-  overlay.addEventListener('click', closeActive);
-  document.addEventListener('keydown', function(e) {{
-    if (e.key === 'Escape') closeActive();
-  }});
-}})();
+document.getElementById('search').addEventListener('input', function() {{
+  const q = this.value.toLowerCase().trim();
+  document.querySelectorAll('.card').forEach(el => {{ el.classList.toggle('hidden', q.length > 0 && !el.dataset.t.includes(q)); }});
+}});
+const overlay = document.getElementById('overlay');
+let hoverTimeout;
+document.querySelectorAll('.card').forEach(card => {{
+  card.addEventListener('mouseenter', (e) => {{ clearTimeout(hoverTimeout); hoverTimeout = setTimeout(() => {{ const desc = card.dataset.desc || ''; if (!desc) return; overlay.innerHTML = '<div class="ol-title">' + card.querySelector('.card-title').textContent + '</div><div class="ol-desc">' + desc + '</div>'; const rect = card.getBoundingClientRect(); overlay.style.left = Math.min(rect.right + 10, window.innerWidth - 360) + 'px'; overlay.style.top = Math.max(rect.top, 10) + 'px'; overlay.classList.add('active'); }}, 400); }});
+  card.addEventListener('mouseleave', () => {{ clearTimeout(hoverTimeout); overlay.classList.remove('active'); }});
+}});
+document.addEventListener('click', function(e) {{ if (!e.target.closest('.dd-wrap')) {{ document.querySelectorAll('.dd-menu.open').forEach(function(m) {{ m.classList.remove('open'); }}); }} }});
 </script>
-
-<script>
-(function() {{
-  var idx = {search_json};
-  var box = document.getElementById('ep-search');
-  var results = document.getElementById('search-results');
-  var latest = document.getElementById('latest-section');
-  var archive = document.querySelector('.archive-section');
-
-  box.addEventListener('input', function() {{
-    var q = box.value.trim().toLowerCase();
-    if (q.length < 2) {{
-      results.classList.remove('active');
-      results.innerHTML = '';
-      if (latest) latest.style.display = '';
-      if (archive) archive.style.display = '';
-      return;
-    }}
-    var terms = q.split(/\\s+/);
-    var hits = idx.filter(function(e) {{
-      var t = e.t.toLowerCase();
-      return terms.every(function(w) {{ return t.indexOf(w) >= 0; }});
-    }});
-    if (latest) latest.style.display = 'none';
-    if (archive) archive.style.display = 'none';
-    if (!hits.length) {{
-      results.innerHTML = '<div class="search-count">No episodes found</div>';
-      results.classList.add('active');
-      return;
-    }}
-    var html = '<div class="search-count">' + hits.length + ' episode' +
-               (hits.length === 1 ? '' : 's') + ' found</div>';
-    hits.forEach(function(e) {{
-      var href = e.s ? 'episodes/' + e.s + '/' : (e.m || '#');
-      html += '<div class="search-result">' +
-              '<span class="search-result-title">' +
-              '<a href="' + href + '">' +
-              e.t.replace(/</g, '&lt;') + '</a></span>' +
-              '<span class="search-result-date">' + e.d + '</span></div>';
-    }});
-    results.innerHTML = html;
-    results.classList.add('active');
-  }});
-}})();
-</script>
-
 </body>
 </html>
 """
