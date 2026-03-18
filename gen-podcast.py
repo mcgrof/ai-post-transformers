@@ -543,8 +543,19 @@ def _publish_episode(config, draft=None):
     for k, v in urls.items():
         print(f"[Publish] {k}: {v}", file=sys.stderr)
 
+    # Set publish_date to today (not the draft creation date)
+    from datetime import date
+    today = date.today().isoformat()
+    pub_date = today
+    conn_pub = get_connection()
+    init_db(conn_pub)
+    conn_pub.execute("UPDATE podcasts SET publish_date = ? WHERE id = ?",
+                     (today, episode.get("id")))
+    conn_pub.commit()
+    conn_pub.close()
+    print(f"[Publish] publish_date set to {today}", file=sys.stderr)
+
     # Copy episode files to public/YYYY/MM/ and update DB paths
-    pub_date = episode.get("publish_date", "")
     if pub_date:
         year, month = pub_date.split("-")[:2]
         public_dir = Path(__file__).parent / "public" / year / month
