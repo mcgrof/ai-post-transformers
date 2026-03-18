@@ -41,8 +41,8 @@ def tts_segment(text, voice_id, output_path, config=None):
     if config is not None:
         _tts_config = config
 
-    backend = "auto"
-    if _tts_config:
+    backend = os.environ.get("PODCAST_TTS_BACKEND", "auto")
+    if backend == "auto" and _tts_config:
         backend = _tts_config.get("podcast", {}).get("tts_backend", "auto")
 
     if backend == "piper":
@@ -171,7 +171,7 @@ print(f"Wrote {{len(full_audio)}} samples to {{output_path}}")
         # sg docker -c 'docker run --rm -v /tmp:/tmp kokoro-tts python /tmp/script.py'
         proc = subprocess.run(
             ["sg", "docker", "-c",
-             f"docker run --rm -v /tmp:/tmp kokoro-tts python {script_path}"],
+             f"docker run --rm --entrypoint python3 -v /tmp:/tmp kokoro-tts {script_path}"],
             capture_output=True, text=True, timeout=300
         )
 

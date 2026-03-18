@@ -1052,13 +1052,18 @@ function draftsPageWithData(data) {
         </div>
         <span class="badge badge-pending">Pending Review</span>
       </div>
-      <p style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0">${d.description || ''}</p>
-      <div style="margin:0.75rem 0;display:flex;align-items:center;gap:8px">
-        <button onclick="var a=this.parentElement.querySelector('audio');a.currentTime=Math.max(0,a.currentTime-15)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text);font-size:0.8rem" title="Rewind 15s">⏪15</button>
+      <div style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0">
+        <p class="desc-preview">${(d.description || '').substring(0, 200)}${(d.description || '').length > 200 ? '...' : ''}</p>
+        ${(d.description || '').length > 200 ? `<p class="desc-full" style="display:none">${d.description}</p><button onclick="this.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.previousElementSibling.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.textContent=this.previousElementSibling.style.display==='none'?'Show more':'Show less'" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem">Show more</button>` : ''}
+      </div>
+      <div style="margin:0.75rem 0;display:flex;align-items:center;gap:4px">
+        <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
+        <button onclick="seekAudio(this,-15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 15s">⏪15s</button>
         <audio controls preload="metadata" style="flex:1;height:40px">
           <source src="${d.audioUrl}" type="audio/mpeg">
         </audio>
-        <button onclick="var a=this.parentElement.querySelector('audio');a.currentTime=Math.min(a.duration,a.currentTime+15)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text);font-size:0.8rem" title="Forward 15s">15⏩</button>
+        <button onclick="seekAudio(this,15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 15s">15s⏩</button>
+        <button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:0.75rem">
         <button class="btn btn-success" onclick="approveDraft('${d.key}')">✓ Approve</button>
@@ -1532,6 +1537,16 @@ function issuesPage() {
 const clientScript = `
 let rejectingDraftKey = null;
 
+// Audio seek helper
+function seekAudio(btn, delta) {
+  var a = btn.closest('.card, .draft-item').querySelector('audio');
+  if (!a) return;
+  var t = a.currentTime + delta;
+  if (t < 0) t = 0;
+  if (a.duration && isFinite(a.duration) && t > a.duration) t = a.duration;
+  a.currentTime = t;
+}
+
 // Toast notifications
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
@@ -1569,12 +1584,18 @@ async function loadDrafts() {
             </div>
           </div>
         </div>
-        <p class="draft-description">\${draft.description || 'No description available'}</p>
-        <div class="audio-player">
-          <audio controls preload="none">
+        <div class="draft-description">
+          <p class="desc-preview">\${(draft.description || 'No description available').substring(0, 200)}\${(draft.description || '').length > 200 ? '...' : ''}</p>
+          \${(draft.description || '').length > 200 ? \`<p class="desc-full" style="display:none">\${draft.description}</p><button onclick="this.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.previousElementSibling.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.textContent=this.previousElementSibling.style.display==='none'?'Show more':'Show less'" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem">Show more</button>\` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;margin:0.75rem 0">
+          <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
+          <button onclick="seekAudio(this,-15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 15s">⏪15s</button>
+          <audio controls preload="none" style="flex:1;height:40px">
             <source src="\${draft.audioUrl}" type="audio/mpeg">
-            Your browser does not support the audio element.
           </audio>
+          <button onclick="seekAudio(this,15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 15s">15s⏩</button>
+          <button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>
         </div>
         <div class="draft-actions">
           <button class="btn btn-success" onclick="approveDraft('\${draft.key}')">
@@ -2020,7 +2041,7 @@ async function getDrafts(env) {
         title: episode?.title || baseName,
         date: episode?.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
         duration: episode?.duration || 'Unknown',
-        description: episode?.description ? episode.description.substring(0, 200) + (episode.description.length > 200 ? '...' : '') : '',
+        description: episode?.description || '',
         audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
         episodeId: episode?.id || null
       });

@@ -18,3 +18,7 @@ inputs/
 viz/
 viz_cache/
 generated_covers/
+.wrangler/
+.cache/
+papers.db-shm
+papers.db-wal
