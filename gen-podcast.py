@@ -233,6 +233,18 @@ modes:
         "--top", type=int, metavar="N",
         help="limit listing to the latest N episodes",
     )
+    parser.add_argument(
+        "--llm-backend", choices=["openai", "claude-cli", "anthropic"],
+        help="override podcast.llm_backend for this run only",
+    )
+    parser.add_argument(
+        "--llm-model", metavar="MODEL",
+        help="override podcast.llm_model for this run only",
+    )
+    parser.add_argument(
+        "--analysis-model", metavar="MODEL",
+        help="override podcast.analysis_model for this run only",
+    )
 
     args = parser.parse_args()
 
@@ -460,8 +472,16 @@ def _publish_site(config):
         print(f"{_c('35', '[Site]')} {_c('1', 'images/github.png')}: "
               f"{_c('2', url)}", file=sys.stderr)
 
-    # Upload archive pages (YYYY/MM/index.html)
     import glob as globmod
+
+    # Upload generated thumbnails
+    for thumb in sorted(globmod.glob(os.path.join(feed_dir, "thumbs", "*.webp"))):
+        rel = os.path.relpath(thumb, feed_dir)
+        url = upload_file(r2, thumb, rel, content_type="image/webp")
+        print(f"{_c('35', '[Site]')} {_c('1', rel)}: "
+              f"{_c('2', url)}", file=sys.stderr)
+
+    # Upload archive pages (YYYY/MM/index.html)
     for archive_page in sorted(globmod.glob(
             os.path.join(feed_dir, "[0-9][0-9][0-9][0-9]",
                          "[0-9][0-9]", "index.html"))):
@@ -541,17 +561,18 @@ def _publish_episode(config, draft=None):
     for k, v in urls.items():
         print(f"[Publish] {k}: {v}", file=sys.stderr)
 
-    # Set publish_date to today (not the draft creation date)
-    from datetime import date
+    # Set publish_date to today and published_at to now (approval/publish ordering)
+    from datetime import date, datetime, timezone
     today = date.today().isoformat()
+    published_at = datetime.now(timezone.utc).isoformat()
     pub_date = today
     conn_pub = get_connection()
     init_db(conn_pub)
-    conn_pub.execute("UPDATE podcasts SET publish_date = ? WHERE id = ?",
-                     (today, episode.get("id")))
+    conn_pub.execute("UPDATE podcasts SET publish_date = ?, published_at = ? WHERE id = ?",
+                     (today, published_at, episode.get("id")))
     conn_pub.commit()
     conn_pub.close()
-    print(f"[Publish] publish_date set to {today}", file=sys.stderr)
+    print(f"[Publish] publish_date set to {today}; published_at={published_at}", file=sys.stderr)
 
     # Copy episode files to public/YYYY/MM/ and update DB paths
     if pub_date:
@@ -598,27 +619,35 @@ def _publish_episode(config, draft=None):
     except Exception as e:
         print(f"[Publish] Viz generation skipped: {e}", file=sys.stderr)
 
-    # Regenerate and upload RSS feed + index page
+    # Regenerate and upload RSS feed + site pages/assets
     feed_path = generate_feed(config)
     feed_url = upload_feed(feed_path)
     print(f"[Publish] Feed: {feed_url}", file=sys.stderr)
+    _publish_site(config)
 
-    # Upload index.html and static assets alongside feed
-    from r2_upload import get_r2_client, upload_file
-    feed_dir = os.path.dirname(feed_path)
-    r2 = get_r2_client()
-
-    index_path = os.path.join(feed_dir, "index.html")
-    if os.path.exists(index_path):
-        idx_url = upload_file(r2, index_path, "index.html",
-                              content_type="text/html")
-        print(f"[Publish] Index: {idx_url}", file=sys.stderr)
-
-    bg_path = os.path.join(feed_dir, "images", "podcast-bg.png")
-    if os.path.exists(bg_path):
-        bg_url = upload_file(r2, bg_path, "images/podcast-bg.png",
-                             content_type="image/png")
-        print(f"[Publish] Background: {bg_url}", file=sys.stderr)
+    # Remove from admin drafts + delete R2 draft mp3 now that publish succeeded
+    try:
+        import boto3, json, os as _os
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=_os.environ["AWS_ENDPOINT_URL"],
+            aws_access_key_id=_os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=_os.environ["AWS_SECRET_ACCESS_KEY"],
+            region_name="auto",
+        )
+        draft_id = episode.get("id")
+        manifest_obj = s3.get_object(Bucket="podcast-admin", Key="manifest.json")
+        manifest = json.loads(manifest_obj["Body"].read())
+        before = len(manifest.get("drafts", []))
+        manifest["drafts"] = [d for d in manifest.get("drafts", []) if d.get("id") != draft_id]
+        s3.put_object(Bucket="podcast-admin", Key="manifest.json", Body=json.dumps(manifest, indent=2), ContentType="application/json")
+        try:
+            s3.delete_object(Bucket="ai-post-transformers", Key=f"drafts/ep{draft_id}.mp3")
+        except Exception:
+            pass
+        print(f"[Publish] Admin manifest cleaned: {before} -> {len(manifest.get('drafts', []))}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Publish] Admin cleanup skipped: {e}", file=sys.stderr)
 
     print(f"\nPublished!", file=sys.stderr)
 

@@ -598,18 +598,30 @@ def _generate_thumbnail(image_url, stem, output_dir):
     if not image_url:
         return None
 
-    # Download original image to temp file
+    # Prefer local public image if available; fall back to downloading.
+    basename = os.path.basename(urllib.parse.urlparse(image_url).path)
+    local_candidate = None
+    m = re.match(r"(\d{4})-(\d{2})-", basename)
+    if m:
+        year, month = m.groups()
+        local_candidate = Path(output_dir).parent / "public" / year / month / basename
+
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp_path = tmp.name
-        urllib.request.urlretrieve(image_url, tmp_path)
+        if local_candidate and local_candidate.exists():
+            tmp_path = str(local_candidate)
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+            urllib.request.urlretrieve(image_url, tmp_path)
     except Exception as e:
-        print(f"[Thumb] Failed to download {image_url}: {e}", file=sys.stderr)
+        print(f"[Thumb] Failed to fetch {image_url}: {e}", file=sys.stderr)
         return None
 
     # Generate thumbnail using ImageMagick
     thumb_path = Path(output_dir) / "thumbs" / f"{stem}.webp"
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cleanup_tmp = not (local_candidate and str(local_candidate) == tmp_path)
 
     try:
         subprocess.run([
@@ -618,15 +630,18 @@ def _generate_thumbnail(image_url, stem, output_dir):
         ], check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         print(f"[Thumb] ImageMagick failed for {stem}: {e}", file=sys.stderr)
-        os.unlink(tmp_path)
+        if cleanup_tmp:
+            os.unlink(tmp_path)
         return None
     except FileNotFoundError:
         print("[Thumb] ImageMagick not found, skipping thumbnail generation",
               file=sys.stderr)
-        os.unlink(tmp_path)
+        if cleanup_tmp:
+            os.unlink(tmp_path)
         return None
 
-    os.unlink(tmp_path)
+    if cleanup_tmp:
+        os.unlink(tmp_path)
     return thumb_path
 
 
@@ -769,6 +784,15 @@ def generate_index(config, feed_path=None):
             img_name = os.path.basename(img_url)
             stem = os.path.splitext(img_name)[0]
             thumb_url = f"{thumb_base}/{stem}.webp"
+
+            # Best effort: generate local thumbnail so publish-site can upload it.
+            thumb_path = feed_path.parent / "thumbs" / f"{stem}.webp"
+            if not thumb_path.exists():
+                try:
+                    _generate_thumbnail(img_url, stem, feed_path.parent)
+                except Exception as e:
+                    print(f"[Thumb] Generation failed for {stem}: {e}",
+                          file=sys.stderr)
 
         # Search keywords
         search_terms = title.lower()
