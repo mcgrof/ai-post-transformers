@@ -889,6 +889,7 @@ footer a:hover {{ color: #ccc; }}
       </div>
     </span>
     <a href="/queue.html">Queue</a>
+    <a href="/conference/announcements/">Announcements</a>
     <span class="dd-wrap">
       <button class="dd-btn" id="btn-conferences" onclick="event.stopPropagation(); document.getElementById('dd-conferences').classList.toggle('open')">Conferences &#9662;</button>
       <div class="dd-menu" id="dd-conferences">
@@ -953,11 +954,41 @@ document.addEventListener('click', function(e) {{ if (!e.target.closest('.dd-wra
 def _generate_conference_pages(episodes, show_title, output_dir):
     """Generate public conference pages with the same look/feel as monthly archives."""
     conferences = {
+        "announcements": {
+            "name": "Announcements",
+            "episode_urls": [
+                "/episodes/cognizant-new-work-new-world-2026/",
+                "/episodes/were-open-source-new-home-visualizations-and-how-to-shape-our-queue/",
+                "/episodes/new-voices-same-nerds-the-kokoro-tts-episode/",
+            ],
+        },
         "neurips2025": {
             "name": "NeurIPS 2025",
             "episode_urls": [
-                "/episodes/why-cartridge-works-keys-as-routers-in-kv-caches/",
+                "/episodes/adaptive-compression-techniques-for-efficient-llm-inference/",
+                "/episodes/flashattention-4-conquers-asymmetric-gpu-hardware-scaling/",
+                "/episodes/long-context-dichotomy-of-findings-status-of-research/",
+                "/episodes/movement-pruning-adaptive-sparsity-by-fine-tuning/",
+                "/episodes/neurips-2025-a-mem-agentic-memory-for-llm-agents/",
+                "/episodes/neurips-2025-agentic-plan-caching-test-time-memory-for-fast-and-cost-efficient-l/",
+                "/episodes/neurips-2025-dynaact-large-language-model-reasoning-with-dynamic-action-spaces/",
+                "/episodes/neurips-2025-flashbias-fast-computation-of-attention-with-bias/",
+                "/episodes/neurips-2025-gated-attention-for-large-language-models-non-linearity-sparsity-an/",
+                "/episodes/neurips-2025-homogeneous-keys-heterogeneous-values/",
+                "/episodes/neurips-2025-kggen-extracting-knowledge-graphs-from-plain-text-with-language-mod/",
+                "/episodes/neurips-2025-l2m-mutual-information-scaling-law-for-long-context-language-modeli/",
+                "/episodes/neurips-2025-large-language-diffusion-models/",
+                "/episodes/neurips-2025-moba-mixture-of-block-attention-for-long-context-llms/",
+                "/episodes/neurips-2025-parallel-scaling-law-for-language-models/",
+                "/episodes/neurips-2025-reinforcement-learning-for-reasoning-in-large-language-models-with/",
+                "/episodes/neurips-2025-reward-reasoning-model/",
+                "/episodes/neurips-2025-self-adapting-language-models/",
+                "/episodes/neurips-2025-serl-self-play-reinforcement-learning-for-large-language-models-wit/",
+                "/episodes/neurips-2025-thinkless-llm-learns-when-to-think/",
+                "/episodes/random-walk-methods-for-graph-learning-and-networks/",
+                "/episodes/squisher-approximating-the-fisher-information-matrix-and-use-cases/",
                 "/episodes/tokenization-bias-the-hidden-flaw-breaking-language-models/",
+                "/episodes/why-cartridge-works-keys-as-routers-in-kv-caches/",
             ],
         },
         "icml2024": {
@@ -969,7 +1000,9 @@ def _generate_conference_pages(episodes, show_title, output_dir):
         "iclr2026": {
             "name": "ICLR 2026",
             "episode_urls": [
+                "/episodes/advancing-mechanistic-interpretability-with-sparse-autoencoders/",
                 "/episodes/gradient-descent-at-inference-time-for-llm-reasoning/",
+                "/episodes/tokenization-bias-the-hidden-flaw-breaking-language-models/",
             ],
         },
         "fast26": {
@@ -982,6 +1015,7 @@ def _generate_conference_pages(episodes, show_title, output_dir):
                 "/episodes/generative-file-systems-replacing-code-with-formal-specifications/",
                 "/episodes/xerxes-cxl-30-simulation-for-scalable-memory-systems/",
                 "/episodes/optimizing-mixture-of-block-attention-through-statistical-theory/",
+                "/episodes/dualpath-breaks-storage-bandwidth-bottleneck-in-agentic-inference/",
             ],
         },
     }
@@ -1262,6 +1296,7 @@ document.addEventListener('click', (e) => {
         conf_dir = Path(output_dir) / "conference" / conf_id
         conf_dir.mkdir(parents=True, exist_ok=True)
         conf_eps = [episode_by_url[url] for url in conf["episode_urls"] if url in episode_by_url]
+        conf_eps.sort(key=lambda e: e.get("date_dt") or datetime.min, reverse=True)
         cards = []
         for ep in conf_eps:
             episode_url = f"../../episodes/{ep['slug']}/"
