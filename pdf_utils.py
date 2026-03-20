@@ -59,14 +59,17 @@ def extract_text(pdf_path):
 
 
 def download_and_extract(url):
-    """Download a PDF from a URL and extract its text.
+    """Download a PDF from a URL (or read a local path) and extract its text.
 
     Args:
-        url: URL pointing to a PDF file.
+        url: URL pointing to a PDF file, or a local filesystem path.
 
     Returns:
         Extracted text as a string.
     """
+    local = Path(url).expanduser()
+    if local.is_file():
+        return extract_text(local)
     pdf_path = download_pdf(url)
     try:
         return extract_text(pdf_path)
