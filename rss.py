@@ -759,9 +759,9 @@ def generate_index(config, feed_path=None):
         })
     search_json = json.dumps(search_idx)
 
-    # Latest 6 episodes for homepage (ordered by publish_date DESC)
+    # Latest 8 episodes for homepage (ordered by publish_date DESC)
     # Episodes are already sorted from feed extraction
-    latest = episodes[:6]
+    latest = episodes[:8]
 
     # Generate slim card HTML for each episode
     thumb_base = "https://podcast.do-not-panic.com/thumbs"
@@ -810,6 +810,17 @@ def generate_index(config, feed_path=None):
     github_html = ""
     if github_repo:
         github_html = f'<a href="https://github.com/{html.escape(github_repo)}" target="_blank">GitHub</a>'
+
+    conferences = [
+        ("neurips2025", "NeurIPS 2025"),
+        ("icml2024", "ICML 2024"),
+        ("iclr2026", "ICLR 2026"),
+        ("fast26", "FAST '26"),
+    ]
+    conferences_html = "\n".join(
+        f'<a href="/conference/{html.escape(conf_id)}/">{html.escape(conf_name)}</a>'
+        for conf_id, conf_name in conferences
+    )
 
     page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -878,6 +889,12 @@ footer a:hover {{ color: #ccc; }}
       </div>
     </span>
     <a href="/queue.html">Queue</a>
+    <span class="dd-wrap">
+      <button class="dd-btn" id="btn-conferences" onclick="event.stopPropagation(); document.getElementById('dd-conferences').classList.toggle('open')">Conferences &#9662;</button>
+      <div class="dd-menu" id="dd-conferences">
+        {conferences_html}
+      </div>
+    </span>
     <a href="/sister-podcasts.html">More Shows</a>
     {github_html}
   </div>
@@ -927,7 +944,363 @@ document.addEventListener('click', function(e) {{ if (!e.target.closest('.dd-wra
     # Generate about page alongside index
     generate_about(config, feed_path.parent)
 
+    # Generate conference pages alongside index
+    _generate_conference_pages(episodes, show_title, feed_path.parent)
+
     return str(index_path)
+
+
+def _generate_conference_pages(episodes, show_title, output_dir):
+    """Generate public conference pages with the same look/feel as monthly archives."""
+    conferences = {
+        "neurips2025": {
+            "name": "NeurIPS 2025",
+            "episode_urls": [
+                "/episodes/why-cartridge-works-keys-as-routers-in-kv-caches/",
+                "/episodes/tokenization-bias-the-hidden-flaw-breaking-language-models/",
+            ],
+        },
+        "icml2024": {
+            "name": "ICML 2024",
+            "episode_urls": [
+                "/episodes/structured-state-space-duality-unifies-transformers-and-ssms/",
+            ],
+        },
+        "iclr2026": {
+            "name": "ICLR 2026",
+            "episode_urls": [
+                "/episodes/gradient-descent-at-inference-time-for-llm-reasoning/",
+            ],
+        },
+        "fast26": {
+            "name": "FAST '26",
+            "episode_urls": [
+                "/episodes/cacheslide-position-aware-kv-cache-reuse-for-agent-llms/",
+                "/episodes/bidaw-computation-storage-aware-kv-caching-for-llms/",
+                "/episodes/accelerating-llm-cold-starts-with-programmable-page-cache/",
+                "/episodes/solidattention-co-designing-sparse-attention-and-ssd-io/",
+                "/episodes/generative-file-systems-replacing-code-with-formal-specifications/",
+                "/episodes/xerxes-cxl-30-simulation-for-scalable-memory-systems/",
+                "/episodes/optimizing-mixture-of-block-attention-through-statistical-theory/",
+            ],
+        },
+    }
+
+    episode_by_url = {f"/episodes/{ep['slug']}/": ep for ep in episodes if ep.get('slug')}
+
+    archive_style = """*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto,
+               Helvetica, Arial, sans-serif;
+  background: #141414;
+  color: #e5e5e5;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+a { color: #e50914; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.page-header {
+  padding: 2rem 1.5rem 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.back { font-size: 0.85rem; color: #777; }
+.back:hover { color: #e5e5e5; }
+h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 0.8rem;
+}
+.section {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 2rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.2rem;
+}
+.card {
+  position: relative;
+  border-radius: 6px;
+  overflow: visible;
+  cursor: pointer;
+}
+.card-visual {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #222;
+  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94),
+              box-shadow 0.3s ease;
+  z-index: 1;
+}
+.card:hover .card-visual {
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
+  z-index: 10;
+  border-radius: 6px 6px 0 0;
+}
+.card-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+.card:hover .card-img { transform: scale(1.1); }
+.card-img-placeholder {
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, #1a1a2e, #2d2d44);
+}
+.card-meta {
+  position: relative;
+  padding: 0.6rem 0.5rem 0.3rem;
+  background: #1a1a1a;
+  transition: transform 0.3s cubic-bezier(.25,.46,.45,.94);
+  z-index: 2;
+}
+.card:hover .card-meta {
+  transform: scale(1.05);
+  z-index: 11;
+}
+.card-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e5e5e5;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-date {
+  font-size: 0.72rem;
+  color: #777;
+  margin-top: 0.15rem;
+}
+.card-viz {
+  display: block;
+  font-size: 0.7rem;
+  color: #5eeacd;
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-viz:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+.card-viz-desc {
+  font-size: 0.8rem;
+  margin-top: 0.6rem;
+  color: #5eeacd;
+}
+.card-viz-desc a {
+  color: #5eeacd;
+}
+.card-viz-desc a:hover {
+  color: #fff;
+}
+.card-body {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 520px;
+  max-width: 90vw;
+  background: #1c1c1c;
+  border-radius: 0 0 6px 6px;
+  padding: 1rem 1.2rem;
+  z-index: 9;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -8px);
+  transform-origin: top center;
+  transition: opacity 0.25s ease, visibility 0.25s ease,
+              transform 0.25s cubic-bezier(.25,.46,.45,.94);
+  pointer-events: none;
+}
+.card:hover .card-body,
+.card.active .card-body {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+.card.active .card-visual {
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.7);
+  z-index: 10;
+  border-radius: 6px 6px 0 0;
+}
+.card.active .card-meta {
+  transform: scale(1.05);
+  z-index: 11;
+}
+.card-desc {
+  font-size: 0.82rem;
+  color: #e5e5e5;
+  line-height: 1.6;
+  margin-bottom: 0.6rem;
+}
+.card-sources {
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #333;
+  font-size: 0.75rem;
+  color: #999;
+  line-height: 1.7;
+}
+.card-sources a {
+  color: #7ab;
+  word-break: break-all;
+}
+.card-sources a:hover { color: #e50914; }
+.card-body audio {
+  width: 100%;
+  height: 34px;
+  margin-bottom: 0.4rem;
+  border-radius: 4px;
+}
+.card-links {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+}
+.card-links a { color: #999; }
+.card-links a:hover { color: #e50914; text-decoration: none; }
+.card.expand-up .card-body {
+  top: auto;
+  bottom: 100%;
+  border-radius: 6px 6px 0 0;
+  transform-origin: bottom center;
+  transform: translate(-50%, 8px);
+}
+.card.expand-up:hover .card-body,
+.card.expand-up.active .card-body {
+  transform: translate(-50%, 0);
+}
+.card.expand-up:hover .card-visual,
+.card.expand-up.active .card-visual {
+  border-radius: 0 0 6px 6px;
+}
+.footer {
+  text-align: center;
+  padding: 2rem;
+  color: #555;
+  font-size: 0.78rem;
+  border-top: 1px solid #222;
+  margin-top: 0;
+}
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.8rem;
+  }
+  .card-body {
+    position: fixed;
+    top: auto; bottom: 0; left: 0;
+    width: 100%; max-width: 100vw; max-height: 70vh;
+    overflow-y: auto;
+    border-radius: 12px 12px 0 0;
+    transform: translateY(100%);
+    opacity: 0; visibility: hidden;
+    z-index: 1000; pointer-events: none;
+    transition: transform 0.3s ease, opacity 0.25s ease, visibility 0.25s ease;
+  }
+  .card.active .card-body {
+    transform: translateY(0);
+    opacity: 1; visibility: visible; pointer-events: auto;
+  }
+  .card-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 999;
+  }
+  .card.active + .card-overlay, .card-overlay.active { display: block; }
+  .card-visual { border-radius: 6px; }
+  .card:hover .card-visual { transform: none; box-shadow: none; border-radius: 6px; }
+  .card:hover .card-meta { transform: none; }
+  .card:hover .card-body { transform: translateY(100%); opacity: 0; visibility: hidden; }
+  .card.active .card-body,
+  .card.active:hover .card-body { transform: translateY(0); opacity: 1; visibility: visible; pointer-events: auto; }
+}
+"""
+
+    card_js = """<script>
+document.querySelectorAll('.card').forEach(card => {
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('audio, a')) return;
+    const wasActive = card.classList.contains('active');
+    document.querySelectorAll('.card.active').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.card-overlay.active').forEach(o => o.classList.remove('active'));
+    if (!wasActive) {
+      card.classList.add('active');
+      const overlay = card.nextElementSibling;
+      if (overlay && overlay.classList.contains('card-overlay')) overlay.classList.add('active');
+    }
+  });
+});
+document.querySelectorAll('.card-overlay').forEach(overlay => {
+  overlay.addEventListener('click', () => {
+    overlay.classList.remove('active');
+    const prev = overlay.previousElementSibling;
+    if (prev && prev.classList.contains('card')) prev.classList.remove('active');
+  });
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.card')) {
+    document.querySelectorAll('.card.active').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.card-overlay.active').forEach(o => o.classList.remove('active'));
+  }
+});
+</script>"""
+
+    for conf_id, conf in conferences.items():
+        conf_dir = Path(output_dir) / "conference" / conf_id
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        conf_eps = [episode_by_url[url] for url in conf["episode_urls"] if url in episode_by_url]
+        cards = []
+        for ep in conf_eps:
+            episode_url = f"../../episodes/{ep['slug']}/"
+            cards.append(_render_card(ep, root_prefix="../../", episode_url=episode_url))
+            cards.append('<div class="card-overlay"></div>')
+        cards_html = "\n".join(cards) if cards else '<p>No public episodes yet.</p>'
+        page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(conf['name'])} &mdash; {html.escape(show_title)}</title>
+<style>
+{archive_style}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <a class="back" href="../../index.html">&larr; All episodes</a>
+  <h1>{html.escape(conf['name'])}</h1>
+</div>
+
+<div class="section">
+  <div class="grid">
+{cards_html}
+  </div>
+</div>
+
+<div class="footer">
+  {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
+</div>
+{card_js}
+</body>
+</html>
+"""
+        (conf_dir / "index.html").write_text(page)
+
+    print(f"{_c('34', '[HTML]')} Generated {_c('1', str(len(conferences)))} conference page(s)", file=sys.stderr)
 
 
 def _generate_episode_pages(episodes, show_title, output_dir):

@@ -506,6 +506,20 @@ def _publish_site(config):
     print(f"{_c('35', '[Site]')} {len(ep_pages)} episode pages uploaded",
           file=sys.stderr)
 
+    # Upload conference pages (conference/{id}/index.html)
+    conf_pages = sorted(globmod.glob(
+            os.path.join(feed_dir, "conference", "*", "index.html")))
+    print(f"{_c('35', '[Site]')} Uploading {len(conf_pages)} conference pages...",
+          file=sys.stderr)
+    for conf_page in conf_pages:
+        rel = os.path.relpath(conf_page, feed_dir)
+        conf_dir = os.path.dirname(rel)
+        upload_file(r2, conf_page, rel, content_type="text/html")
+        upload_file(r2, conf_page, conf_dir + "/",
+                    content_type="text/html")
+    print(f"{_c('35', '[Site]')} {len(conf_pages)} conference pages uploaded",
+          file=sys.stderr)
+
     # Upload all viz HTML files
     viz_dir = os.path.join(project_root, "viz")
     if os.path.isdir(viz_dir):
