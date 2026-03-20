@@ -1,9 +1,15 @@
 """Configurable LLM backend abstraction.
 
-Supports three backends:
-  - claude-cli: Claude CLI subprocess (default, uses Max subscription)
+Supports four backends:
   - openai: OpenAI API via Python SDK
+  - codex: Codex CLI subprocess (uses Codex subscription, not API credits)
+  - claude-cli: Claude CLI subprocess (uses Max subscription, not API credits)
   - anthropic: Anthropic API via Python SDK
+
+When llm_backend is "openai", the codex CLI is preferred automatically
+so that the Codex subscription is used instead of pay-per-token API
+credits.  The openai SDK path is only used as a fallback when the
+codex binary is not found.
 
 Usage:
     from llm_backend import get_llm_backend, llm_call
@@ -15,6 +21,7 @@ Usage:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -22,12 +29,21 @@ import sys
 def get_llm_backend(config):
     """Return a backend dict based on config podcast.llm_backend.
 
-    Reads config["podcast"]["llm_backend"] (default: "claude-cli").
+    Reads config["podcast"]["llm_backend"] (default: "openai").
     Returns a dict with "type" key and optional "client" for SDK backends.
     """
-    backend_type = config.get("podcast", {}).get("llm_backend", "claude-cli")
+    backend_type = config.get("podcast", {}).get("llm_backend", "openai")
+
+    if backend_type == "codex":
+        return {"type": "codex"}
 
     if backend_type == "openai":
+        # Prefer codex CLI over the OpenAI SDK so we use the Codex
+        # subscription instead of burning pay-per-token API credits.
+        if shutil.which("codex"):
+            print("[LLM] openai backend: routing through codex CLI "
+                  "(subscription credits)", file=sys.stderr)
+            return {"type": "codex"}
         import openai
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -73,6 +89,8 @@ def llm_call(backend, model, prompt, temperature=0.4,
                               temperature, max_tokens)
     elif btype == "claude-cli":
         raw = _call_claude_cli(model, prompt, max_tokens)
+    elif btype == "codex":
+        raw = _call_codex(model, prompt, max_tokens)
     else:
         raise ValueError(f"Unknown backend type: {btype!r}")
 
@@ -135,6 +153,41 @@ def _call_claude_cli(model, prompt, max_tokens):
             f"Claude CLI error (rc={result.returncode}, "
             f"timeout={timeout}s): {result.stderr[:300]}")
     return stdout
+
+
+def _call_codex(model, prompt, max_tokens):
+    import tempfile
+    outfile = tempfile.NamedTemporaryFile(
+        suffix=".txt", delete=False, mode="w")
+    outfile.close()
+    try:
+        cmd = ["codex", "exec",
+               "-s", "read-only",
+               "--ephemeral",
+               "-o", outfile.name]
+        if model:
+            cmd.extend(["-m", model])
+        prompt_factor = len(prompt) // 5000 * 30
+        token_factor = max_tokens // 20
+        timeout = max(300, prompt_factor + token_factor + 300)
+        result = subprocess.run(
+            cmd, input=prompt, capture_output=True,
+            text=True, timeout=timeout)
+        if result.returncode != 0:
+            stderr_msg = result.stderr[:300] if result.stderr else ""
+            raise RuntimeError(
+                f"Codex CLI error (rc={result.returncode}, "
+                f"timeout={timeout}s): {stderr_msg}")
+        output = open(outfile.name).read().strip()
+        if not output:
+            raise RuntimeError(
+                "Codex CLI returned empty output")
+        return output
+    finally:
+        try:
+            os.unlink(outfile.name)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +289,8 @@ def _parse_json(raw, backend, model, prompt, temperature, max_tokens):
                                    temperature, max_tokens)
         elif btype == "claude-cli":
             raw2 = _call_claude_cli(model, retry_prompt, max_tokens)
+        elif btype == "codex":
+            raw2 = _call_codex(model, retry_prompt, max_tokens)
         else:
             raise ValueError(f"Unknown backend type: {btype!r}")
 
