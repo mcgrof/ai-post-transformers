@@ -40,6 +40,9 @@ scores arXiv papers against a research interest profile.
 - `interests.py` — `InterestScorer` (legacy single-profile scorer)
 - `viz_catalog.py` — visualization catalog sync (`run_viz_sync`)
 
+**Legacy migration:**
+- `mirror_legacy.py` — scrape, mirror, and rebuild legacy episodes
+
 **Sources:**
 - `sources/arxiv_source.py` — arXiv API fetcher
 - `sources/hf_daily.py` — HuggingFace Daily Papers scraper
@@ -226,29 +229,103 @@ Audio files are uploaded to R2 under `episodes/{basename}`. Public
 URLs follow `https://podcast.do-not-panic.com/episodes/{basename}`.
 The RSS feed references these URLs for podcast distribution.
 
+### Legacy episodes and anchor_feed.xml
+
+The podcast launched on Spotify/Anchor in August 2025. Those ~467
+legacy episodes were originally hosted on Anchor with audio on
+Spotify's CloudFront CDN. When the podcast migrated to self-hosted
+R2, Spotify set up a 301 redirect from the old Anchor RSS URL to
+our `feed.xml`. This means the old feed is no longer available
+from Spotify.
+
+All legacy episode data is now mirrored to R2:
+- Audio: `episodes/{slug}.m4a` on R2
+- HTML pages: `episodes/{slug}/index.html` on R2
+- Cover images: `episodes/{slug}-cover.jpg` or already on R2
+- Metadata manifest: `legacy_manifest.json` (local, not committed)
+
+The file `podcasts/anchor_feed.xml` is a locally-generated RSS
+feed containing all legacy episodes with R2-hosted audio URLs.
+It is loaded by `generate_feed()` in `rss.py` and merged with
+the local DB episodes to produce the combined `feed.xml`.
+
+**CRITICAL — LEGACY EPISODE PROTECTION RULES:**
+
+These rules exist because legacy episodes were accidentally wiped
+from the RSS feed once before. That must never happen again.
+
+1. Do NOT delete, empty, or overwrite `anchor_feed.xml` with a
+   stub or skeleton. This file contains 467 legacy episode RSS
+   items. Destroying it removes the entire back catalog from
+   podcast apps. If the feed needs regeneration, run:
+   ```bash
+   python mirror_legacy.py build-feed
+   ```
+
+2. Do NOT modify `_load_anchor_items()` in `rss.py` to skip,
+   filter, or reduce legacy episodes without explicit user
+   approval. The legacy episodes are a core part of the podcast.
+
+3. Do NOT modify `generate_feed()` in `rss.py` to exclude legacy
+   items or change deduplication logic without explicit approval.
+   The merged feed must always contain both new DB episodes AND
+   legacy anchor items.
+
+4. Do NOT download or overwrite `anchor_feed.xml` from the Anchor
+   RSS URL in `config.yaml`. That URL now 301-redirects to our
+   own feed.xml — fetching it would replace 467 legacy items with
+   our current (much smaller) feed, destroying the back catalog.
+
+5. Before any change to `rss.py`, `mirror_legacy.py`, or
+   `anchor_feed.xml`, verify that `generate_feed()` still
+   produces a feed with both new AND legacy episodes. The total
+   should be ~480+ episodes. If the count drops below 400,
+   something is wrong — stop and investigate.
+
+6. The legacy audio files on R2 (`episodes/{slug}.m4a`) are the
+   ONLY surviving copies. Spotify's CloudFront CDN copies may
+   vanish at any time. Do NOT delete R2-hosted legacy audio.
+
+The authoritative source for legacy metadata is
+`legacy_manifest.json` and the R2-hosted episode pages.
+
 ### LLM backend selection
 
 The pipeline routes all LLM calls through a configurable backend
-defined in `llm_backend.py`. Three backends are supported:
+defined in `llm_backend.py`. Four backends are supported:
 
 ```yaml
 podcast:
-  llm_backend: claude-cli   # "claude-cli", "openai", or "anthropic"
-  llm_model: sonnet          # backend-specific model name
-  analysis_model: sonnet
+  llm_backend: openai    # "claude-cli", "codex", "openai", or "anthropic"
+  llm_model: gpt-5.4     # backend-specific model name
+  analysis_model: gpt-5.4
 ```
 
-**claude-cli** (default): Calls the `claude` CLI as a subprocess.
-Uses the Max subscription at no extra API cost. Temperature is not
+**claude-cli**: Calls the `claude` CLI as a subprocess. Uses the
+Max subscription at no extra API cost. Temperature is not
 controllable via CLI. Model names are Claude CLI model names
 (e.g., `sonnet`, `opus`, `haiku`).
 
-**openai**: Uses the OpenAI Python SDK. Requires `OPENAI_API_KEY`.
-Model names are OpenAI model names (e.g., `gpt-4.1-mini`).
+**codex**: Calls the `codex exec` CLI as a subprocess. Uses the
+Codex subscription at no extra API cost. Model names are OpenAI
+model names (e.g., `o3`, `gpt-5.4`).
+
+**openai**: Configured to use the OpenAI Python SDK, but when the
+`codex` binary is found in PATH the backend automatically routes
+through `codex exec` instead, so that the Codex subscription is
+used rather than burning pay-per-token API credits. The SDK
+fallback only activates when `codex` is not installed.
 
 **anthropic**: Uses the Anthropic Python SDK. Requires
 `ANTHROPIC_API_KEY`. Model names are Anthropic API model IDs
 (e.g., `claude-sonnet-4-20250514`).
+
+**Cost note:** The `claude-cli` and `codex` backends use flat-rate
+subscriptions ($200/mo each). Prefer these over `openai` or
+`anthropic` API backends to avoid per-token charges. The `openai`
+backend auto-promotes to `codex` when the CLI is available, so
+setting `llm_backend: openai` in config.yaml is safe — it will
+not spend API credits as long as `codex` is installed.
 
 `image_gen.py` still uses the OpenAI image API (`gpt-image-1`)
 since no Claude/Anthropic equivalent exists. When `OPENAI_API_KEY`
@@ -373,5 +450,9 @@ unless X is a previously published episode of this podcast.
 ## Cross-Agent Access
 
 To avoid other agents missing these guidelines, ensure every agent
-entrypoint symlinks back to this document. For Codex runs,
-`CODEX.md` must always be a symlink to `CLAUDE.md`.
+entrypoint symlinks back to this document:
+- `CODEX.md` → `CLAUDE.md` (OpenAI Codex legacy name)
+- `AGENTS.md` → `CLAUDE.md` (OpenAI Codex/Agents current name)
+
+Both must always be symlinks, never independent files. If an agent
+framework adds a new instruction filename, symlink it here too.
