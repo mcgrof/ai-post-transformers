@@ -18,6 +18,7 @@ inputs/
 viz/
 viz_cache/
 generated_covers/
+legacy_manifest.json
 .wrangler/
 .cache/
 papers.db-shm
