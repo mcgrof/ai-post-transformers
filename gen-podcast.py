@@ -455,7 +455,6 @@ def _publish_site(config):
         ("images/ai-origins.jpg",     "images/ai-origins.jpg",     "image/jpeg"),
         ("images/ai-ax.jpg",          "images/ai-ax.jpg",          "image/jpeg"),
     ]
-    project_root = os.path.dirname(os.path.abspath(__file__))
     for local_name, r2_key, ctype in static_files:
         local_path = os.path.join(feed_dir, local_name)
         if not os.path.exists(local_path):
@@ -641,6 +640,34 @@ def _publish_episode(config, draft=None):
     _publish_site(config)
 
     # Remove from admin drafts + delete R2 draft mp3 now that publish succeeded
+    try:
+        import boto3, json, os as _os
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=_os.environ["AWS_ENDPOINT_URL"],
+            aws_access_key_id=_os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=_os.environ["AWS_SECRET_ACCESS_KEY"],
+            region_name="auto",
+        )
+        draft_id = episode.get("id")
+        manifest_obj = s3.get_object(Bucket="podcast-admin", Key="manifest.json")
+        manifest = json.loads(manifest_obj["Body"].read())
+        before = len(manifest.get("drafts", []))
+        manifest["drafts"] = [d for d in manifest.get("drafts", []) if d.get("id") != draft_id]
+        s3.put_object(Bucket="podcast-admin", Key="manifest.json", Body=json.dumps(manifest, indent=2), ContentType="application/json")
+        try:
+            s3.delete_object(Bucket="ai-post-transformers", Key=f"drafts/ep{draft_id}.mp3")
+        except Exception:
+            pass
+        print(f"[Publish] Admin manifest cleaned: {before} -> {len(manifest.get('drafts', []))}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Publish] Admin cleanup skipped: {e}", file=sys.stderr)
+
+    print(f"\nPublished!", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
     try:
         import boto3, json, os as _os
         s3 = boto3.client(
