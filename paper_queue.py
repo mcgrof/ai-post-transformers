@@ -1461,15 +1461,22 @@ def generate_queue_html_v2(sections, config):
     html_path = Path(__file__).parent / "podcasts" / "queue.html"
     page = template_path.read_text()
 
+    def _record_to_jsonable(r):
+        if isinstance(r, dict):
+            return r
+        if hasattr(r, "__dict__"):
+            return dict(r.__dict__)
+        return r
+
     slim_sections = {
-        "public": sections.get("public", []),
-        "memory": sections.get("memory", []),
-        "bridge": sections.get("bridge", []),
-        "monitor": sections.get("monitor", []),
-        "deferred": sections.get("deferred", []),
-        "out_of_scope": sections.get("out_of_scope", []),
+        "public": [_record_to_jsonable(r) for r in sections.get("public", [])],
+        "memory": [_record_to_jsonable(r) for r in sections.get("memory", [])],
+        "bridge": [_record_to_jsonable(r) for r in sections.get("bridge", [])],
+        "monitor": [_record_to_jsonable(r) for r in sections.get("monitor", [])],
+        "deferred": [_record_to_jsonable(r) for r in sections.get("deferred", [])],
+        "out_of_scope": [_record_to_jsonable(r) for r in sections.get("out_of_scope", [])],
     }
-    queue_json = json.dumps(slim_sections, ensure_ascii=False, default=str)
+    queue_json = json.dumps(slim_sections, ensure_ascii=False)
 
     page, n = re.subn(
         r"const QUEUE = .*?;\n\nconst CATEGORY_META =",
