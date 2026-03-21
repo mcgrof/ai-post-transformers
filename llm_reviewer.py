@@ -115,8 +115,8 @@ class LLMReviewer:
     def __init__(self, config):
         self.config = config
         self.backend = get_llm_backend(config)
-        self.model = config.get("podcast", {}).get(
-            "analysis_model", "sonnet")
+        self.model = config.get("podcast", {}).get("analysis_model") \
+            or config.get("podcast", {}).get("llm_model", "gpt-5.4")
         self.workers = config.get("editorial", {}).get(
             "llm_workers", 4)
 
@@ -153,6 +153,7 @@ class LLMReviewer:
                          "yellow")
                     results[rec.arxiv_id] = None
 
+
         # Apply results
         reviewed = 0
         for rec in records:
@@ -162,8 +163,15 @@ class LLMReviewer:
                 if not rec.status:
                     rec.status = "Monitor"
                 continue
-            self._apply_review(rec, review)
-            reviewed += 1
+            try:
+                self._apply_review(rec, review)
+                reviewed += 1
+            except Exception as e:
+                _log("[LLMReview]",
+                     f"Apply failed for {rec.arxiv_id}: {e}",
+                     "yellow")
+                if not rec.status:
+                    rec.status = "Monitor"
 
         _log("[LLMReview]",
              f"Reviewed {_c('green', str(reviewed))}"
@@ -205,6 +213,8 @@ class LLMReviewer:
 
     def _apply_review(self, rec, review):
         """Apply LLM review adjustments to a PaperRecord."""
+        review = _coerce_review(review)
+
         # Score adjustments (clamped to ±0.3, then final clamp)
         pub_adj = _clamp_adj(
             review.get("public_interest_score_adjustment", 0))
@@ -244,6 +254,25 @@ class LLMReviewer:
             "what_would_raise_priority", "")
         rec.one_sentence_episode_hook = review.get(
             "one_sentence_episode_hook", "")
+
+
+def _coerce_review(review):
+    """Best-effort normalization for LLM review payloads.
+
+    Accepts dicts directly. If the backend returned a JSON string,
+    parse it. Anything else degrades to an empty dict so queue runs
+    fail soft instead of aborting.
+    """
+    if isinstance(review, dict):
+        return review
+    if isinstance(review, str):
+        try:
+            parsed = json.loads(review)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
 
 
 def _clamp_adj(v):
