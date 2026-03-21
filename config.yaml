@@ -228,6 +228,12 @@ sponsors:
     inference budgets, storage, and volunteer time. If you want to help keep the
     podcast going, sponsor the project and help fund more episode generation,
     visuals, and infrastructure.
+  featured_episode:
+    title: "New Site Features: Conferences Tracking and How to Support the Show"
+    url: /episodes/new-site-features-conferences-tracking-and-how-to-support-the-show/
+    description: >
+      Short announcement episode covering the new Conferences browser plus how the
+      Sponsor page helps fund the AI credits and infrastructure behind the project.
   links:
     primary:
       label: Sponsor mcgrof on GitHub Sponsors

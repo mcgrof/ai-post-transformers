@@ -1891,6 +1891,17 @@ def generate_sponsor_page(config, output_dir):
     primary = sponsor_cfg.get("links", {}).get("primary", {})
     primary_label = html.escape(primary.get("label", "Sponsor this project"))
     primary_url = html.escape(primary.get("url", "https://github.com/sponsors/mcgrof"))
+    featured = sponsor_cfg.get("featured_episode", {})
+    featured_html = ""
+    if featured:
+        feat_title = html.escape(featured.get("title", "Announcement episode"))
+        feat_url = html.escape(featured.get("url", "/index.html"))
+        feat_desc = html.escape(featured.get("description", ""))
+        featured_html = f"""<div class=\"featured-episode\">
+  <div class=\"featured-kicker\">Listen first</div>
+  <div class=\"featured-title\"><a href=\"{feat_url}\">{feat_title}</a></div>
+  <p class=\"featured-desc\">{feat_desc}</p>
+</div>"""
 
     cards = []
     for person in contributors:
@@ -1935,6 +1946,10 @@ h1 {{ font-size: 1.8rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }
 .subtitle {{ color: #999; font-size: 0.95rem; margin-bottom: 1.5rem; }}
 .cta {{ display:inline-block; margin-bottom: 2rem; background:#e50914; color:#fff; padding:0.8rem 1rem; border-radius:8px; font-weight:600; }}
 .cta:hover {{ text-decoration:none; filter:brightness(1.08); }}
+.featured-episode {{ background:#191922; border:1px solid #2e2e44; border-radius:10px; padding:1rem 1.1rem; margin:0 0 1.4rem; }}
+.featured-kicker {{ color:#888; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem; }}
+.featured-title {{ font-size:1rem; font-weight:700; margin-bottom:0.35rem; }}
+.featured-desc {{ color:#aaa; font-size:0.88rem; }}
 .sponsor-card {{ background:#1a1a1a; border:1px solid #2b2b2b; border-radius:10px; padding:1.2rem; margin-bottom:1rem; }}
 .sponsor-head {{ display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:0.8rem; }}
 .sponsor-name {{ font-size:1.05rem; font-weight:700; color:#fff; }}
@@ -1955,6 +1970,7 @@ h1 {{ font-size: 1.8rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }
   <h1>Sponsor</h1>
   <p class=\"subtitle\">{intro}</p>
   <a class=\"cta\" href=\"{primary_url}\" target=\"_blank\">{primary_label}</a>
+  {featured_html}
   {cards_html}
 </div>
 <div class=\"footer\">{html.escape(show_title)}</div>
