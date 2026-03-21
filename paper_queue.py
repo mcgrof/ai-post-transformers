@@ -1464,6 +1464,8 @@ def generate_queue_html_v2(sections, config):
     def _record_to_jsonable(r):
         if isinstance(r, dict):
             return r
+        if hasattr(r, "to_dict"):
+            return r.to_dict()
         if hasattr(r, "__dict__"):
             return dict(r.__dict__)
         return r
