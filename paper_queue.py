@@ -1469,7 +1469,7 @@ def generate_queue_html_v2(sections, config):
         "deferred": sections.get("deferred", []),
         "out_of_scope": sections.get("out_of_scope", []),
     }
-    queue_json = json.dumps(slim_sections, ensure_ascii=False)
+    queue_json = json.dumps(slim_sections, ensure_ascii=False, default=str)
 
     page, n = re.subn(
         r"const QUEUE = .*?;\n\nconst CATEGORY_META =",
