@@ -1462,9 +1462,9 @@ def generate_queue_html_v2(sections, config):
     total = sum(len(v) for v in sections.values())
 
     section_configs = [
-        ("Bridge", sections.get("bridge", []), "#a8dadc"),
         ("Public AI", sections.get("public", []), "#8ab4f8"),
         ("Memory/Storage", sections.get("memory", []), "#f4a261"),
+        ("Bridge", sections.get("bridge", []), "#a8dadc"),
         ("Monitor", sections.get("monitor", []), "#b0b0b0"),
         ("Deferred", sections.get("deferred", []), "#c9b458"),
         ("Out of Scope",
