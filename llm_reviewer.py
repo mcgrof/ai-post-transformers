@@ -87,9 +87,13 @@ IMPORTANT GUIDELINES:
   relevance: usually Deferred this cycle.
 - Narrow application papers: usually Out of scope unless the
   general method clearly transfers.
-- Memory-adjacent papers can score well on the memory lens if they
-  create useful predictive signals for scheduling, prefetch,
-  tiering, or cache reuse.
+- Memory-adjacent papers can score well on the memory lens only if they
+  have a concrete systems path to memory/cache/storage behavior such as
+  KV cache reuse, cache eviction, prefetch, offload, tiering, paging,
+  or bandwidth reduction.
+- Multi-agent, reasoning, RL, alignment, or dialogue papers are NOT
+  memory papers unless the memory/storage mechanism is central rather
+  than incidental.
 
 Output ONLY valid JSON with exactly these fields:
 {{

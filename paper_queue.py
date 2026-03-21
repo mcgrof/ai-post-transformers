@@ -290,13 +290,35 @@ def build_final_queue(reviewed, all_records, config):
     memory_first = _apply_diversity_cap(
         memory_first, diversity_cap)[:n_memory]
 
-    # Backfill sparse buckets from Monitor
-    for bucket, target in [
-            (bridge, n_bridge),
-            (public_first, n_public),
-            (memory_first, n_memory)]:
-        while len(bucket) < target and monitor:
-            bucket.append(monitor.pop(0))
+    # Backfill sparse buckets from Monitor, but keep category integrity.
+    def _fits_bridge(r):
+        return (
+            "Bridge" in r.badges
+            or (r.public_interest_score > 0.3 and r.memory_score > 0.3)
+        )
+
+    def _fits_public(r):
+        return r.public_interest_score >= max(0.35, r.memory_score)
+
+    def _fits_memory(r):
+        return (
+            "Memory/Storage Core" in r.badges
+            or "Memory/Storage Adjacent" in r.badges
+            or r.memory_score >= 0.35
+        ) and r.memory_score >= r.public_interest_score
+
+    for bucket, target, pred in [
+            (bridge, n_bridge, _fits_bridge),
+            (public_first, n_public, _fits_public),
+            (memory_first, n_memory, _fits_memory)]:
+        i = 0
+        while len(bucket) < target and i < len(monitor):
+            cand = monitor[i]
+            if pred(cand):
+                bucket.append(cand)
+                monitor.pop(i)
+            else:
+                i += 1
 
     # Remaining reviewed papers that weren't placed go to monitor,
     # but skip those already in deferred or out_of_scope
