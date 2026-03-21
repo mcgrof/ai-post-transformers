@@ -437,6 +437,7 @@ def _publish_site(config):
 
     r2 = get_r2_client()
     feed_dir = os.path.dirname(feed_path)
+    project_root = os.path.dirname(os.path.abspath(__file__))
 
     static_files = [
         ("index.html", "index.html", "text/html"),
