@@ -441,6 +441,7 @@ def _publish_site(config):
     static_files = [
         ("index.html", "index.html", "text/html"),
         ("sister-podcasts.html",      "sister-podcasts.html",      "text/html"),
+        ("sponsor.html",              "sponsor.html",              "text/html"),
         ("queue.html",                "queue.html",                "text/html"),
         ("queue.xml",                 "queue.xml",                 "application/xml"),
         ("images/podcast-bg.png",     "images/podcast-bg.png",     "image/png"),

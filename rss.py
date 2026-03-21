@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -483,6 +484,16 @@ def _extract_episodes_from_feed(feed_path):
         srt_el = item.find("{https://podcastindex.org/namespace/1.0}transcript")
         srt = srt_el.get("url", "") if srt_el is not None else ""
 
+        # Compute thumbnail URL from image URL
+        thumb_url = ""
+        if img:
+            img_stem = os.path.splitext(
+                os.path.basename(urllib.parse.urlparse(img).path))[0]
+            if img_stem:
+                thumb_url = (
+                    f"https://podcast.do-not-panic.com/thumbs/"
+                    f"{img_stem}.webp")
+
         episodes.append({
             "title": title,
             "date": date_str,
@@ -490,6 +501,7 @@ def _extract_episodes_from_feed(feed_path):
             "description": desc,
             "audio_url": audio,
             "image_url": img,
+            "thumb_url": thumb_url,
             "srt_url": srt,
             "viz_links": viz_links,
         })
@@ -523,9 +535,11 @@ def _extract_viz_links(desc):
 def _render_card(ep, root_prefix="", episode_url=""):
     """Render a single episode card HTML. root_prefix adjusts relative paths."""
     img_html = ""
-    if ep["image_url"]:
+    # Prefer thumbnail for card display; fall back to full image
+    card_img = ep.get("thumb_url") or ep.get("image_url", "")
+    if card_img:
         img_html = (
-            f'<img class="card-img" src="{html.escape(ep["image_url"])}" '
+            f'<img class="card-img" src="{html.escape(card_img)}" '
             f'alt="" loading="lazy">')
     else:
         img_html = '<div class="card-img card-img-placeholder"></div>'
@@ -612,7 +626,12 @@ def _generate_thumbnail(image_url, stem, output_dir):
         else:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 tmp_path = tmp.name
-            urllib.request.urlretrieve(image_url, tmp_path)
+            req = urllib.request.Request(
+                image_url,
+                headers={"User-Agent": "podcast-thumbgen/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                with open(tmp_path, "wb") as f:
+                    f.write(resp.read())
     except Exception as e:
         print(f"[Thumb] Failed to fetch {image_url}: {e}", file=sys.stderr)
         return None
@@ -683,6 +702,30 @@ def generate_index(config, feed_path=None):
 
     episodes = _extract_episodes_from_feed(feed_path)
     total = len(episodes)
+
+    # Generate thumbnails for all episodes that have images but no
+    # local thumbnail yet.  This ensures conference and month pages
+    # use lightweight WebP thumbs instead of full-size PNGs.
+    thumb_dir = feed_path.parent / "thumbs"
+    generated = 0
+    for ep in episodes:
+        img_url = ep.get("image_url", "")
+        if not img_url:
+            continue
+        stem = os.path.splitext(
+            os.path.basename(urllib.parse.urlparse(img_url).path))[0]
+        if not stem:
+            continue
+        thumb_path = thumb_dir / f"{stem}.webp"
+        if not thumb_path.exists():
+            try:
+                _generate_thumbnail(img_url, stem, feed_path.parent)
+                generated += 1
+            except Exception:
+                pass
+    if generated:
+        print(f"{_c('34', '[Thumb]')} Generated {generated} new thumbnails",
+              file=sys.stderr)
 
     # Assign slugs to all episodes (ensure uniqueness)
     seen_slugs = {}
@@ -896,6 +939,7 @@ footer a:hover {{ color: #ccc; }}
         {conferences_html}
       </div>
     </span>
+    <a href="/sponsor.html">Sponsor</a>
     <a href="/sister-podcasts.html">More Shows</a>
     {github_html}
   </div>
@@ -942,8 +986,9 @@ document.addEventListener('click', function(e) {{ if (!e.target.closest('.dd-wra
     # Generate per-month archive pages
     _generate_month_pages(sorted_months, show_title, feed_path.parent)
 
-    # Generate about page alongside index
+    # Generate about + sponsor pages alongside index
     generate_about(config, feed_path.parent)
+    generate_sponsor_page(config, feed_path.parent)
 
     # Generate conference pages alongside index
     _generate_conference_pages(episodes, show_title, feed_path.parent)
@@ -1832,6 +1877,94 @@ h1 {{
     if count:
         print(f"{_c('34', '[HTML]')} Generated {_c('1', str(count))} "
               f"archive page(s)", file=sys.stderr)
+
+
+def generate_sponsor_page(config, output_dir):
+    """Generate sponsor.html with support links and contributor credits."""
+    sponsor_cfg = config.get("sponsors", {})
+    contributors = sponsor_cfg.get("contributors", [])
+    spotify = config.get("spotify", {})
+    show = spotify.get("show", {})
+    show_title = show.get("title", "AI Post Transformers")
+
+    intro = html.escape(sponsor_cfg.get("intro", "Support the project and the people donating credits and time to make it run."))
+    primary = sponsor_cfg.get("links", {}).get("primary", {})
+    primary_label = html.escape(primary.get("label", "Sponsor this project"))
+    primary_url = html.escape(primary.get("url", "https://github.com/sponsors/mcgrof"))
+
+    cards = []
+    for person in contributors:
+        name = html.escape(person.get("name", "Contributor"))
+        role = html.escape(person.get("role", "Contributor"))
+        profile = html.escape(person.get("profile_url", "#"))
+        support_url = html.escape(person.get("support_url", primary_url))
+        support_label = html.escape(person.get("support_label", "Sponsor"))
+        blurb = html.escape(person.get("blurb", ""))
+        services = "".join(
+            f'<li>{html.escape(service)}</li>' for service in person.get("services", [])
+        )
+        cards.append(f"""<div class=\"sponsor-card\">
+  <div class=\"sponsor-head\">
+    <div>
+      <div class=\"sponsor-name\"><a href=\"{profile}\" target=\"_blank\">{name}</a></div>
+      <div class=\"sponsor-role\">{role}</div>
+    </div>
+    <a class=\"sponsor-btn\" href=\"{support_url}\" target=\"_blank\">{support_label}</a>
+  </div>
+  <p class=\"sponsor-blurb\">{blurb}</p>
+  <div class=\"services-title\">Existing credits / services in use</div>
+  <ul class=\"services\">{services}</ul>
+</div>""")
+
+    cards_html = "\n".join(cards) if cards else "<p>No contributors listed yet.</p>"
+    page = f"""<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+<title>Sponsor &mdash; {html.escape(show_title)}</title>
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; background: #141414; color: #e5e5e5; line-height: 1.6; min-height: 100vh; }}
+a {{ color: #e50914; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+.page {{ max-width: 820px; margin: 0 auto; padding: 3rem 1.5rem 2rem; }}
+.back {{ font-size: 0.85rem; color: #777; margin-bottom: 2rem; display: inline-block; }}
+.back:hover {{ color: #e5e5e5; }}
+h1 {{ font-size: 1.8rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }}
+.subtitle {{ color: #999; font-size: 0.95rem; margin-bottom: 1.5rem; }}
+.cta {{ display:inline-block; margin-bottom: 2rem; background:#e50914; color:#fff; padding:0.8rem 1rem; border-radius:8px; font-weight:600; }}
+.cta:hover {{ text-decoration:none; filter:brightness(1.08); }}
+.sponsor-card {{ background:#1a1a1a; border:1px solid #2b2b2b; border-radius:10px; padding:1.2rem; margin-bottom:1rem; }}
+.sponsor-head {{ display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:0.8rem; }}
+.sponsor-name {{ font-size:1.05rem; font-weight:700; color:#fff; }}
+.sponsor-role {{ color:#888; font-size:0.85rem; margin-top:0.15rem; }}
+.sponsor-btn {{ color:#fff; background:#2a2a2a; border:1px solid #444; padding:0.45rem 0.7rem; border-radius:8px; white-space:nowrap; }}
+.sponsor-btn:hover {{ text-decoration:none; border-color:#e50914; }}
+.sponsor-blurb {{ color:#bbb; margin-bottom:0.8rem; }}
+.services-title {{ color:#888; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.4rem; }}
+.services {{ padding-left:1.2rem; color:#ddd; }}
+.services li {{ margin:0.25rem 0; }}
+.footer {{ text-align: center; padding: 2rem; color: #555; font-size: 0.78rem; border-top: 1px solid #222; margin-top: 2rem; }}
+@media (max-width: 560px) {{ .sponsor-head {{ flex-direction:column; }} .sponsor-btn {{ align-self:flex-start; }} }}
+</style>
+</head>
+<body>
+<div class=\"page\">
+  <a class=\"back\" href=\"index.html\">&larr; Back to episodes</a>
+  <h1>Sponsor</h1>
+  <p class=\"subtitle\">{intro}</p>
+  <a class=\"cta\" href=\"{primary_url}\" target=\"_blank\">{primary_label}</a>
+  {cards_html}
+</div>
+<div class=\"footer\">{html.escape(show_title)}</div>
+</body>
+</html>
+"""
+    out_path = Path(output_dir) / "sponsor.html"
+    out_path.write_text(page)
+    print(f"{_c('34', '[HTML]')} Sponsor page written to {_c('2', str(out_path))}", file=sys.stderr)
+    return str(out_path)
 
 
 def generate_about(config, output_dir):

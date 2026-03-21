@@ -107,9 +107,9 @@ podcast:
   min_minutes: 15
   max_minutes: 23
   multi_paper_minutes: 30
-  llm_backend: claude-cli
-  llm_model: sonnet
-  analysis_model: sonnet
+  llm_backend: openai   # Codex/OpenAI default; switch to claude-cli or anthropic only when explicitly wanted
+  llm_model: gpt-5.4
+  analysis_model: gpt-5.4
   hosts:
     a:
       name: Hal Turing
@@ -221,6 +221,31 @@ sister_podcasts:
     image: images/ai-ax.jpg
     spotify_url: https://open.spotify.com/show/3YrceHROrdD9oeu2o78U44
     status: complete
+
+sponsors:
+  intro: >
+    AI Post Transformers runs on a weird but effective stack of existing AI credits,
+    inference budgets, storage, and volunteer time. If you want to help keep the
+    podcast going, sponsor the project and help fund more episode generation,
+    visuals, and infrastructure.
+  links:
+    primary:
+      label: Sponsor mcgrof on GitHub Sponsors
+      url: https://github.com/sponsors/mcgrof
+  contributors:
+    - name: mcgrof
+      role: Creator / operator
+      profile_url: https://github.com/mcgrof
+      support_url: https://github.com/sponsors/mcgrof
+      support_label: GitHub Sponsors
+      services:
+        - OpenAI credits
+        - ElevenLabs credits
+        - Cloudflare R2 + site hosting
+      blurb: >
+        Maintains the pipeline, editorial flow, publishing, and site. Existing AI
+        credits and infrastructure are what currently make the episodes ship.
+
 social_signals:
   enabled: true
   pwc_enabled: true          # Papers With Code trending
