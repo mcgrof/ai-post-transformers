@@ -1,7 +1,7 @@
 # Delegation Operations Runbook
 
-This runbook is for the operator handling volunteer onboarding, polling,
-claims, overrides, retries, and recovery.
+This runbook is for the trusted operator handling worker onboarding,
+polling, claims, overrides, retries, and recovery.
 
 Architecture context lives in
 [`docs/delegation-architecture.md`](/home/mcgrof/devel/ai-post-transformers/docs/delegation-architecture.md).
@@ -55,14 +55,15 @@ need.
 
 ## Polling and Claim Loop
 
-Recommended volunteer loop:
+Recommended trusted worker loop:
 
 ```text
-poll snapshot
-  -> select eligible queued job
+poll authoritative state
+  -> read server-filtered eligible queued jobs
   -> attempt claim with expected_version
   -> if conflict, refresh and retry
   -> run task
+  -> send heartbeat before lease expiry while work continues
   -> on handoff, release
   -> on success/failure, record result
 ```
@@ -72,6 +73,8 @@ Operator checks during active polling:
 - watch for repeated stale-version conflicts
 - watch for `active_claims` at or above `max_claims`
 - watch for locale skew, for example only `en-*` jobs draining
+- watch for `lease_expires_at` drifting past current time without a fresh
+  heartbeat
 
 ## Release vs Fail
 
@@ -147,6 +150,7 @@ Symptoms:
 
 - job remains `claimed`
 - no result arrives
+- `lease_expires_at` is stale or keeps drifting without heartbeats
 
 Actions:
 
@@ -215,12 +219,13 @@ Do not restore from R2 blindly if SQL/D1 contains newer valid claims.
 
 Run these checks before opening queue access wider:
 
-- Are operator actions authenticated?
-- Are volunteer identities authenticated?
+- Are trusted operator actions authenticated?
+- Are trusted worker identities authenticated?
 - Are overrides auditable?
 - Are unpublished payloads kept out of public R2 paths?
 - Are claim/result endpoints rejecting stale versions?
-- Are queue snapshots redacting data not needed by volunteers?
+- Are heartbeat and lease fields visible to trusted operators?
+- Are queue snapshots redacting data not needed by workers?
 
 ## Bus-Factor Plan
 

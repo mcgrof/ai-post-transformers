@@ -23,6 +23,21 @@ It is a pure state-transition module:
 - `export_manifest_snapshot()` produces a stable operator/debug view.
 - `export_admin_queue_payload()` exports queue sections for admin UI use.
 
+The durable persistence boundary now lives in
+[`delegation_store.py`](/home/mcgrof/devel/ai-post-transformers/delegation_store.py).
+It defines a SQL/D1-style contract:
+
+- `load_manifest()` reads the authoritative manifest.
+- `mutate_manifest(mutator, expected_version=...)` applies one atomic
+  compare-and-swap update.
+- `load_admin_queue()` and `save_admin_queue()` keep the operator export
+  payload separate from live claim state.
+
+The request contract now lives in
+[`delegation_backend.py`](/home/mcgrof/devel/ai-post-transformers/delegation_backend.py).
+It exposes trusted operator and trusted worker flows on top of that
+store boundary.
+
 The test contract lives in
 [`tests/test_delegation_queue.py`](/home/mcgrof/devel/ai-post-transformers/tests/test_delegation_queue.py).
 Those tests define the real behavior more precisely than prose.
@@ -38,9 +53,9 @@ boundaries:
 4. The queue tracks retries, failures, and per-locale/per-volunteer
    metrics.
 
-The current code does not persist manifests by itself. Persistence,
-polling, and API exposure belong in the deployment layer around the
-module.
+The state machine stays pure, but persistence and API exposure now sit
+behind an explicit store contract so the live queue can move from local
+SQLite to D1 without changing queue semantics.
 
 ## Components
 
@@ -51,8 +66,9 @@ module.
 | Metrics buckets | Implemented | Success/failure totals by volunteer and locale | Trusted |
 | Admin export helpers | Implemented | Stable snapshots and flat/sectioned payloads | Trusted |
 | Cloudflare admin UI | Adjacent | Human-facing dashboard and control plane shell | Semi-trusted |
-| Durable queue storage | Not implemented here | Persist current manifest version | Trusted |
-| Volunteer polling client | Not implemented here | Poll, claim, run, and post results | Untrusted |
+| Durable queue storage | Implemented contract | Atomic manifest CAS plus admin payload persistence | Trusted |
+| Trusted worker polling API | Implemented contract | Poll, claim, heartbeat, release, and report results | Trusted |
+| Static or copied queue exports | Adjacent | Human review and debugging copies | Semi-trusted |
 
 ## Manifest Schema
 
@@ -69,6 +85,7 @@ Each job tracks:
 - `required_capabilities`
 - `status`: `queued`, `claimed`, `completed`, `failed`
 - `claimed_by`, `claimed_at`
+- `last_heartbeat_at`, `lease_expires_at`
 - `failure_count`, `max_retries`
 - `override`: admin override metadata when used
 - `history`: append-only claim/release/result events
@@ -112,14 +129,16 @@ another actor updated the manifest first, retry from a fresh read.
 
 ## Polling Flow
 
-The current repository implements the state transitions, not the poller.
-This is the recommended flow around it:
+The backend now exposes a trusted worker polling contract around the
+state machine:
 
 ```text
-volunteer polls snapshot
-  -> filter locally by capability/locale/queue policy
-  -> submit claim(job_id, volunteer_id, expected_version)
+trusted worker polls authoritative state
+  -> server filters eligible queued jobs by approval/capability/locale
+  -> worker submits claim(job_id, worker_id, expected_version)
+  -> server returns lease_expires_at and heartbeat metadata
   -> if claim succeeds, run the delegated task
+  -> heartbeat while work is in progress
   -> on operator handoff, release_job()
   -> on success/failure, record_job_result()
   -> poll again
@@ -130,6 +149,27 @@ Operator note:
 - Polling should be idempotent.
 - Claims must always include the manifest version last observed.
 - Clients must assume every network retry can race another claimant.
+- Lease metadata is authoritative server state, not a client timer.
+- Leases show liveness for trusted workers, but operator release or
+  failure decisions still control reclamation.
+
+## Trusted Operator / Trusted Worker API
+
+The current backend contract distinguishes three views:
+
+- `trusted_operator`: authoritative operator control plane and export.
+- `trusted_workers`: authenticated workers polling and claiming from live
+  state.
+- `static_exports`: semi-trusted copies for inspection only, never live
+  claiming.
+
+Trusted worker endpoints are expected to support:
+
+- poll
+- claim with `expected_version`
+- heartbeat to refresh `lease_expires_at`
+- release without burning retry budget
+- result reporting for success or failure
 
 ## Worker / Volunteer Model
 
@@ -193,20 +233,20 @@ tool.
 ### Trusted
 
 - Queue manifest persistence
-- Admin approval and override actions
+- Trusted operator approval and override actions
+- Trusted worker polling and mutation endpoints
 - Metrics and audit history
 - CI tests that pin the state machine contract
 
-### Untrusted or semi-trusted
+### Semi-trusted
 
-- Volunteer clients
 - Browser-based operator sessions until authenticated
 - Any queue payload copied into R2 or static artifacts
 
 Design rule:
 
-Never trust a volunteer's local view of queue state. Only the server-side
-manifest version is authoritative.
+Never trust a worker's local view of queue state. Only the server-side
+manifest version and lease metadata are authoritative.
 
 ## D1 / SQL vs R2 Tradeoffs
 
@@ -309,11 +349,11 @@ Additional deployment-layer failures to plan for:
 
 ### Controls recommended in deployment
 
-- authenticate operator and volunteer identities separately
+- authenticate trusted operator and trusted worker identities separately
 - require server-side override authorization
 - store audit logs outside the browser session
-- sign or server-generate claim/result requests
-- expire claims with leases or heartbeats
+- server-generate or validate poll/claim/result requests
+- track leases with heartbeat refresh
 - restrict R2 exposure for unpublished queue data
 - back up manifest history before schema or scheduler changes
 
@@ -327,6 +367,9 @@ on every push and pull request through
 Delegation coverage currently verifies:
 
 - admin approval gate
+- durable SQLite compare-and-swap persistence
+- trusted worker poll filtering
+- lease issuance and heartbeat refresh
 - stale-version claim rejection
 - release without failure accounting
 - retry exhaustion behavior

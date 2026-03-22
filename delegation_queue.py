@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 class DelegationQueueError(RuntimeError):
@@ -88,6 +88,8 @@ def enqueue_job(manifest, job_id, title, locale="en-US",
         "status": "queued",
         "claimed_by": None,
         "claimed_at": None,
+        "last_heartbeat_at": None,
+        "lease_expires_at": None,
         "failure_count": 0,
         "max_retries": max_retries,
         "override": None,
@@ -98,7 +100,7 @@ def enqueue_job(manifest, job_id, title, locale="en-US",
 
 
 def claim_job(manifest, job_id, volunteer_id, now=None, expected_version=None,
-              admin_override=None):
+              admin_override=None, lease_duration_seconds=900):
     """Claim a job if the manifest version and volunteer fit."""
     _require_version(manifest, expected_version)
 
@@ -139,18 +141,43 @@ def claim_job(manifest, job_id, volunteer_id, now=None, expected_version=None,
     job["status"] = "claimed"
     job["claimed_by"] = volunteer_id
     job["claimed_at"] = ts
+    job["last_heartbeat_at"] = ts
+    job["lease_expires_at"] = _lease_expires_at(now, lease_duration_seconds)
     job["override"] = deepcopy(admin_override) if admin_override else None
     job["history"].append({
         "action": history_action,
         "volunteer_id": volunteer_id,
         "prior_volunteer_id": prior_claimant_id,
         "timestamp": ts,
+        "lease_expires_at": job["lease_expires_at"],
         "override": deepcopy(admin_override) if admin_override else None,
     })
 
     state["volunteers"][volunteer_id] = volunteer
     state["jobs"][job_id] = job
     state["metrics"]["jobs_claimed"] += 1
+    state["version"] += 1
+    return state
+
+
+def heartbeat_job(manifest, job_id, volunteer_id, now=None,
+                  lease_duration_seconds=900):
+    """Refresh heartbeat and lease metadata for a claimed job."""
+    state = deepcopy(manifest)
+    job = deepcopy(state["jobs"][job_id])
+    if job["claimed_by"] != volunteer_id or job["status"] != "claimed":
+        raise ClaimConflictError(f"{volunteer_id} does not own {job_id}")
+
+    ts = _iso8601(now)
+    job["last_heartbeat_at"] = ts
+    job["lease_expires_at"] = _lease_expires_at(now, lease_duration_seconds)
+    job["history"].append({
+        "action": "heartbeat",
+        "volunteer_id": volunteer_id,
+        "timestamp": ts,
+        "lease_expires_at": job["lease_expires_at"],
+    })
+    state["jobs"][job_id] = job
     state["version"] += 1
     return state
 
@@ -168,6 +195,8 @@ def release_job(manifest, job_id, volunteer_id, reason="", now=None):
     job["status"] = "queued"
     job["claimed_by"] = None
     job["claimed_at"] = None
+    job["last_heartbeat_at"] = None
+    job["lease_expires_at"] = None
     job["history"].append({
         "action": "released",
         "volunteer_id": volunteer_id,
@@ -219,6 +248,8 @@ def record_job_result(manifest, job_id, volunteer_id, success, now=None,
     })
     job["claimed_by"] = None
     job["claimed_at"] = None
+    job["last_heartbeat_at"] = None
+    job["lease_expires_at"] = None
 
     state["volunteers"][volunteer_id] = volunteer
     state["jobs"][job_id] = job
@@ -339,3 +370,10 @@ def _iso8601(value):
         return value.astimezone(timezone.utc).isoformat().replace(
             "+00:00", "Z")
     return str(value)
+
+
+def _lease_expires_at(now, lease_duration_seconds):
+    current = now or datetime.now(timezone.utc)
+    if not isinstance(current, datetime):
+        return str(current)
+    return _iso8601(current + timedelta(seconds=lease_duration_seconds))

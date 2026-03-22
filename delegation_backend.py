@@ -13,7 +13,7 @@ from delegation_queue import (
     LocaleMismatchError,
     approve_volunteer,
     claim_job,
-    create_manifest,
+    heartbeat_job,
     enqueue_job,
     export_admin_queue_payload,
     export_manifest_snapshot,
@@ -21,11 +21,12 @@ from delegation_queue import (
     register_volunteer,
     release_job,
 )
+from delegation_store import InMemoryDelegationStateStore
 
 
 TRUST_BOUNDARIES = {
-    "admin_view": "authoritative operator snapshot",
-    "volunteer_clients": "untrusted claimants",
+    "trusted_operator": "authoritative operator control plane",
+    "trusted_workers": "authenticated workers claim from live state",
     "static_exports": "semi-trusted copies, never claim from them",
 }
 
@@ -38,30 +39,8 @@ class BackendResponse:
     body: dict[str, Any]
 
 
-class InMemoryDelegationStore:
-    """Minimal manifest store used by tests and local backend wiring."""
-
-    def __init__(self, now=None):
-        self._now = now
-        self._manifest = create_manifest()
-        self._admin_queue = export_admin_queue_payload({})
-
-    def load_manifest(self):
-        return self._manifest
-
-    def save_manifest(self, manifest):
-        self._manifest = manifest
-
-    def load_admin_queue(self):
-        return self._admin_queue
-
-    def save_admin_queue(self, payload):
-        self._admin_queue = payload
-
-    def now(self):
-        if self._now is None:
-            return None
-        return self._now()
+class InMemoryDelegationStore(InMemoryDelegationStateStore):
+    """Backward-compatible in-memory delegation store."""
 
 
 class DelegationBackend:
@@ -77,14 +56,15 @@ class DelegationBackend:
         try:
             if method == "POST" and path == (
                     "/api/delegation/admin/volunteers/register"):
-                manifest = register_volunteer(
-                    self.store.load_manifest(),
-                    body["volunteer_id"],
-                    body["capabilities"],
-                    locales=body.get("locales"),
-                    max_claims=body.get("max_claims", 1),
+                manifest = self.store.mutate_manifest(
+                    lambda current: register_volunteer(
+                        current,
+                        body["volunteer_id"],
+                        body["capabilities"],
+                        locales=body.get("locales"),
+                        max_claims=body.get("max_claims", 1),
+                    )
                 )
-                self.store.save_manifest(manifest)
                 volunteer = manifest["volunteers"][body["volunteer_id"]]
                 return self._ok({
                     "volunteer": volunteer,
@@ -93,12 +73,13 @@ class DelegationBackend:
 
             if method == "POST" and path == (
                     "/api/delegation/admin/volunteers/approve"):
-                manifest = approve_volunteer(
-                    self.store.load_manifest(),
-                    body["volunteer_id"],
-                    admin_id=body["admin_id"],
+                manifest = self.store.mutate_manifest(
+                    lambda current: approve_volunteer(
+                        current,
+                        body["volunteer_id"],
+                        admin_id=body["admin_id"],
+                    )
                 )
-                self.store.save_manifest(manifest)
                 volunteer = manifest["volunteers"][body["volunteer_id"]]
                 return self._ok({
                     "volunteer": volunteer,
@@ -106,46 +87,60 @@ class DelegationBackend:
                 })
 
             if method == "POST" and path == "/api/delegation/admin/jobs/enqueue":
-                manifest = enqueue_job(
-                    self.store.load_manifest(),
-                    body["job_id"],
-                    title=body["title"],
-                    locale=body.get("locale", "en-US"),
-                    required_capabilities=body.get("required_capabilities"),
-                    max_retries=body.get("max_retries", 3),
+                manifest = self.store.mutate_manifest(
+                    lambda current: enqueue_job(
+                        current,
+                        body["job_id"],
+                        title=body["title"],
+                        locale=body.get("locale", "en-US"),
+                        required_capabilities=body.get(
+                            "required_capabilities"),
+                        max_retries=body.get("max_retries", 3),
+                    )
                 )
-                self.store.save_manifest(manifest)
                 job = manifest["jobs"][body["job_id"]]
                 return self._ok({
                     "job": job,
                     "manifest_version": manifest["version"],
                 })
 
-            if method == "POST" and path == "/api/delegation/volunteer/jobs/claim":
-                manifest = claim_job(
-                    self.store.load_manifest(),
-                    body["job_id"],
-                    body["volunteer_id"],
-                    now=self.store.now(),
+            if method == "POST" and path in (
+                    "/api/delegation/volunteer/jobs/claim",
+                    "/api/delegation/trusted-worker/jobs/claim"):
+                volunteer_id = body.get("volunteer_id", body.get("worker_id"))
+                manifest = self.store.mutate_manifest(
+                    lambda current: claim_job(
+                        current,
+                        body["job_id"],
+                        volunteer_id,
+                        now=self.store.now(),
+                        expected_version=body.get("expected_version"),
+                        lease_duration_seconds=self.store.
+                        lease_duration_seconds(),
+                    ),
                     expected_version=body.get("expected_version"),
                 )
-                self.store.save_manifest(manifest)
                 job = manifest["jobs"][body["job_id"]]
                 return self._ok({
                     "job": job,
+                    "lease": self._lease_payload(job),
                     "manifest_version": manifest["version"],
                     "trust_boundary": "server_manifest_authoritative",
                 })
 
-            if method == "POST" and path == "/api/delegation/volunteer/jobs/release":
-                manifest = release_job(
-                    self.store.load_manifest(),
-                    body["job_id"],
-                    body["volunteer_id"],
-                    reason=body.get("reason", ""),
-                    now=self.store.now(),
+            if method == "POST" and path in (
+                    "/api/delegation/volunteer/jobs/release",
+                    "/api/delegation/trusted-worker/jobs/release"):
+                volunteer_id = body.get("volunteer_id", body.get("worker_id"))
+                manifest = self.store.mutate_manifest(
+                    lambda current: release_job(
+                        current,
+                        body["job_id"],
+                        volunteer_id,
+                        reason=body.get("reason", ""),
+                        now=self.store.now(),
+                    )
                 )
-                self.store.save_manifest(manifest)
                 job = manifest["jobs"][body["job_id"]]
                 return self._ok({
                     "job": job,
@@ -154,20 +149,44 @@ class DelegationBackend:
                     "trust_boundary": "server_manifest_authoritative",
                 })
 
-            if method == "POST" and path == "/api/delegation/volunteer/jobs/result":
-                manifest = record_job_result(
-                    self.store.load_manifest(),
-                    body["job_id"],
-                    body["volunteer_id"],
-                    success=body["success"],
-                    now=self.store.now(),
-                    error=body.get("error", ""),
+            if method == "POST" and path in (
+                    "/api/delegation/volunteer/jobs/result",
+                    "/api/delegation/trusted-worker/jobs/result"):
+                volunteer_id = body.get("volunteer_id", body.get("worker_id"))
+                manifest = self.store.mutate_manifest(
+                    lambda current: record_job_result(
+                        current,
+                        body["job_id"],
+                        volunteer_id,
+                        success=body["success"],
+                        now=self.store.now(),
+                        error=body.get("error", ""),
+                    )
                 )
-                self.store.save_manifest(manifest)
                 job = manifest["jobs"][body["job_id"]]
                 return self._ok({
                     "job": job,
                     "metrics": manifest["metrics"],
+                    "manifest_version": manifest["version"],
+                    "trust_boundary": "server_manifest_authoritative",
+                })
+
+            if method == "POST" and path == (
+                    "/api/delegation/trusted-worker/jobs/heartbeat"):
+                manifest = self.store.mutate_manifest(
+                    lambda current: heartbeat_job(
+                        current,
+                        body["job_id"],
+                        body["worker_id"],
+                        now=self.store.now(),
+                        lease_duration_seconds=self.store.
+                        lease_duration_seconds(),
+                    )
+                )
+                job = manifest["jobs"][body["job_id"]]
+                return self._ok({
+                    "job": job,
+                    "lease": self._lease_payload(job),
                     "manifest_version": manifest["version"],
                     "trust_boundary": "server_manifest_authoritative",
                 })
@@ -177,15 +196,19 @@ class DelegationBackend:
                     "admin_id": body["admin_id"],
                     "reason": body["reason"],
                 }
-                manifest = claim_job(
-                    self.store.load_manifest(),
-                    body["job_id"],
-                    body["volunteer_id"],
-                    now=self.store.now(),
+                manifest = self.store.mutate_manifest(
+                    lambda current: claim_job(
+                        current,
+                        body["job_id"],
+                        body["volunteer_id"],
+                        now=self.store.now(),
+                        expected_version=body.get("expected_version"),
+                        admin_override=override,
+                        lease_duration_seconds=self.store.
+                        lease_duration_seconds(),
+                    ),
                     expected_version=body.get("expected_version"),
-                    admin_override=override,
                 )
-                self.store.save_manifest(manifest)
                 job = manifest["jobs"][body["job_id"]]
                 return self._ok({
                     "job": job,
@@ -201,7 +224,12 @@ class DelegationBackend:
                 self.store.save_admin_queue(payload)
                 return self._ok(payload)
 
-            if method == "GET" and path == "/api/delegation/admin/export":
+            if method == "POST" and path == "/api/delegation/trusted-worker/poll":
+                return self._ok(self._worker_poll_payload(body["worker_id"]))
+
+            if method == "GET" and path in (
+                    "/api/delegation/admin/export",
+                    "/api/delegation/trusted-operator/export"):
                 return self._ok({
                     "manifest": export_manifest_snapshot(
                         self.store.load_manifest()),
@@ -236,3 +264,56 @@ class DelegationBackend:
             "manifest_version": self.store.load_manifest()["version"],
             "trust_boundary": "server_manifest_authoritative",
         })
+
+    def _worker_poll_payload(self, worker_id):
+        manifest = self.store.load_manifest()
+        worker = manifest["volunteers"][worker_id]
+        if not worker.get("approved"):
+            raise ApprovalRequiredError(worker_id)
+
+        eligible_jobs = []
+        active_claims = []
+        at_capacity = worker["active_claims"] >= worker["max_claims"]
+        for job_id in sorted(manifest["jobs"]):
+            job = manifest["jobs"][job_id]
+            if job["claimed_by"] == worker_id and job["status"] == "claimed":
+                active_claims.append(self._public_job(job))
+                continue
+            if at_capacity or job["status"] != "queued":
+                continue
+            if not self._worker_can_claim(job, worker):
+                continue
+            eligible_jobs.append(self._public_job(job))
+
+        return {
+            "worker": worker,
+            "eligible_jobs": eligible_jobs,
+            "active_claims": active_claims,
+            "manifest_version": manifest["version"],
+            "lease_duration_seconds": self.store.lease_duration_seconds(),
+            "trust_boundary": "trusted_worker_server_filtered",
+        }
+
+    def _worker_can_claim(self, job, worker):
+        required = set(job["required_capabilities"])
+        actual = set(worker["capabilities"])
+        if not required.issubset(actual):
+            return False
+        return self._locale_matches(job["locale"], worker["locales"])
+
+    def _locale_matches(self, job_locale, worker_locales):
+        if "*" in worker_locales or job_locale in worker_locales:
+            return True
+        return job_locale.split("-", 1)[0] in worker_locales
+
+    def _lease_payload(self, job):
+        return {
+            "duration_seconds": self.store.lease_duration_seconds(),
+            "last_heartbeat_at": job["last_heartbeat_at"],
+            "expires_at": job["lease_expires_at"],
+        }
+
+    def _public_job(self, job):
+        visible = dict(job)
+        visible.pop("history", None)
+        return visible

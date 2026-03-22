@@ -115,8 +115,8 @@ test('GET /api/delegation serves stored export bundle and fallback trust boundar
           counts: {},
         },
         trust_boundaries: {
-          admin_view: 'authoritative operator snapshot',
-          volunteer_clients: 'untrusted claimants',
+          trusted_operator: 'authoritative operator control plane',
+          trusted_workers: 'authenticated workers claim from live state',
           static_exports: 'semi-trusted copies, never claim from them',
         },
       },
@@ -157,7 +157,7 @@ test('GET /api/delegation serves stored export bundle and fallback trust boundar
   assert.equal(fallbackBody.manifest.version, 0);
   assert.equal(fallbackBody.admin_queue.papers[0].queue_section, 'bridge');
   assert.equal(
-    fallbackBody.trust_boundaries.volunteer_clients,
-    'untrusted claimants',
+    fallbackBody.trust_boundaries.trusted_workers,
+    'authenticated workers claim from live state',
   );
 });

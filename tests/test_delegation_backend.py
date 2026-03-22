@@ -267,7 +267,7 @@ class TestDelegationBackendFlows:
         assert exported.body["manifest"]["jobs"][0]["job_id"] == "job-1"
         assert exported.body["admin_queue"]["papers"][0]["queue_section"] == "bridge"
         assert exported.body["trust_boundaries"] == {
-            "admin_view": "authoritative operator snapshot",
-            "volunteer_clients": "untrusted claimants",
+            "trusted_operator": "authoritative operator control plane",
+            "trusted_workers": "authenticated workers claim from live state",
             "static_exports": "semi-trusted copies, never claim from them",
         }

@@ -2097,8 +2097,8 @@ async function getDelegationExport(env) {
       },
       admin_queue: queue,
       trust_boundaries: {
-        admin_view: 'authoritative operator snapshot',
-        volunteer_clients: 'untrusted claimants',
+        trusted_operator: 'authoritative operator control plane',
+        trusted_workers: 'authenticated workers claim from live state',
         static_exports: 'semi-trusted copies, never claim from them',
       },
     };
