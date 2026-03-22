@@ -456,15 +456,17 @@ class EditorialScorer:
             )
 
             rec.memory_score = clamp(
-                w_mem.get("direct_memory_relevance", 0.35)
+                w_mem.get("direct_memory_relevance", 0.30)
                     * rec.direct_memory_relevance
-                + w_mem.get("systems_leverage", 0.20)
+                + w_mem.get("systems_leverage", 0.18)
                     * rec.systems_leverage
                 + w_mem.get("deployment_proximity", 0.15)
                     * rec.deployment_proximity
-                + w_mem.get("evidence", 0.15) * rec.evidence_score
-                + w_mem.get("memory_adjacent_future_value", 0.15)
+                + w_mem.get("evidence", 0.12) * rec.evidence_score
+                + w_mem.get("memory_adjacent_future_value", 0.10)
                     * rec.memory_adjacent_future_value
+                + w_mem.get("bandwidth_capacity", 0.15)
+                    * rec.bandwidth_capacity
             )
 
             rec.quality_score = clamp(
@@ -536,21 +538,54 @@ class EditorialScorer:
         shortlist_cfg = self.weights.get("shortlist", {})
         size = shortlist_cfg.get("size", 100)
         min_max_axis = shortlist_cfg.get("min_max_axis", 0.15)
+        memory_pool_size = min(
+            size, shortlist_cfg.get("memory_pool_size", 20))
+        memory_min_score = shortlist_cfg.get(
+            "memory_min_score", 0.25)
 
         # Filter out papers below minimum threshold
         eligible = [r for r in records
                     if r.max_axis_score >= min_max_axis]
 
-        # Sort by composite ranking signal
-        eligible.sort(
-            key=lambda r: (
-                r.max_axis_score
-                + bridge_bonus * r.bridge_score
-                + 0.2 * r.quality_score
-                + 0.1 * r.novelty_score),
-            reverse=True)
+        def _global_rank(rec):
+            return (
+                rec.max_axis_score
+                + bridge_bonus * rec.bridge_score
+                + 0.2 * rec.quality_score
+                + 0.1 * rec.novelty_score
+            )
 
-        shortlist = eligible[:size]
+        def _memory_rank(rec):
+            return (
+                rec.memory_score
+                + 0.25 * rec.bridge_score
+                + 0.15 * rec.quality_score
+                + 0.10 * rec.novelty_score
+                + 0.10 * rec.bandwidth_capacity
+            )
+
+        global_ranked = sorted(
+            eligible, key=_global_rank, reverse=True)
+        memory_ranked = sorted(
+            [r for r in eligible if r.memory_score >= memory_min_score],
+            key=_memory_rank, reverse=True)
+
+        shortlist = []
+        selected_ids = set()
+        for rec in memory_ranked:
+            if len(shortlist) >= memory_pool_size:
+                break
+            shortlist.append(rec)
+            selected_ids.add(rec.arxiv_id)
+
+        for rec in global_ranked:
+            if len(shortlist) >= size:
+                break
+            if rec.arxiv_id in selected_ids:
+                continue
+            shortlist.append(rec)
+            selected_ids.add(rec.arxiv_id)
+
         _log("[Editorial]",
              f"Shortlist: {_c('bold', str(len(shortlist)))} papers "
              f"({_c('dim', f'from {len(eligible)} eligible')})")

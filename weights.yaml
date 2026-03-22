@@ -11,11 +11,12 @@ public_interest:
   evidence: 0.15
 
 memory:
-  direct_memory_relevance: 0.35
-  systems_leverage: 0.20
+  direct_memory_relevance: 0.30
+  systems_leverage: 0.18
   deployment_proximity: 0.15
-  evidence: 0.15
-  memory_adjacent_future_value: 0.15
+  evidence: 0.12
+  memory_adjacent_future_value: 0.10
+  bandwidth_capacity: 0.15
 
 quality:
   evidence: 0.40
@@ -42,6 +43,8 @@ penalties:
 shortlist:
   size: 100
   min_max_axis: 0.15
+  memory_pool_size: 20
+  memory_min_score: 0.25
 
 # Final queue allocation
 final_queue:
@@ -49,3 +52,7 @@ final_queue:
   public: 10
   memory: 10
   diversity_cap: 3
+  bridge_min_score: 0.30
+  public_min_score: 0.35
+  memory_min_score: 0.25
+  memory_first_score: 0.40

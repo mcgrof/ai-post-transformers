@@ -12,6 +12,9 @@ arxiv_categories:
 - cs.CL
 - cs.CV
 - cs.AR
+- cs.DC
+- cs.PF
+- cs.DB
 interests:
   primary:
   - KV cache scaling laws, KV cache compression, attention efficiency, paged attention

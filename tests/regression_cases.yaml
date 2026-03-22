@@ -134,3 +134,24 @@ cases:
       memory_score_low: true
       expected_status: "Cover now"
       expected_badges_contain: "Public AI"
+
+  - name: cross_category_memory_systems
+    description: >
+      Cross-category math + systems paper with real memory relevance.
+      It should not be starved merely because the primary category is
+      outside the core fetch set when systems relevance is explicit.
+    paper:
+      arxiv_id: "9999.00006"
+      title: "Cache Algebra: Scheduling KV Memory Across Disaggregated LLM Clusters"
+      abstract: >
+        We introduce a matrix-based scheduler for KV cache placement in
+        disaggregated LLM serving clusters. The method jointly optimizes
+        memory bandwidth, CXL-attached DRAM tiering, cache reuse, and
+        data movement across prefill and decode workers, delivering
+        1.8x higher serving throughput on multi-node deployments.
+      authors: ["Jamie Lin", "Morgan Lee"]
+      categories: ["cs.MA", "cs.DC", "cs.LG"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      memory_score_high: true
+      expected_status: "Cover now"

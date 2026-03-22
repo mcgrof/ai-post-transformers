@@ -244,6 +244,10 @@ def build_final_queue(reviewed, all_records, config):
     n_public = fq.get("public", 10)
     n_memory = fq.get("memory", 10)
     diversity_cap = fq.get("diversity_cap", 3)
+    bridge_min = fq.get("bridge_min_score", 0.30)
+    public_min = fq.get("public_min_score", 0.35)
+    memory_min = fq.get("memory_min_score", 0.25)
+    memory_first_score = fq.get("memory_first_score", 0.40)
 
     cover_now = [r for r in reviewed if r.status == "Cover now"]
     monitor = [r for r in reviewed if r.status == "Monitor"]
@@ -264,14 +268,14 @@ def build_final_queue(reviewed, all_records, config):
     memory_first = []
 
     for r in cover_now:
-        if "Bridge" in r.badges or (
-                r.public_interest_score > 0.3
-                and r.memory_score > 0.3):
+        if _is_bridge_candidate(r, bridge_min):
             bridge.append(r)
-        elif r.public_interest_score > r.memory_score:
-            public_first.append(r)
-        else:
+        elif _is_memory_candidate(r, memory_min):
+            _add_memory_bucket_label(
+                r, memory_first_score=memory_first_score)
             memory_first.append(r)
+        else:
+            public_first.append(r)
 
     # Sort each bucket by quality
     bridge.sort(key=lambda r: r.bridge_score, reverse=True)
@@ -291,34 +295,31 @@ def build_final_queue(reviewed, all_records, config):
         memory_first, diversity_cap)[:n_memory]
 
     # Backfill sparse buckets from Monitor, but keep category integrity.
-    def _fits_bridge(r):
-        return (
-            "Bridge" in r.badges
-            or (r.public_interest_score > 0.3 and r.memory_score > 0.3)
-        )
-
-    def _fits_public(r):
-        return r.public_interest_score >= max(0.35, r.memory_score)
-
-    def _fits_memory(r):
-        return (
-            "Memory/Storage Core" in r.badges
-            or "Memory/Storage Adjacent" in r.badges
-            or r.memory_score >= 0.35
-        ) and r.memory_score >= r.public_interest_score
-
-    for bucket, target, pred in [
-            (bridge, n_bridge, _fits_bridge),
-            (public_first, n_public, _fits_public),
-            (memory_first, n_memory, _fits_memory)]:
-        i = 0
-        while len(bucket) < target and i < len(monitor):
-            cand = monitor[i]
-            if pred(cand):
-                bucket.append(cand)
-                monitor.pop(i)
-            else:
-                i += 1
+    for bucket, target, pred, ranker in [
+            (bridge, n_bridge,
+             lambda r: _is_bridge_candidate(r, bridge_min),
+             lambda r: r.bridge_score + 0.2 * r.quality_score),
+            (public_first, n_public,
+             lambda r: r.public_interest_score >= public_min,
+             lambda r: r.public_interest_score + 0.2 * r.quality_score),
+            (memory_first, n_memory,
+             lambda r: _is_memory_candidate(r, memory_min),
+             lambda r: (
+                 r.memory_score + 0.2 * r.quality_score
+                 + 0.1 * r.bandwidth_capacity
+             ))]:
+        for cand in sorted(monitor, key=ranker, reverse=True):
+            if len(bucket) >= target:
+                break
+            if not pred(cand):
+                continue
+            if cand in bucket:
+                continue
+            if bucket is memory_first:
+                _add_memory_bucket_label(
+                    cand, memory_first_score=memory_first_score)
+            bucket.append(cand)
+            monitor.remove(cand)
 
     # Remaining reviewed papers that weren't placed go to monitor,
     # but skip those already in deferred or out_of_scope
@@ -343,6 +344,32 @@ def build_final_queue(reviewed, all_records, config):
         "deferred": deferred,
         "out_of_scope": out_of_scope,
     }
+
+
+def _is_bridge_candidate(rec, bridge_min):
+    return (
+        "Bridge" in rec.badges
+        or (rec.public_interest_score >= bridge_min
+            and rec.memory_score >= bridge_min)
+    )
+
+
+def _is_memory_candidate(rec, memory_min):
+    return (
+        "Memory/Storage Core" in rec.badges
+        or "Memory/Storage Adjacent" in rec.badges
+        or rec.memory_score >= memory_min
+    )
+
+
+def _add_memory_bucket_label(rec, memory_first_score):
+    label = "Memory-first" if (
+        "Memory/Storage Core" in rec.badges
+        or rec.memory_score >= memory_first_score
+        or rec.memory_score >= rec.public_interest_score
+    ) else "Memory-relevant"
+    if label not in rec.badges:
+        rec.badges.append(label)
 
 
 def _apply_diversity_cap(records, cap):
