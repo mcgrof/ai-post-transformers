@@ -106,8 +106,14 @@ def claim_job(manifest, job_id, volunteer_id, now=None, expected_version=None,
     volunteer = deepcopy(state["volunteers"][volunteer_id])
     job = deepcopy(state["jobs"][job_id])
 
+    prior_claimant_id = job["claimed_by"]
+    prior_claimant = None
+    if prior_claimant_id is not None:
+        prior_claimant = deepcopy(state["volunteers"][prior_claimant_id])
+
     if job["status"] != "queued":
-        raise ClaimConflictError(f"job {job_id} is not claimable")
+        if not admin_override or job["status"] != "claimed":
+            raise ClaimConflictError(f"job {job_id} is not claimable")
 
     if not admin_override:
         if not volunteer.get("approved"):
@@ -118,14 +124,26 @@ def claim_job(manifest, job_id, volunteer_id, now=None, expected_version=None,
             raise CapacityExceededError(volunteer_id)
 
     ts = _iso8601(now)
-    volunteer["active_claims"] += 1
+    history_action = "claimed"
+    if job["status"] == "claimed" and admin_override:
+        history_action = "reclaimed"
+        if prior_claimant and prior_claimant_id != volunteer_id:
+            prior_claimant["active_claims"] = max(
+                0, prior_claimant["active_claims"] - 1)
+            state["volunteers"][prior_claimant_id] = prior_claimant
+        if prior_claimant_id != volunteer_id:
+            volunteer["active_claims"] += 1
+    else:
+        volunteer["active_claims"] += 1
+
     job["status"] = "claimed"
     job["claimed_by"] = volunteer_id
     job["claimed_at"] = ts
     job["override"] = deepcopy(admin_override) if admin_override else None
     job["history"].append({
-        "action": "claimed",
+        "action": history_action,
         "volunteer_id": volunteer_id,
+        "prior_volunteer_id": prior_claimant_id,
         "timestamp": ts,
         "override": deepcopy(admin_override) if admin_override else None,
     })
