@@ -1936,6 +1936,9 @@ async function handleAPI(path, request, env) {
     case '/api/queue':
       return await getQueue(env);
 
+    case '/api/delegation':
+      return await getDelegationExport(env);
+
     case '/api/submissions':
       return await getSubmissions(env);
 
@@ -1977,7 +1980,7 @@ async function getDashboardStats(env) {
     const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');
     if (queueData) {
       const queue = await queueData.json();
-      stats.queueSize = queue.papers?.length || 0;
+      stats.queueSize = normalizeQueuePayload(queue).papers.length;
     }
 
     // Count submissions
@@ -2058,13 +2061,104 @@ async function getQueue(env) {
   try {
     const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');
     if (!queueData) {
-      return { papers: [] };
+      return normalizeQueuePayload(null);
     }
     const queue = await queueData.json();
-    return { papers: queue };
+    return normalizeQueuePayload(queue);
   } catch (error) {
     return { error: error.message, papers: [] };
   }
+}
+
+async function getDelegationExport(env) {
+  try {
+    const delegationData = await env.ADMIN_BUCKET.get('delegation/admin/latest.json');
+    if (delegationData) {
+      return await delegationData.json();
+    }
+
+    const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');
+    const queue = queueData ? normalizeQueuePayload(await queueData.json())
+      : normalizeQueuePayload(null);
+
+    return {
+      manifest: {
+        version: 0,
+        jobs: [],
+        volunteers: [],
+        metrics: {
+          jobs_claimed: 0,
+          jobs_released: 0,
+          jobs_succeeded: 0,
+          jobs_failed: 0,
+          by_volunteer: {},
+          by_locale: {},
+        },
+      },
+      admin_queue: queue,
+      trust_boundaries: {
+        admin_view: 'authoritative operator snapshot',
+        volunteer_clients: 'untrusted claimants',
+        static_exports: 'semi-trusted copies, never claim from them',
+      },
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      manifest: { version: 0, jobs: [], volunteers: [], metrics: {} },
+      admin_queue: normalizeQueuePayload(null),
+    };
+  }
+}
+
+function normalizeQueuePayload(queue) {
+  if (!queue) {
+    return { papers: [], sections: {}, counts: {} };
+  }
+
+  if (Array.isArray(queue)) {
+    return { papers: queue, sections: {}, counts: {} };
+  }
+
+  if (Array.isArray(queue.papers)) {
+    return {
+      papers: queue.papers,
+      sections: queue.sections || {},
+      counts: queue.counts || {},
+      exported_at: queue.exported_at,
+    };
+  }
+
+  const papers = [];
+  const sections = {};
+  const counts = {};
+
+  for (const [sectionName, records] of Object.entries(queue)) {
+    if (!Array.isArray(records)) {
+      continue;
+    }
+    sections[sectionName] = records;
+    counts[sectionName] = records.length;
+    for (const record of records) {
+      papers.push({
+        queue_section: sectionName,
+        score: queueScore(record),
+        ...record,
+      });
+    }
+  }
+
+  return { papers, sections, counts };
+}
+
+function queueScore(record) {
+  for (const key of ['max_axis_score', 'public_interest_score', 'memory_score']) {
+    const value = record?.[key];
+    if (typeof value === 'number') {
+      return value;
+    }
+  }
+  return 0;
 }
 
 // Get submissions
