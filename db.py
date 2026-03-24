@@ -3,10 +3,38 @@
 import re
 import sqlite3
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "papers.db"
+LEGACY_FEED_PATH = Path(__file__).parent / "podcasts" / "anchor_feed.xml"
+ARXIV_ID_RE = re.compile(r'(\d{4}\.\d{4,5})(?:v\d+)?')
+
+
+def _extract_arxiv_ids_from_text(text):
+    if not text:
+        return set()
+    return {m.group(1) for m in ARXIV_ID_RE.finditer(text)}
+
+
+def _get_legacy_episode_arxiv_ids(feed_path=None):
+    """Extract arXiv IDs from legacy Anchor feed descriptions/links."""
+    path = Path(feed_path or LEGACY_FEED_PATH)
+    if not path.exists():
+        return set()
+    try:
+        tree = ET.parse(path)
+    except ET.ParseError:
+        return set()
+
+    ids = set()
+    for item in tree.findall('./channel/item'):
+        for tag in ('description', 'link', 'guid'):
+            elem = item.find(tag)
+            if elem is not None and elem.text:
+                ids.update(_extract_arxiv_ids_from_text(elem.text))
+    return ids
 
 
 def get_connection(db_path=None):
@@ -211,45 +239,66 @@ def get_all_episode_arxiv_ids(conn):
     for row in rows:
         try:
             for url in json.loads(row["source_urls"]):
-                m = re.search(r'(\d{4}\.\d{4,5})', url)
-                if m:
-                    ids.add(m.group(1))
+                ids.update(_extract_arxiv_ids_from_text(url))
         except (json.JSONDecodeError, TypeError):
             pass
+    ids.update(_get_legacy_episode_arxiv_ids())
     return ids
 
 
 def get_episodes_by_arxiv_id(conn):
     """Map each arXiv ID to the list of episodes that reference it.
 
-    Combines podcast_papers junction table entries with arXiv IDs
-    extracted from the source_urls JSON column. Returns a
-    defaultdict(list) mapping arXiv ID strings to episode dicts.
+    Combines podcast_papers junction table entries, arXiv IDs
+    extracted from the source_urls JSON column, and legacy feed
+    episodes from anchor_feed.xml.
     """
     from collections import defaultdict
     episodes = list_podcasts(conn)
     mapping = defaultdict(list)
     for ep in episodes:
         aids = set()
-        # Junction table IDs
         paper_ids = ep.get("paper_ids")
         if paper_ids:
             for aid in paper_ids.split(","):
                 aid = aid.strip()
                 if aid:
                     aids.add(aid)
-        # Source URL IDs
         source_urls = ep.get("source_urls")
         if source_urls:
             try:
                 for url in json.loads(source_urls):
-                    m = re.search(r'(\d{4}\.\d{4,5})', url)
-                    if m:
-                        aids.add(m.group(1))
+                    aids.update(_extract_arxiv_ids_from_text(url))
             except (json.JSONDecodeError, TypeError):
                 pass
         for aid in aids:
             mapping[aid].append(ep)
+
+    if LEGACY_FEED_PATH.exists():
+        try:
+            tree = ET.parse(LEGACY_FEED_PATH)
+            for item in tree.findall('./channel/item'):
+                aids = set()
+                title = item.findtext('title', default='')
+                link = item.findtext('link', default='')
+                description = item.findtext('description', default='')
+                pub_date = item.findtext('pubDate', default='')
+                for text in (title, link, description):
+                    aids.update(_extract_arxiv_ids_from_text(text))
+                if not aids:
+                    continue
+                episode = {
+                    'title': title,
+                    'publish_date': pub_date,
+                    'audio_file': item.findtext('enclosure', default=''),
+                    'description': description,
+                    'legacy': True,
+                    'link': link,
+                }
+                for aid in aids:
+                    mapping[aid].append(episode)
+        except ET.ParseError:
+            pass
     return mapping
 
 

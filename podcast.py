@@ -255,6 +255,77 @@ def _format_source_citation(papers_info):
     return header + "\n\n" + "\n\n".join(sections)
 
 
+def _extract_arxiv_id(url):
+    """Extract arXiv id from common arxiv URL forms."""
+    if not url:
+        return None
+    m = re.search(r'arxiv\.org/(?:abs|pdf|html)/([^?#]+)', url)
+    if not m:
+        return None
+    arxiv_id = m.group(1)
+    arxiv_id = arxiv_id.replace('.pdf', '')
+    return arxiv_id
+
+
+def _resolve_source_info(conn, url, fallback_title=""):
+    """Resolve a source URL into title/authors/year/url metadata when possible."""
+    info = {"title": fallback_title or url, "authors": "", "year": "", "url": url}
+    arxiv_id = _extract_arxiv_id(url)
+    if not arxiv_id:
+        return info
+
+    paper = _find_paper(conn, arxiv_id)
+    if paper is None:
+        try:
+            from paper_queue import _fetch_arxiv_meta
+            paper = _fetch_arxiv_meta(arxiv_id)
+            if paper:
+                # keep DB warm so future lookups are cheap
+                from db import upsert_paper
+                upsert_paper(conn, paper)
+                conn.commit()
+        except Exception:
+            paper = None
+
+    if not paper:
+        info["title"] = fallback_title or arxiv_id
+        return info
+
+    authors = paper.get("authors", "")
+    if isinstance(authors, str):
+        try:
+            authors = json.loads(authors)
+        except Exception:
+            pass
+    year = ""
+    published = paper.get("published", "")
+    if published:
+        year = str(published)[:4]
+
+    info.update({
+        "title": paper.get("title") or fallback_title or arxiv_id,
+        "authors": ", ".join(authors) if isinstance(authors, list) else (authors or ""),
+        "year": year,
+        "url": paper.get("arxiv_url") or url,
+    })
+    return info
+
+
+def _format_source_entry(index, title, authors, year, url):
+    line = f"  {index}. {title}"
+    tail = []
+    if authors:
+        tail.append(authors)
+    if year:
+        tail.append(year)
+    if tail:
+        line += f" — {', '.join(tail)}"
+    lines = [line]
+    if url:
+        lines.append(f"     {url}")
+    return lines
+
+
 def _find_paper(conn, arxiv_id):
     """Look up a paper by arxiv_id in the database."""
     row = conn.execute(
@@ -457,9 +528,13 @@ def generate_podcast(config, arxiv_id=None):
     # Format description: summary + numbered sources with URLs
     desc_lines = [summary, "", "Sources:"]
     src_num = 1
-    desc_lines.append(f"  {src_num}. {paper_info['title']} — {', '.join(authors) if authors else '?'}, {paper_info.get('published', '?')[:4]}")
-    if paper_info.get("url"):
-        desc_lines.append(f"     {paper_info['url']}")
+    desc_lines.extend(_format_source_entry(
+        src_num,
+        paper_info['title'],
+        ', '.join(authors) if authors else '',
+        paper_info.get('published', '')[:4],
+        paper_info.get('url', ''),
+    ))
     src_num += 1
 
     if sources:
@@ -754,8 +829,16 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     # Build description: summary + numbered sources with URLs
     desc_lines = [summary, "", "Sources:"]
     src_num = 1
-    for url in urls:
-        desc_lines.append(f"  {src_num}. {url}")
+    for i, url in enumerate(urls):
+        fallback_title = title if i == 0 else ""
+        source_info = _resolve_source_info(conn, url, fallback_title=fallback_title)
+        desc_lines.extend(_format_source_entry(
+            src_num,
+            source_info.get('title', url),
+            source_info.get('authors', ''),
+            source_info.get('year', ''),
+            source_info.get('url', url),
+        ))
         src_num += 1
     if sources:
         for s in sources:
