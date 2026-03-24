@@ -577,12 +577,18 @@ def _render_card(ep, root_prefix="", episode_url=""):
         viz_html = "\n    ".join(parts)
 
     ep_link = f' data-href="{html.escape(episode_url)}"' if episode_url else ''
+    title_html = html.escape(ep["title"])
+    if episode_url:
+        title_html = (
+            f'<a class="card-title-link" href="{html.escape(episode_url)}" '
+            f'title="Episode page">{title_html}</a>'
+        )
     return f"""<div class="card"{ep_link}>
   <div class="card-visual">
     {img_html}
   </div>
   <div class="card-meta">
-    <div class="card-title">{html.escape(ep["title"])}</div>
+    <div class="card-title">{title_html}</div>
     <div class="card-date">{html.escape(ep["date"])}</div>
     {viz_html}
   </div>
@@ -1154,6 +1160,14 @@ h1 {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.card-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+.card-title-link:hover {
+  color: #fff;
+  text-decoration: underline;
+}
 .card-date {
   font-size: 0.72rem;
   color: #777;
@@ -1643,6 +1657,14 @@ h1 {{
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}}
+.card-title-link {{
+  color: inherit;
+  text-decoration: none;
+}}
+.card-title-link:hover {{
+  color: #fff;
+  text-decoration: underline;
 }}
 .card-date {{
   font-size: 0.72rem;
