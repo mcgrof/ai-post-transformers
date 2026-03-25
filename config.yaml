@@ -260,6 +260,12 @@ social_signals:
   pwc_enabled: true          # Papers With Code trending
   pwc_boost: 0.10            # boost for PWC trending papers
   influencer_weight: 1.0     # multiplier for influencer author matching
+  weak_sources:
+    enabled: true
+    marktechpost_enabled: true
+    marktechpost_boost: 0.03   # discovery nudge only; not a real reviewer/influencer signal
+    marktechpost_feed: https://www.marktechpost.com/feed/
+    marktechpost_recent_limit: 40
   # Custom influencers can be added here; otherwise uses built-in defaults.
   influencers:
     - name: "Omar Sanseviero"

@@ -15,6 +15,7 @@ import re
 import sys
 import time
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 
@@ -228,6 +229,58 @@ def fetch_pwc_trending():
     return arxiv_ids
 
 
+def fetch_marktechpost_mentions(config):
+    """Fetch recent MarkTechPost feed items and extract linked arXiv IDs.
+
+    This is treated as a weak discovery signal only, not an influencer/reviewer boost.
+    """
+    weak_cfg = config.get("social_signals", {}).get("weak_sources", {})
+    if not weak_cfg.get("enabled", True) or not weak_cfg.get("marktechpost_enabled", False):
+        return set()
+
+    feed_url = weak_cfg.get("marktechpost_feed", "https://www.marktechpost.com/feed/")
+    limit = int(weak_cfg.get("marktechpost_recent_limit", 40))
+    _log("[Social]", f"Fetching MarkTechPost feed ({limit} recent items)...")
+    try:
+        resp = requests.get(
+            feed_url,
+            timeout=30,
+            headers={"User-Agent": "paper-feed/1.0 (research tool)"},
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        _log("[Social]", f"MarkTechPost feed error: {e}")
+        return set()
+
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError as e:
+        _log("[Social]", f"MarkTechPost feed parse error: {e}")
+        return set()
+
+    ids = set()
+    items = root.findall('.//item')[:limit]
+    ns_content = '{http://purl.org/rss/1.0/modules/content/}encoded'
+    patterns = [
+        re.compile(r'arxiv\.org/abs/(\d{4}\.\d{4,5})'),
+        re.compile(r'arxiv\.org/pdf/(\d{4}\.\d{4,5})'),
+    ]
+    for item in items:
+        blobs = [
+            item.findtext('title', default=''),
+            item.findtext('description', default=''),
+            item.findtext('link', default=''),
+            item.findtext(ns_content, default=''),
+        ]
+        combined = '\n'.join(blobs)
+        for pattern in patterns:
+            for match in pattern.finditer(combined):
+                ids.add(match.group(1))
+
+    _log("[Social]", f"MarkTechPost mentions: {len(ids)} papers")
+    return ids
+
+
 def fetch_social_signals(papers, config):
     """Aggregate all social signals for a set of papers.
 
@@ -251,7 +304,12 @@ def fetch_social_signals(papers, config):
     if social_cfg.get("pwc_enabled", True):
         pwc_ids = fetch_pwc_trending()
 
-    # 3. Combine signals
+    # 3. Weak discovery sources
+    weak_cfg = social_cfg.get("weak_sources", {})
+    marktechpost_ids = fetch_marktechpost_mentions(config)
+    marktechpost_boost = weak_cfg.get("marktechpost_boost", 0.03)
+
+    # 4. Combine signals
     results = {}
     pwc_boost = social_cfg.get("pwc_boost", 0.10)
     influencer_weight = social_cfg.get("influencer_weight", 1.0)
@@ -260,23 +318,28 @@ def fetch_social_signals(papers, config):
         aid = paper["arxiv_id"]
         inf_data = influence.get(aid, {})
         is_pwc = aid in pwc_ids
+        is_marktechpost = aid in marktechpost_ids
 
         sources = list(inf_data.get("scoring_sources", []))
         inf_boost = inf_data.get("influencer_boost", 0.0) * influencer_weight
 
         if is_pwc:
             sources.append("pwc_trending")
+        if is_marktechpost:
+            sources.append("discovery:marktechpost")
 
         pwc_val = pwc_boost if is_pwc else 0.0
+        weak_val = marktechpost_boost if is_marktechpost else 0.0
 
         # Combined social score (don't let it exceed 0.35)
-        social_score = min(0.35, inf_boost + pwc_val)
+        social_score = min(0.35, inf_boost + pwc_val + weak_val)
 
         if sources:
             results[aid] = {
                 "influencer_boost": inf_boost,
                 "influencer_matches": inf_data.get("influencer_matches", []),
                 "pwc_trending": is_pwc,
+                "marktechpost_mentioned": is_marktechpost,
                 "social_score": social_score,
                 "scoring_sources": sources,
             }
