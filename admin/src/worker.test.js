@@ -478,6 +478,8 @@ test('GET /drafts shows the deployed admin release tag', async () => {
 
   assert.equal(response.status, 200);
   assert.ok(html.includes(ADMIN_RELEASE_TAG));
+  assert.ok(html.includes('copyReleaseTag()'));
+  assert.ok(html.includes('Copy release tag to clipboard'));
 });
 
 test('GET /api/version exposes the deployed admin release tag', async () => {

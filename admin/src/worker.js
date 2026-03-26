@@ -109,6 +109,20 @@ header {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+button.release-chip {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+}
+
+.release-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 nav {
@@ -974,8 +988,8 @@ function baseHTML(title, content, activePage) {
         <a href="/" class="logo">
           <div class="logo-icon">🎙️</div>
           <span>Admin Dashboard</span>
-          <span class="release-chip">${ADMIN_RELEASE_TAG}</span>
         </a>
+        <button type="button" class="release-chip" onclick="copyReleaseTag()" title="Copy release tag to clipboard" aria-label="Copy release tag to clipboard">${ADMIN_RELEASE_TAG}</button>
         <nav>
           <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
           <a href="/drafts"${activePage === 'drafts' ? ' class="active"' : ''}>Drafts</a>
@@ -1751,6 +1765,25 @@ function showToast(message, type = 'success') {
   toast.innerHTML = '<span>' + (type === 'success' ? '✓' : '✕') + '</span><span>' + message + '</span>';
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
+}
+
+async function copyReleaseTag() {
+  const tag = '${ADMIN_RELEASE_TAG}';
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(tag);
+    } else {
+      const input = document.createElement('input');
+      input.value = tag;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    showToast('Copied release tag: ' + tag);
+  } catch (err) {
+    showToast('Failed to copy release tag', 'error');
+  }
 }
 
 // Drafts
