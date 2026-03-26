@@ -1385,6 +1385,13 @@ document.addEventListener('click', (e) => {
   </div>
 </div>
 
+<div class="archive">
+  <h2>Browse by month</h2>
+  <div class="archive-months">
+    {month_nav_html}
+  </div>
+</div>
+
 <div class="footer">
   {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
 </div>
@@ -1540,6 +1547,13 @@ h1 {{
   <div class="ep-links">{links_html}</div>
   <div class="ep-desc">{ep["description"]}</div>
 </div>
+<div class="archive">
+  <h2>Browse by month</h2>
+  <div class="archive-months">
+    {month_nav_html}
+  </div>
+</div>
+
 <div class="footer">
   {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
 </div>
@@ -1556,6 +1570,13 @@ h1 {{
 def _generate_month_pages(sorted_months, show_title, output_dir):
     """Generate per-month archive pages under YYYY/MM/index.html."""
     import calendar
+
+    month_nav_links = []
+    for (nav_year, nav_month), _ in sorted_months:
+        nav_label = f"{calendar.month_abbr[nav_month]} {nav_year}"
+        nav_href = f"../../{nav_year}/{nav_month:02d}/index.html"
+        month_nav_links.append(f'<a href="{nav_href}">{html.escape(nav_label)}</a>')
+    month_nav_html = "\n    ".join(month_nav_links)
 
     for (year, month), month_eps in sorted_months:
         label = f"{calendar.month_name[month]} {year}"
@@ -1778,6 +1799,32 @@ h1 {{
 .card.expand-up.active .card-visual {{
   border-radius: 0 0 6px 6px;
 }}
+.archive {{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem 1.5rem;
+}}
+.archive h2 {{
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #777;
+  margin-bottom: 0.5rem;
+}}
+.archive-months {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}}
+.archive-months a {{
+  font-size: 0.75rem;
+  color: #888;
+  text-decoration: none;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #252525;
+  border-radius: 4px;
+  transition: all 0.15s;
+}}
+.archive-months a:hover {{ border-color: #e50914; color: #fff; }}
 .footer {{
   text-align: center;
   padding: 2rem;
@@ -1830,6 +1877,13 @@ h1 {{
 <div class="section">
   <div class="grid">
 {cards_html}
+  </div>
+</div>
+
+<div class="archive">
+  <h2>Browse by month</h2>
+  <div class="archive-months">
+    {month_nav_html}
   </div>
 </div>
 
