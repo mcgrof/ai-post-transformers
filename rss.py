@@ -165,6 +165,24 @@ def _normalize_description_html(desc_html):
     return desc_html
 
 
+
+
+def _search_alias_terms(text):
+    """Add search aliases for important cited papers/method names.
+
+    This helps homepage search find episodes by common misspellings, shorthand,
+    or canonical paper identifiers even when the stored source URL is a scholar
+    query rather than a direct arXiv link.
+    """
+    hay = (text or '').lower()
+    aliases = []
+
+    if 'heavy-hitter oracle' in hay or re.search(r'h2o', hay):
+        aliases.extend(['h2o', 'h20', 'heavy-hitter oracle', '2306.14048'])
+
+    return ' '.join(dict.fromkeys(aliases))
+
+
 def _build_search_index(episodes, legacy_slugs=None):
     """Build a full-catalog search index for homepage search.
 
@@ -179,13 +197,14 @@ def _build_search_index(episodes, legacy_slugs=None):
         feed_slugs.add(slug)
         desc_full = _plain_text_description(_normalize_description_html(ep.get("description", "")))
         desc_plain = _truncate_sentence(desc_full, 240)
+        alias_terms = _search_alias_terms((ep.get("title", "") or "") + "\n" + desc_full)
         search_idx.append({
             "t": ep.get("title", ""),
             "d": ep.get("date", ""),
             "s": slug,
             "u": f"episodes/{slug}/",
             "x": desc_plain,
-            "q": desc_full,
+            "q": (desc_full + ' ' + alias_terms).strip(),
             "i": ep.get("thumb_url") or ep.get("image_url", ""),
             "l": False,
         })

@@ -1,4 +1,4 @@
-from rss import _build_search_index, _format_sources_html
+from rss import _build_search_index, _format_sources_html, _search_alias_terms
 
 
 def test_build_search_index_includes_feed_episodes_and_extra_legacy_slugs():
@@ -69,3 +69,11 @@ def test_format_sources_html_splits_flattened_url_only_blob():
     html = _format_sources_html(blob)
     assert html.count('<a href="https://') == 3
     assert 'https://arxiv.org/html/2502.15734v1https://' not in html
+
+
+def test_search_alias_terms_add_h2o_variants_and_arxiv_id():
+    aliases = _search_alias_terms('H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models')
+    assert 'h2o' in aliases
+    assert 'h20' in aliases
+    assert 'heavy-hitter oracle' in aliases
+    assert '2306.14048' in aliases
