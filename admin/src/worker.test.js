@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import worker from './worker.js';
+import { ADMIN_RELEASE_TAG } from './release.js';
 
 
 class MockBucketObject {
@@ -464,6 +465,32 @@ test('GET /drafts renders public-style clickable source blocks for malformed dra
   assert.ok(html.includes('href="https://arxiv.org/abs/2412.15605"'));
   assert.ok(html.includes('href="https://arxiv.org/abs/2303.01843"'));
   assert.equal(html.includes('2502.15734https://arxiv.org/abs/2412.15605'), false);
+});
+
+test('GET /drafts shows the deployed admin release tag', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes(ADMIN_RELEASE_TAG));
+});
+
+test('GET /api/version exposes the deployed admin release tag', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/version'),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.release, ADMIN_RELEASE_TAG);
 });
 
 test('POST /api/review supports claim release and retry publish actions', async () => {

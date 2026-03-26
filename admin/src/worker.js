@@ -1,6 +1,8 @@
 // AI Post Transformers Admin Dashboard
 // Cloudflare Worker with inline HTML
 
+import { ADMIN_RELEASE_TAG } from './release.js';
+
 const GITHUB_REPO = 'mcgrof/ai-post-transformers';
 const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
 const PUBLISH_JOB_PROGRESS_STEPS = ['publish', 'viz', 'cover', 'site', 'verify'];
@@ -93,6 +95,20 @@ header {
   align-items: center;
   justify-content: center;
   font-size: 1.25rem;
+}
+
+.release-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 nav {
@@ -940,7 +956,7 @@ function baseHTML(title, content, activePage) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} - AI Post Transformers Admin</title>
+  <title>${title} - AI Post Transformers Admin (${ADMIN_RELEASE_TAG})</title>
   <style>${styles}
     .conference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
     .conference-card { display: block; padding: 1.25rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: inherit; transition: border-color 0.2s; }
@@ -958,6 +974,7 @@ function baseHTML(title, content, activePage) {
         <a href="/" class="logo">
           <div class="logo-icon">🎙️</div>
           <span>Admin Dashboard</span>
+          <span class="release-chip">${ADMIN_RELEASE_TAG}</span>
         </a>
         <nav>
           <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
@@ -978,7 +995,7 @@ function baseHTML(title, content, activePage) {
   <footer>
     <div class="container">
       <div class="footer-content">
-        <span>AI Post Transformers Admin</span>
+        <span>AI Post Transformers Admin · ${ADMIN_RELEASE_TAG}</span>
         <div class="footer-links">
           <a href="https://podcast.do-not-panic.com" target="_blank">Main Site</a>
           <a href="https://github.com/${GITHUB_REPO}" target="_blank">GitHub</a>
@@ -2229,6 +2246,9 @@ async function handleAPI(path, request, env) {
 
     case '/api/delegation':
       return await getDelegationExport(env);
+
+    case '/api/version':
+      return { release: ADMIN_RELEASE_TAG };
 
     case '/api/submissions':
       return await getSubmissions(env);
