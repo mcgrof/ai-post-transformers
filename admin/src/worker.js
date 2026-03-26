@@ -1153,6 +1153,61 @@ function toggleDraftDescription(btn) {
   btn.textContent = showingFull ? 'Show more' : 'Show less';
 }
 
+
+function publishJobBadgeClass(state) {
+  switch (state) {
+    case 'approved_for_publish':
+    case 'publish_completed':
+      return 'badge-success';
+    case 'publish_claimed':
+    case 'publish_running':
+      return 'badge-blue';
+    case 'publish_failed':
+      return 'badge-danger';
+    case 'publish_released':
+      return 'badge-warning';
+    default:
+      return 'badge-pending';
+  }
+}
+
+function publishJobStateLabel(job) {
+  if (!job || !job.state) return 'Pending Review';
+  switch (job.state) {
+    case 'approved_for_publish': return 'Approved for Publish';
+    case 'publish_claimed': return 'Claimed for Publish';
+    case 'publish_running': return 'Publishing';
+    case 'publish_completed': return 'Published';
+    case 'publish_failed': return 'Publish Failed';
+    case 'publish_released': return 'Ready to Reclaim';
+    default: return job.state.replace(/_/g, ' ');
+  }
+}
+
+function renderPublishJobSummary(job) {
+  if (!job) return '';
+  const parts = [];
+  parts.push('<div style="margin-top:0.5rem;font-size:0.77rem;color:var(--text-secondary)">Publish state: <strong style="color:var(--text-primary)">' + escapeHtml(publishJobStateLabel(job)) + '</strong></div>');
+  if (job.claimed_by && job.claimed_by.name) {
+    parts.push('<div style="font-size:0.74rem;color:var(--text-secondary)">Claimed by: ' + escapeHtml(job.claimed_by.name) + '</div>');
+  }
+  if (job.error && job.error.step) {
+    const msg = job.error.message || 'Publish step failed';
+    parts.push('<div style="font-size:0.74rem;color:var(--danger)">Last error: ' + escapeHtml(job.error.step + ' — ' + msg) + '</div>');
+  }
+  return parts.join('');
+}
+
+function renderDraftActionButtons(draft) {
+  const job = draft.publish_job || null;
+  const state = job && job.state ? job.state : null;
+  const locked = ['approved_for_publish', 'publish_claimed', 'publish_running', 'publish_completed'].includes(state);
+  const approveLabel = locked ? '✓ Approved' : '✓ Approve';
+  const approveAttrs = locked ? ' disabled style="opacity:0.65;cursor:not-allowed"' : '';
+  return '<button class="btn btn-success" onclick="approveDraft(\'' + draft.key + '\')"' + approveAttrs + '>' + approveLabel + '</button>'
+    + '<button class="btn btn-danger" onclick="openRejectModal(\'' + draft.key + '\')">✕ Reject</button>';
+}
+
 function draftsPageWithData(data) {
   const drafts = data.drafts || [];
   if (drafts.length === 0) {
@@ -1174,11 +1229,12 @@ function draftsPageWithData(data) {
             📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}
           </div>
         </div>
-        <span class="badge badge-pending">Pending Review</span>
+        <span class="badge ${publishJobBadgeClass(d.publish_job && d.publish_job.state)}">${publishJobStateLabel(d.publish_job)}</span>
       </div>
+      ${renderPublishJobSummary(d.publish_job)}
       <div class="draft-desc-wrap" style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0;line-height:1.55">
         <div class="desc-preview">${previewHtml}</div>
-        ${showToggle ? `<div class="desc-full" style="display:none">${fullHtml}</div><button onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>` : ''}
+        ${showToggle ? `<div class="desc-full" style="display:none">${fullHtml}</div><button type="button" onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>` : ''}
       </div>
       <div style="margin:0.75rem 0;display:flex;align-items:center;gap:4px">
         <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
@@ -1190,8 +1246,7 @@ function draftsPageWithData(data) {
         <button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:0.75rem">
-        <button class="btn btn-success" onclick="approveDraft('${d.key}')">✓ Approve</button>
-        <button class="btn btn-danger" onclick="rejectDraft('${d.key}')">✗ Reject</button>
+        ${renderDraftActionButtons(d)}
       </div>
     </div>
   `}).join('');
@@ -1802,7 +1857,7 @@ async function loadDrafts() {
         + '<div class="desc-preview">' + formatDraftDescription(draft.description || 'No description available', true) + '</div>'
         + (((draft.description || 'No description available').length > 220)
             ? ('<div class="desc-full" style="display:none">' + formatDraftDescription(draft.description || 'No description available', false) + '</div>'
-               + '<button onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>')
+               + '<button type="button" onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>')
             : '')
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:4px;margin:0.75rem 0">'
@@ -1813,8 +1868,7 @@ async function loadDrafts() {
         + '<button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>'
         + '</div>'
         + '<div class="draft-actions">'
-        + '<button class="btn btn-success" onclick="approveDraft('' + draft.key + '')">✓ Approve</button>'
-        + '<button class="btn btn-danger" onclick="openRejectModal('' + draft.key + '')">✕ Reject</button>'
+        + renderDraftActionButtons(draft)
         + '</div>'
         + '</div>';
     }).join('') + '</div>';
