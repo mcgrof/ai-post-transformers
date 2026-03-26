@@ -1881,13 +1881,21 @@ async function approveDraft(key) {
   try {
     const res = await fetch('/api/review', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, action: 'approve' })
     });
+    if (!res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        showToast('Approve failed: server returned ' + res.status + ' (possible auth/session issue)', 'error');
+        return;
+      }
+    }
     const data = await res.json();
     if (data.success) {
       showToast('Draft approved successfully');
-      loadDrafts();
+      window.location.reload();
     } else {
       showToast(data.error || 'Failed to approve draft', 'error');
     }
@@ -1916,14 +1924,22 @@ async function confirmReject() {
   try {
     const res = await fetch('/api/review', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: rejectingDraftKey, action: 'reject', reason })
     });
+    if (!res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        showToast('Reject failed: server returned ' + res.status + ' (possible auth/session issue)', 'error');
+        return;
+      }
+    }
     const data = await res.json();
     if (data.success) {
       showToast('Draft rejected');
       closeRejectModal();
-      loadDrafts();
+      window.location.reload();
     } else {
       showToast(data.error || 'Failed to reject draft', 'error');
     }

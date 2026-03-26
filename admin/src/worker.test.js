@@ -265,6 +265,173 @@ test('GET /api/drafts includes latest publish job status summary', async () => {
 
 
 
+test('POST /api/review approve without adminId still creates durable state', async () => {
+  // The real frontend sends { key, action: 'approve' } with NO adminId/adminName.
+  // This test verifies the actual browser click path creates durable shared state.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 99,
+            title: 'HyperAgents Draft',
+            draft_key: 'drafts/2026/03/hyperagents.mp3',
+          },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/hyperagents.mp3': 'audio-data',
+    },
+  });
+
+  // Simulate the exact payload the frontend sends (no adminId, no adminName)
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/hyperagents.mp3',
+        action: 'approve',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.publish_job, 'approve response must include publish_job');
+  assert.equal(body.publish_job.state, 'approved_for_publish');
+  assert.ok(body.publish_job.job_id, 'publish_job must have a job_id');
+
+  // Verify durable state: both review record and publish job written to R2
+  const allKeys = [...env.ADMIN_BUCKET.objects.keys()];
+  const reviewKeys = allKeys.filter((k) => k.startsWith('reviews/'));
+  const publishJobKeys = allKeys.filter((k) => k.startsWith('publish-jobs/'));
+  assert.ok(reviewKeys.length >= 1, 'review record must be written');
+  assert.ok(publishJobKeys.length >= 1, 'publish job must be written');
+
+  // Verify the publish job is retrievable via GET /api/drafts
+  const draftsRes = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const draftsBody = await draftsRes.json();
+  const draft = draftsBody.drafts.find(
+    (d) => d.key === 'drafts/2026/03/hyperagents.mp3',
+  );
+  assert.ok(draft, 'draft must appear in drafts list');
+  assert.ok(draft.publish_job, 'draft must have publish_job after approve');
+  assert.equal(draft.publish_job.state, 'approved_for_publish');
+});
+
+
+test('POST /api/review approve is idempotent for already-approved drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 50,
+            title: 'Double Click Draft',
+            draft_key: 'drafts/2026/03/double-click.mp3',
+          },
+        ],
+      },
+    },
+  });
+
+  // First approve
+  const res1 = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/double-click.mp3',
+        action: 'approve',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body1 = await res1.json();
+  assert.equal(body1.success, true);
+  const firstJobId = body1.publish_job.job_id;
+
+  // Second approve (user clicks again because UI didn't update)
+  const res2 = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/double-click.mp3',
+        action: 'approve',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body2 = await res2.json();
+  assert.equal(body2.success, true);
+  assert.equal(body2.publish_job.state, 'approved_for_publish');
+
+  // Should still have exactly one publish job (re-approved, not duplicated)
+  const allKeys = [...env.ADMIN_BUCKET.objects.keys()];
+  const publishJobKeys = allKeys.filter((k) => k.startsWith('publish-jobs/'));
+  assert.equal(publishJobKeys.length, 1, 'must not create duplicate publish jobs');
+});
+
+
+test('GET /drafts server-rendered page reflects approved state in action buttons', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 17,
+            title: 'Approved Draft',
+            draft_key: 'drafts/2026/03/approved.mp3',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_26_090000.json': {
+        job_id: 'pub_2026_03_26_090000',
+        draft_key: 'drafts/2026/03/approved.mp3',
+        title: 'Approved Draft',
+        state: 'approved_for_publish',
+        created_at: '2026-03-26T09:00:00Z',
+        updated_at: '2026-03-26T09:00:00Z',
+        progress: {
+          publish: 'pending',
+          viz: 'pending',
+          cover: 'pending',
+          site: 'pending',
+          verify: 'pending',
+        },
+      },
+    },
+    podcast: {
+      'drafts/2026/03/approved.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // The approve button should be disabled when draft is already approved
+  assert.ok(html.includes('disabled'), 'approve button must be disabled for approved drafts');
+  assert.ok(html.includes('Approved'), 'button label must show Approved state');
+});
+
+
 test('GET /drafts renders public-style clickable source blocks for malformed draft sources', async () => {
   const env = makeEnv({
     admin: {
