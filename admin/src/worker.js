@@ -78,6 +78,13 @@ header {
   gap: 1rem;
 }
 
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -985,11 +992,13 @@ function baseHTML(title, content, activePage) {
   <header>
     <div class="container">
       <div class="header-content">
-        <a href="/" class="logo">
-          <div class="logo-icon">🎙️</div>
-          <span>Admin Dashboard</span>
-        </a>
-        <button type="button" class="release-chip" data-release="${ADMIN_RELEASE_TAG}" onclick="copyReleaseTag(event)" title="Copy release tag to clipboard" aria-label="Copy release tag to clipboard">${ADMIN_RELEASE_TAG}</button>
+        <div class="brand-group">
+          <a href="/" class="logo">
+            <div class="logo-icon">🎙️</div>
+            <span>Admin Dashboard</span>
+          </a>
+          <button type="button" class="release-chip" data-release="${ADMIN_RELEASE_TAG}" onclick="copyReleaseTag(event)" title="Copy release tag to clipboard" aria-label="Copy release tag to clipboard"><span aria-hidden="true">📋</span><span>${ADMIN_RELEASE_TAG}</span></button>
+        </div>
         <nav>
           <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
           <a href="/drafts"${activePage === 'drafts' ? ' class="active"' : ''}>Drafts</a>
