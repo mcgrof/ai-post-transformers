@@ -1877,21 +1877,29 @@ async function loadDrafts() {
   }
 }
 
+async function adminApiFetch(path, options) {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    redirect: 'manual',
+    ...options,
+  });
+  if (res.type === 'opaqueredirect' || res.status === 0 || res.status === 302) {
+    throw new Error('ACCESS_SESSION_EXPIRED');
+  }
+  const ct = (res.headers.get('content-type') || '');
+  if (!ct.includes('application/json')) {
+    throw new Error('ACCESS_SESSION_EXPIRED');
+  }
+  return res;
+}
+
 async function approveDraft(key) {
   try {
-    const res = await fetch('/api/review', {
+    const res = await adminApiFetch('/api/review', {
       method: 'POST',
-      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, action: 'approve' })
     });
-    if (!res.ok) {
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) {
-        showToast('Approve failed: server returned ' + res.status + ' (possible auth/session issue)', 'error');
-        return;
-      }
-    }
     const data = await res.json();
     if (data.success) {
       showToast('Draft approved successfully');
@@ -1900,6 +1908,11 @@ async function approveDraft(key) {
       showToast(data.error || 'Failed to approve draft', 'error');
     }
   } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading to re-authenticate...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
     showToast('Failed to approve draft: ' + err.message, 'error');
   }
 }
@@ -1922,19 +1935,11 @@ async function confirmReject() {
     return;
   }
   try {
-    const res = await fetch('/api/review', {
+    const res = await adminApiFetch('/api/review', {
       method: 'POST',
-      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: rejectingDraftKey, action: 'reject', reason })
     });
-    if (!res.ok) {
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) {
-        showToast('Reject failed: server returned ' + res.status + ' (possible auth/session issue)', 'error');
-        return;
-      }
-    }
     const data = await res.json();
     if (data.success) {
       showToast('Draft rejected');
@@ -1944,6 +1949,11 @@ async function confirmReject() {
       showToast(data.error || 'Failed to reject draft', 'error');
     }
   } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading to re-authenticate...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
     showToast('Failed to reject draft: ' + err.message, 'error');
   }
 }
