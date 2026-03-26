@@ -438,14 +438,24 @@ def _local_adversarial_search(text, analysis, config, backend):
 
     catalog = []
 
-    # 1. New pipeline episodes (with transcripts)
+    # 1. New pipeline episodes (published/public only; never drafts/private local state)
     conn = get_connection()
     init_db(conn)
     episodes = list_podcasts(conn)
     conn.close()
 
     for ep in episodes:
-        audio = ep.get("audio_file", "")
+        audio = ep.get("audio_file", "") or ""
+        published_at = ep.get("published_at", "") or ""
+
+        # Only allow previously published public episodes as callback/source material.
+        # Drafts, local-only episodes, and unpublished/internal artifacts must never
+        # be eligible here.
+        if not published_at:
+            continue
+        if "/public/" not in audio:
+            continue
+
         txt_path = audio.replace(".mp3", ".txt") if audio else ""
         transcript = ""
         if txt_path and os.path.exists(txt_path):

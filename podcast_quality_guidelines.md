@@ -27,6 +27,7 @@ They should be fed into every podcast generation pass as additional context.
 - ALL cited papers must include: **title, authors, institution/lab, year**.
 - Example: "That's from the Flash Attention paper by Tri Dao out of Stanford, 2022"
 - Don't just name-drop — explain WHY you're referencing that work.
+- **Never use unpublished drafts, private/internal episodes, local-only artifacts, or operator research notes as sources or callbacks.** Prior-episode references are allowed only for already published public podcast episodes.
 
 ## Content Quality
 - **Adversarial search findings presented imperatively** — not "the adversarial search found..." Just state the counterpoint as if the host knows it.
