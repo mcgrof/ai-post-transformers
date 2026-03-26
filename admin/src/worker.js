@@ -1034,6 +1034,58 @@ function dashboardPage(stats) {
 }
 
 
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatDraftDescription(desc, preview = false) {
+  const text = String(desc || 'No description available');
+  const sourceSplit = text.split(/\n\s*Sources:\s*\n?/);
+  const body = sourceSplit[0].trim();
+  const sources = sourceSplit.length > 1 ? sourceSplit.slice(1).join('\n').trim() : '';
+  const sourceCount = sources ? (sources.match(/(?:^|\n)\s*\d+\.\s/gm) || []).length : 0;
+
+  let bodyText = body;
+  let sourcesText = sources;
+  if (preview) {
+    const truncated = text.length > 220 ? text.slice(0, 220).trimEnd() + '...' : text;
+    const previewSplit = truncated.split(/\n\s*Sources:\s*\n?/);
+    bodyText = previewSplit[0].trim();
+    sourcesText = previewSplit.length > 1 ? previewSplit.slice(1).join('\n').trim() : '';
+  }
+
+  function linkifyAndBreak(s) {
+    let html = escapeHtml(s)
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\n/g, '<br>');
+    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+    return html;
+  }
+
+  let html = linkifyAndBreak(bodyText);
+  if (sourcesText) {
+    const sourceLabel = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
+    html += '<br><br><strong>' + sourceLabel + '</strong><br><br>' + linkifyAndBreak(sourcesText);
+  }
+  return html;
+}
+
+function toggleDraftDescription(btn) {
+  const wrap = btn.closest('.draft-description, .draft-desc-wrap');
+  if (!wrap) return;
+  const preview = wrap.querySelector('.desc-preview');
+  const full = wrap.querySelector('.desc-full');
+  const showingFull = full && full.style.display !== 'none';
+  if (preview) preview.style.display = showingFull ? 'block' : 'none';
+  if (full) full.style.display = showingFull ? 'none' : 'block';
+  btn.textContent = showingFull ? 'Show more' : 'Show less';
+}
+
 function draftsPageWithData(data) {
   const drafts = data.drafts || [];
   if (drafts.length === 0) {
@@ -1041,7 +1093,12 @@ function draftsPageWithData(data) {
     <div class="empty-state"><div class="empty-state-icon">🎧</div><h3>No pending drafts</h3><p>All caught up!</p></div>`;
   }
 
-  const cards = drafts.map(d => `
+  const cards = drafts.map(d => {
+    const desc = d.description || '';
+    const previewHtml = formatDraftDescription(desc, true);
+    const fullHtml = formatDraftDescription(desc, false);
+    const showToggle = desc.length > 220;
+    return `
     <div class="card" style="margin-bottom:1.5rem">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
@@ -1052,9 +1109,9 @@ function draftsPageWithData(data) {
         </div>
         <span class="badge badge-pending">Pending Review</span>
       </div>
-      <div style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0">
-        <p class="desc-preview">${(d.description || '').substring(0, 200)}${(d.description || '').length > 200 ? '...' : ''}</p>
-        ${(d.description || '').length > 200 ? `<p class="desc-full" style="display:none">${d.description}</p><button onclick="this.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.previousElementSibling.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.textContent=this.previousElementSibling.style.display==='none'?'Show more':'Show less'" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem">Show more</button>` : ''}
+      <div class="draft-desc-wrap" style="color:var(--text-secondary);font-size:0.875rem;margin:0.75rem 0;line-height:1.55">
+        <div class="desc-preview">${previewHtml}</div>
+        ${showToggle ? `<div class="desc-full" style="display:none">${fullHtml}</div><button onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>` : ''}
       </div>
       <div style="margin:0.75rem 0;display:flex;align-items:center;gap:4px">
         <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
@@ -1070,7 +1127,7 @@ function draftsPageWithData(data) {
         <button class="btn btn-danger" onclick="rejectDraft('${d.key}')">✗ Reject</button>
       </div>
     </div>
-  `).join('');
+  `}).join('');
 
   return `<div class="page-header"><h1>Draft Review</h1><p>${drafts.length} episodes pending review</p></div>${cards}`;
 }
@@ -1558,6 +1615,58 @@ function showToast(message, type = 'success') {
 }
 
 // Drafts
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatDraftDescription(desc, preview = false) {
+  const text = String(desc || 'No description available');
+  const sourceSplit = text.split(/\n\s*Sources:\s*\n?/);
+  const body = sourceSplit[0].trim();
+  const sources = sourceSplit.length > 1 ? sourceSplit.slice(1).join('\n').trim() : '';
+  const sourceCount = sources ? (sources.match(/(?:^|\n)\s*\d+\.\s/gm) || []).length : 0;
+
+  let bodyText = body;
+  let sourcesText = sources;
+  if (preview) {
+    const truncated = text.length > 220 ? text.slice(0, 220).trimEnd() + '...' : text;
+    const previewSplit = truncated.split(/\n\s*Sources:\s*\n?/);
+    bodyText = previewSplit[0].trim();
+    sourcesText = previewSplit.length > 1 ? previewSplit.slice(1).join('\n').trim() : '';
+  }
+
+  function linkifyAndBreak(s) {
+    let html = escapeHtml(s)
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\n/g, '<br>');
+    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+    return html;
+  }
+
+  let html = linkifyAndBreak(bodyText);
+  if (sourcesText) {
+    const sourceLabel = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
+    html += '<br><br><strong>' + sourceLabel + '</strong><br><br>' + linkifyAndBreak(sourcesText);
+  }
+  return html;
+}
+
+function toggleDraftDescription(btn) {
+  const wrap = btn.closest('.draft-description, .draft-desc-wrap');
+  if (!wrap) return;
+  const preview = wrap.querySelector('.desc-preview');
+  const full = wrap.querySelector('.desc-full');
+  const showingFull = full && full.style.display !== 'none';
+  if (preview) preview.style.display = showingFull ? 'block' : 'none';
+  if (full) full.style.display = showingFull ? 'none' : 'block';
+  btn.textContent = showingFull ? 'Show more' : 'Show less';
+}
+
 async function loadDrafts() {
   // Skip if server-rendered content already present
   const dc = document.getElementById("drafts-container");
@@ -1573,40 +1682,31 @@ async function loadDrafts() {
       return;
     }
 
-    container.innerHTML = '<div class="draft-list">' + data.drafts.map(draft => \`
-      <div class="draft-item" data-key="\${draft.key}">
-        <div class="draft-header">
-          <div>
-            <div class="draft-title">\${draft.title || draft.key}</div>
-            <div class="draft-meta">
-              <span>📅 \${draft.date || 'Unknown date'}</span>
-              <span>⏱️ \${draft.duration || 'Unknown duration'}</span>
-            </div>
-          </div>
-        </div>
-        <div class="draft-description">
-          <p class="desc-preview">\${(draft.description || 'No description available').substring(0, 200)}\${(draft.description || '').length > 200 ? '...' : ''}</p>
-          \${(draft.description || '').length > 200 ? \`<p class="desc-full" style="display:none">\${draft.description}</p><button onclick="this.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.previousElementSibling.previousElementSibling.style.display=this.previousElementSibling.style.display==='none'?'block':'none';this.textContent=this.previousElementSibling.style.display==='none'?'Show more':'Show less'" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem">Show more</button>\` : ''}
-        </div>
-        <div style="display:flex;align-items:center;gap:4px;margin:0.75rem 0">
-          <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
-          <button onclick="seekAudio(this,-15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 15s">⏪15s</button>
-          <audio controls preload="none" style="flex:1;height:40px">
-            <source src="\${draft.audioUrl}" type="audio/mpeg">
-          </audio>
-          <button onclick="seekAudio(this,15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 15s">15s⏩</button>
-          <button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>
-        </div>
-        <div class="draft-actions">
-          <button class="btn btn-success" onclick="approveDraft('\${draft.key}')">
-            ✓ Approve
-          </button>
-          <button class="btn btn-danger" onclick="openRejectModal('\${draft.key}')">
-            ✕ Reject
-          </button>
-        </div>
-      </div>
-    \`).join('') + '</div>';
+    container.innerHTML = '<div class="draft-list">' + data.drafts.map(function(draft) {
+      return '<div class="draft-item" data-key="' + draft.key + '">'
+        + '<div class="draft-header"><div><div class="draft-title">' + (draft.title || draft.key) + '</div>'
+        + '<div class="draft-meta"><span>📅 ' + (draft.date || 'Unknown date') + '</span><span>⏱️ ' + (draft.duration || 'Unknown duration') + '</span></div>'
+        + '</div></div>'
+        + '<div class="draft-description" style="line-height:1.55">'
+        + '<div class="desc-preview">' + formatDraftDescription(draft.description || 'No description available', true) + '</div>'
+        + (((draft.description || 'No description available').length > 220)
+            ? ('<div class="desc-full" style="display:none">' + formatDraftDescription(draft.description || 'No description available', false) + '</div>'
+               + '<button onclick="toggleDraftDescription(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:0.8rem;margin-top:0.5rem">Show more</button>')
+            : '')
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:4px;margin:0.75rem 0">'
+        + '<button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>'
+        + '<button onclick="seekAudio(this,-15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 15s">⏪15s</button>'
+        + '<audio controls preload="none" style="flex:1;height:40px"><source src="' + draft.audioUrl + '" type="audio/mpeg"></audio>'
+        + '<button onclick="seekAudio(this,15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 15s">15s⏩</button>'
+        + '<button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>'
+        + '</div>'
+        + '<div class="draft-actions">'
+        + '<button class="btn btn-success" onclick="approveDraft('' + draft.key + '')">✓ Approve</button>'
+        + '<button class="btn btn-danger" onclick="openRejectModal('' + draft.key + '')">✕ Reject</button>'
+        + '</div>'
+        + '</div>';
+    }).join('') + '</div>';
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Failed to load drafts</h3><p>' + err.message + '</p></div>';
   }
