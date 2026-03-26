@@ -73,6 +73,55 @@ def _load_legacy_slugs():
         return []
 
 
+def _plain_text_description(desc_html):
+    """Convert stored episode description HTML into compact searchable text."""
+    text = desc_html or ""
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"</p>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _build_search_index(episodes, legacy_slugs=None):
+    """Build a full-catalog search index for homepage search.
+
+    Includes all feed episodes plus any extra legacy slugs that are not already
+    represented in the merged feed.
+    """
+    feed_slugs = set()
+    search_idx = []
+
+    for ep in episodes:
+        slug = ep.get("slug") or _slug_from_title(ep.get("title", ""))
+        feed_slugs.add(slug)
+        desc_plain = _truncate_sentence(_plain_text_description(ep.get("description", "")), 240)
+        search_idx.append({
+            "t": ep.get("title", ""),
+            "d": ep.get("date", ""),
+            "s": slug,
+            "u": f"episodes/{slug}/",
+            "x": desc_plain,
+            "i": ep.get("thumb_url") or ep.get("image_url", ""),
+            "l": False,
+        })
+
+    extra_legacy = sorted({s for s in (legacy_slugs or []) if s not in feed_slugs})
+    for slug in extra_legacy:
+        search_idx.append({
+            "t": _title_from_slug(slug),
+            "d": "Legacy",
+            "s": slug,
+            "u": f"episodes/{slug}/",
+            "x": "Legacy episode",
+            "i": "",
+            "l": True,
+        })
+
+    return search_idx
+
+
 def _parse_publish_date(date_str):
     """Convert YYYY-MM-DD to RFC 2822 format for <pubDate>.
 
@@ -780,33 +829,12 @@ def generate_index(config, feed_path=None):
 
     archive_html = "\n    ".join(archive_links)
 
-    # Load legacy episodes from R2 slug list for search index
-    legacy_slugs = _load_legacy_slugs()
-    # Filter out slugs that already exist in feed episodes
-    feed_slugs = {ep.get("slug", "") for ep in episodes}
-    legacy_slugs = [s for s in legacy_slugs if s not in feed_slugs]
-    legacy_slugs.sort()
-    legacy_count = len(legacy_slugs)
-
-    count = total + legacy_count
-
-    # Search index for legacy + current episodes
-    search_idx = []
-    for ep in episodes:
-        search_idx.append({
-            "t": ep.get("title", ""),
-            "d": ep.get("date", ""),
-            "s": ep.get("slug", ""),
-            "m": ep.get("audio_url", ""),
-        })
-    for slug in legacy_slugs:
-        search_idx.append({
-            "t": _title_from_slug(slug),
-            "d": "Legacy",
-            "s": slug,
-            "m": f"episodes/{slug}/",
-        })
-    search_json = json.dumps(search_idx)
+    # Search should cover the entire merged catalog, not just the visible cards.
+    # Include any extra legacy slugs as a fallback in case they are not present
+    # in the merged feed snapshot.
+    search_idx = _build_search_index(episodes, _load_legacy_slugs())
+    count = len(search_idx)
+    search_json = json.dumps(search_idx).replace("</", "<\\/")
 
     # Latest 8 episodes for homepage (ordered by publish_date DESC)
     # Episodes are already sorted from feed extraction
@@ -897,15 +925,23 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .search-wrap input {{ width: 100%; background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 8px; padding: 0.5rem 0.9rem; color: #e0e0e0; font-size: 0.85rem; outline: none; }}
 .search-wrap input:focus {{ border-color: #e50914; }}
 .search-wrap input::placeholder {{ color: #555; }}
+.search-help {{ max-width: 800px; margin: 0.35rem auto 0; padding: 0 1.5rem; color: #666; font-size: 0.72rem; }}
 .section-title {{ max-width: 800px; margin: 1.2rem auto 0.6rem; padding: 0 1.5rem; font-size: 1rem; font-weight: 700; color: #e0e0e0; }}
+.section-subtitle {{ max-width: 800px; margin: -0.2rem auto 0.7rem; padding: 0 1.5rem; color: #777; font-size: 0.76rem; }}
 .grid {{ max-width: 800px; margin: 0 auto; padding: 0 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; }}
 .card {{ background: #1a1a2a; border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; text-decoration: none; color: inherit; display: block; }}
 .card:hover {{ transform: scale(1.05); box-shadow: 0 8px 30px rgba(229,9,20,0.2); z-index: 10; }}
 .card-img {{ width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #222; }}
+.card-img-placeholder {{ width: 100%; aspect-ratio: 1; background: linear-gradient(180deg, #232334 0%, #1a1a2a 100%); display: block; }}
 .card-meta {{ padding: 0.5rem 0.6rem 0.6rem; }}
 .card-title {{ font-size: 0.78rem; font-weight: 600; color: #e0e0e0; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }}
 .card:hover .card-title {{ color: #fff; }}
 .card-date {{ font-size: 0.65rem; color: #666; margin-top: 0.25rem; }}
+.search-result .card-meta {{ padding-bottom: 0.3rem; }}
+.search-result .card-blurb {{ padding: 0 0.6rem 0.75rem; color: #aaa; font-size: 0.73rem; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }}
+.search-badge {{ display: inline-block; margin-top: 0.35rem; font-size: 0.62rem; color: #ffb3b7; border: 1px solid #5a2a2d; border-radius: 999px; padding: 0.12rem 0.4rem; }}
+.search-empty {{ grid-column: 1 / -1; padding: 1rem; color: #888; text-align: center; border: 1px dashed #2f2f3d; border-radius: 10px; background: #171723; }}
+.search-results-wrap {{ display: none; }}
 .card-overlay {{ display: none; position: fixed; z-index: 100; background: #1c1c2e; border: 1px solid #333; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); max-width: 340px; padding: 1rem; pointer-events: none; }}
 .card-overlay.active {{ display: block; }}
 .card-overlay .ol-title {{ font-size: 0.9rem; font-weight: 700; margin-bottom: 0.3rem; }}
@@ -950,10 +986,16 @@ footer a:hover {{ color: #ccc; }}
     {github_html}
   </div>
 </div>
-<div class="search-wrap"><input type="text" id="search" placeholder="Search episodes..." autocomplete="off"></div>
-<div class="section-title">Latest Episodes</div>
+<div class="search-wrap"><input type="text" id="search" placeholder="Search all episodes, including legacy podcasts..." autocomplete="off"></div>
+<div class="search-help">Searches the full catalog, including legacy episodes from the pre-R2 era.</div>
+<div class="section-title" id="latest-title">Latest Episodes</div>
 <div class="grid" id="episodes">
 {cards_html}
+</div>
+<div class="search-results-wrap" id="search-results-wrap">
+  <div class="section-title" id="search-results-title">Search Results</div>
+  <div class="section-subtitle" id="search-results-summary"></div>
+  <div class="grid" id="search-results"></div>
 </div>
 <div id="overlay" class="card-overlay"></div>
 <div class="archive">
@@ -964,13 +1006,93 @@ footer a:hover {{ color: #ccc; }}
 </div>
 <footer>{html.escape(show_title)} &middot; <a href="https://github.com/{html.escape(github_repo) if github_repo else 'mcgrof/ai-post-transformers'}">source</a> &middot; <a href="/feed.xml">rss</a></footer>
 <script>
-document.getElementById('search').addEventListener('input', function() {{
+const searchIndex = {search_json};
+const searchInput = document.getElementById('search');
+const latestTitle = document.getElementById('latest-title');
+const latestGrid = document.getElementById('episodes');
+const searchResultsWrap = document.getElementById('search-results-wrap');
+const searchResultsTitle = document.getElementById('search-results-title');
+const searchResultsSummary = document.getElementById('search-results-summary');
+const searchResults = document.getElementById('search-results');
+
+function escapeHtml(value) {{
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}}
+
+function scoreEpisode(item, terms) {{
+  const title = (item.t || '').toLowerCase();
+  const desc = (item.x || '').toLowerCase();
+  const date = (item.d || '').toLowerCase();
+  let score = 0;
+  for (const term of terms) {{
+    const inTitle = title.includes(term);
+    const inDesc = desc.includes(term);
+    const inDate = date.includes(term);
+    if (!inTitle && !inDesc && !inDate) return -1;
+    if (title === term) score += 80;
+    else if (title.startsWith(term)) score += 35;
+    else if (inTitle) score += 20;
+    if (inDesc) score += 6;
+    if (inDate) score += 2;
+  }}
+  if (item.l) score -= 1;
+  return score;
+}}
+
+function renderSearchResults(items, query) {{
+  if (!items.length) {{
+    searchResults.innerHTML = '<div class="search-empty">No episodes matched “' + escapeHtml(query) + '”.</div>';
+    return;
+  }}
+  searchResults.innerHTML = items.map(item => {{
+    const image = item.i
+      ? '<img class="card-img" src="' + escapeHtml(item.i) + '" alt="" loading="lazy">'
+      : '<div class="card-img card-img-placeholder"></div>';
+    const badge = item.l ? '<div class="search-badge">Legacy</div>' : '';
+    const blurb = item.x ? '<div class="card-blurb">' + escapeHtml(item.x) + '</div>' : '';
+    return '<a class="card search-result" href="' + escapeHtml(item.u) + '">' +
+      image +
+      '<div class="card-meta"><div class="card-title">' + escapeHtml(item.t) + '</div><div class="card-date">' + escapeHtml(item.d) + '</div>' + badge + '</div>' +
+      blurb +
+      '</a>';
+  }}).join('');
+}}
+
+searchInput.addEventListener('input', function() {{
   const q = this.value.toLowerCase().trim();
-  document.querySelectorAll('.card').forEach(el => {{ el.classList.toggle('hidden', q.length > 0 && !el.dataset.t.includes(q)); }});
+  if (!q) {{
+    latestTitle.style.display = '';
+    latestGrid.style.display = 'grid';
+    searchResultsWrap.style.display = 'none';
+    searchResults.innerHTML = '';
+    searchResultsSummary.textContent = '';
+    return;
+  }}
+
+  const terms = q.split(/\s+/).filter(Boolean);
+  const matches = searchIndex
+    .map(item => ({{ item, score: scoreEpisode(item, terms) }}))
+    .filter(entry => entry.score >= 0)
+    .sort((a, b) => b.score - a.score || (a.item.t || '').localeCompare(b.item.t || ''))
+    .slice(0, 60)
+    .map(entry => entry.item);
+
+  latestTitle.style.display = 'none';
+  latestGrid.style.display = 'none';
+  searchResultsWrap.style.display = 'block';
+  searchResultsTitle.textContent = 'Search Results';
+  searchResultsSummary.textContent = matches.length + ' match' + (matches.length === 1 ? '' : 'es') + ' for “' + q + '”';
+  renderSearchResults(matches, q);
 }});
+
 const overlay = document.getElementById('overlay');
 let hoverTimeout;
-document.querySelectorAll('.card').forEach(card => {{
+document.querySelectorAll('#episodes .card').forEach(card => {{
   card.addEventListener('mouseenter', (e) => {{ clearTimeout(hoverTimeout); hoverTimeout = setTimeout(() => {{ const desc = card.dataset.desc || ''; if (!desc) return; overlay.innerHTML = '<div class="ol-title">' + card.querySelector('.card-title').textContent + '</div><div class="ol-desc">' + desc + '</div>'; const rect = card.getBoundingClientRect(); overlay.style.left = Math.min(rect.right + 10, window.innerWidth - 360) + 'px'; overlay.style.top = Math.max(rect.top, 10) + 'px'; overlay.classList.add('active'); }}, 400); }});
   card.addEventListener('mouseleave', () => {{ clearTimeout(hoverTimeout); overlay.classList.remove('active'); }});
 }});
@@ -1385,13 +1507,6 @@ document.addEventListener('click', (e) => {
   </div>
 </div>
 
-<div class="archive">
-  <h2>Browse by month</h2>
-  <div class="archive-months">
-    {month_nav_html}
-  </div>
-</div>
-
 <div class="footer">
   {html.escape(show_title)} &middot; <a href="../../index.html">Home</a>
 </div>
@@ -1546,12 +1661,6 @@ h1 {{
   {audio_html}
   <div class="ep-links">{links_html}</div>
   <div class="ep-desc">{ep["description"]}</div>
-</div>
-<div class="archive">
-  <h2>Browse by month</h2>
-  <div class="archive-months">
-    {month_nav_html}
-  </div>
 </div>
 
 <div class="footer">
