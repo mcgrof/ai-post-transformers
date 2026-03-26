@@ -431,6 +431,28 @@ textarea {
   line-height: 1.5;
 }
 
+.draft-description .card-sources,
+.draft-desc-wrap .card-sources {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+
+.draft-description .card-sources a,
+.draft-desc-wrap .card-sources a {
+  color: var(--accent);
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.draft-description .card-sources a:hover,
+.draft-desc-wrap .card-sources a:hover {
+  text-decoration: underline;
+}
+
 .draft-actions {
   display: flex;
   gap: 0.75rem;
@@ -1044,34 +1066,78 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function splitDraftSources(text) {
+  const raw = String(text || '');
+  const match = raw.match(/(?:\n\s*Sources:\s*\n?|Sources:\s*)/i);
+  if (!match) {
+    return { body: raw.trim(), sources: '' };
+  }
+  const idx = match.index || 0;
+  return {
+    body: raw.slice(0, idx).trim(),
+    sources: raw.slice(idx + match[0].length).trim(),
+  };
+}
+
+function formatDraftSourcesHtml(sourcesRaw, preview = false) {
+  if (!sourcesRaw) return '';
+  let body = String(sourcesRaw || '');
+  body = body.replace(/(\d+\.\s)/g, '\n$1');
+  body = body.replace(/(https?:\/\/)/g, '\n$1');
+  body = body.replace(/[ 	]+/g, ' ');
+  body = body.replace(/\n\s*/g, '\n').trim();
+
+  const lines = body.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const rendered = [];
+  let pendingTitle = null;
+  let sourceCount = 0;
+
+  function flushTitle() {
+    if (pendingTitle) {
+      rendered.push(escapeHtml(pendingTitle.trim()));
+      pendingTitle = null;
+      sourceCount += 1;
+    }
+  }
+
+  for (const line of lines) {
+    if (/^https?:\/\//i.test(line)) {
+      flushTitle();
+      const urls = line.match(/https?:\/\/[^\s,)]+/g) || [];
+      for (const url of urls) {
+        const esc = escapeHtml(url);
+        rendered.push('<a href="' + esc + '" target="_blank" rel="noopener noreferrer">' + esc + '</a>');
+      }
+      if (urls.length > 1) sourceCount += urls.length - 1;
+      continue;
+    }
+    if (/^\d+\.\s/.test(line)) {
+      flushTitle();
+      pendingTitle = line;
+      continue;
+    }
+    if (pendingTitle) pendingTitle += ' ' + line;
+    else {
+      rendered.push(escapeHtml(line));
+      sourceCount += 1;
+    }
+  }
+  flushTitle();
+
+  const visible = preview ? rendered.slice(0, 4) : rendered;
+  const label = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
+  return '<div class="card-sources"><strong>' + label + '</strong><br><br>' + visible.join('<br>') + '</div>';
+}
+
 function formatDraftDescription(desc, preview = false) {
   const text = String(desc || 'No description available');
-  const sourceSplit = text.split(/\n\s*Sources:\s*\n?/);
-  const body = sourceSplit[0].trim();
-  const sources = sourceSplit.length > 1 ? sourceSplit.slice(1).join('\n').trim() : '';
-  const sourceCount = sources ? (sources.match(/(?:^|\n)\s*\d+\.\s/gm) || []).length : 0;
+  const parts = splitDraftSources(text);
+  const bodyText = preview && parts.body.length > 220 ? parts.body.slice(0, 220).trimEnd() + '...' : parts.body;
 
-  let bodyText = body;
-  let sourcesText = sources;
-  if (preview) {
-    const truncated = text.length > 220 ? text.slice(0, 220).trimEnd() + '...' : text;
-    const previewSplit = truncated.split(/\n\s*Sources:\s*\n?/);
-    bodyText = previewSplit[0].trim();
-    sourcesText = previewSplit.length > 1 ? previewSplit.slice(1).join('\n').trim() : '';
-  }
-
-  function linkifyAndBreak(s) {
-    let html = escapeHtml(s)
-      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/\n/g, '<br>');
-    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
-    return html;
-  }
-
-  let html = linkifyAndBreak(bodyText);
-  if (sourcesText) {
-    const sourceLabel = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
-    html += '<br><br><strong>' + sourceLabel + '</strong><br><br>' + linkifyAndBreak(sourcesText);
+  let html = escapeHtml(bodyText).replace(/\n/g, '<br>');
+  html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+  if (parts.sources) {
+    html += formatDraftSourcesHtml(parts.sources, preview);
   }
   return html;
 }
@@ -1625,34 +1691,78 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function splitDraftSources(text) {
+  const raw = String(text || '');
+  const match = raw.match(/(?:\n\s*Sources:\s*\n?|Sources:\s*)/i);
+  if (!match) {
+    return { body: raw.trim(), sources: '' };
+  }
+  const idx = match.index || 0;
+  return {
+    body: raw.slice(0, idx).trim(),
+    sources: raw.slice(idx + match[0].length).trim(),
+  };
+}
+
+function formatDraftSourcesHtml(sourcesRaw, preview = false) {
+  if (!sourcesRaw) return '';
+  let body = String(sourcesRaw || '');
+  body = body.replace(/(\d+\.\s)/g, '\n$1');
+  body = body.replace(/(https?:\/\/)/g, '\n$1');
+  body = body.replace(/[ 	]+/g, ' ');
+  body = body.replace(/\n\s*/g, '\n').trim();
+
+  const lines = body.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const rendered = [];
+  let pendingTitle = null;
+  let sourceCount = 0;
+
+  function flushTitle() {
+    if (pendingTitle) {
+      rendered.push(escapeHtml(pendingTitle.trim()));
+      pendingTitle = null;
+      sourceCount += 1;
+    }
+  }
+
+  for (const line of lines) {
+    if (/^https?:\/\//i.test(line)) {
+      flushTitle();
+      const urls = line.match(/https?:\/\/[^\s,)]+/g) || [];
+      for (const url of urls) {
+        const esc = escapeHtml(url);
+        rendered.push('<a href="' + esc + '" target="_blank" rel="noopener noreferrer">' + esc + '</a>');
+      }
+      if (urls.length > 1) sourceCount += urls.length - 1;
+      continue;
+    }
+    if (/^\d+\.\s/.test(line)) {
+      flushTitle();
+      pendingTitle = line;
+      continue;
+    }
+    if (pendingTitle) pendingTitle += ' ' + line;
+    else {
+      rendered.push(escapeHtml(line));
+      sourceCount += 1;
+    }
+  }
+  flushTitle();
+
+  const visible = preview ? rendered.slice(0, 4) : rendered;
+  const label = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
+  return '<div class="card-sources"><strong>' + label + '</strong><br><br>' + visible.join('<br>') + '</div>';
+}
+
 function formatDraftDescription(desc, preview = false) {
   const text = String(desc || 'No description available');
-  const sourceSplit = text.split(/\n\s*Sources:\s*\n?/);
-  const body = sourceSplit[0].trim();
-  const sources = sourceSplit.length > 1 ? sourceSplit.slice(1).join('\n').trim() : '';
-  const sourceCount = sources ? (sources.match(/(?:^|\n)\s*\d+\.\s/gm) || []).length : 0;
+  const parts = splitDraftSources(text);
+  const bodyText = preview && parts.body.length > 220 ? parts.body.slice(0, 220).trimEnd() + '...' : parts.body;
 
-  let bodyText = body;
-  let sourcesText = sources;
-  if (preview) {
-    const truncated = text.length > 220 ? text.slice(0, 220).trimEnd() + '...' : text;
-    const previewSplit = truncated.split(/\n\s*Sources:\s*\n?/);
-    bodyText = previewSplit[0].trim();
-    sourcesText = previewSplit.length > 1 ? previewSplit.slice(1).join('\n').trim() : '';
-  }
-
-  function linkifyAndBreak(s) {
-    let html = escapeHtml(s)
-      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/\n/g, '<br>');
-    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
-    return html;
-  }
-
-  let html = linkifyAndBreak(bodyText);
-  if (sourcesText) {
-    const sourceLabel = preview && sourceCount > 0 ? 'Sources (' + sourceCount + ')' : 'Sources:';
-    html += '<br><br><strong>' + sourceLabel + '</strong><br><br>' + linkifyAndBreak(sourcesText);
+  let html = escapeHtml(bodyText).replace(/\n/g, '<br>');
+  html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+  if (parts.sources) {
+    html += formatDraftSourcesHtml(parts.sources, preview);
   }
   return html;
 }

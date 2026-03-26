@@ -263,6 +263,42 @@ test('GET /api/drafts includes latest publish job status summary', async () => {
 });
 
 
+
+
+test('GET /drafts renders public-style clickable source blocks for malformed draft sources', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 42,
+            title: 'Malformed Sources Draft',
+            draft_key: 'drafts/2026/03/malformed.mp3',
+            description: 'Body copy here. Sources: https://arxiv.org/abs/2502.15734https://arxiv.org/abs/2412.15605 2. FastGen https://arxiv.org/abs/2303.01843',
+          },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/malformed.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('card-sources'));
+  assert.ok(html.includes('href="https://arxiv.org/abs/2502.15734"'));
+  assert.ok(html.includes('href="https://arxiv.org/abs/2412.15605"'));
+  assert.ok(html.includes('href="https://arxiv.org/abs/2303.01843"'));
+  assert.equal(html.includes('2502.15734https://arxiv.org/abs/2412.15605'), false);
+});
+
 test('POST /api/review supports claim release and retry publish actions', async () => {
   const env = makeEnv({
     admin: {
