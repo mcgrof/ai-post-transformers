@@ -370,6 +370,39 @@ is created without a cover image.
 3. Commit with detailed message
 4. Repeat for next change
 
+### Publish Control-Plane Test Gate
+
+When touching any file that can affect draft review, publish job state,
+publish execution, image backfill, or admin publish semantics, run the
+publish workflow test suite before committing.
+
+This applies in particular to changes under:
+- `admin/src/worker.js`
+- `admin/src/worker.test.js`
+- `scripts/publish_jobs.py`
+- `scripts/publish_job_store.py`
+- `scripts/publish_job_runner.py`
+- `scripts/run_publish_worker.py`
+- `backfill_images.py`
+- `gen-podcast.py`
+- `rss.py`
+- any new publish worker or admin-control-plane helpers/tests
+
+Required command:
+
+```bash
+make test-publish
+```
+
+Do not skip this because the publish workflow has too many partial-fail
+modes: audio-only publishes, missing viz, missing cover art, broken site
+updates, stale draft state, lease/claim regressions, and admin actions
+that record intent without completing publication.
+
+If the change also affects broader queueing, podcast generation, or feed
+rendering behavior, run the broader relevant pytest or node test files in
+addition to `make test-publish`.
+
 ## Code Style
 
 ### Python

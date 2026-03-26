@@ -131,7 +131,7 @@ def _find_anchor_episodes_needing_images(anchor_path):
     return needs_image, tree
 
 
-def _find_db_episodes_needing_images():
+def _find_db_episodes_needing_images(episode_id=None):
     """Find DB episodes with no image_file set.
 
     Returns a list of dicts with id, title, description, audio_file.
@@ -143,6 +143,8 @@ def _find_db_episodes_needing_images():
 
     needs_image = []
     for ep in episodes:
+        if episode_id is not None and ep.get("id") != episode_id:
+            continue
         if ep.get("image_file"):
             continue
         # Skip drafts
@@ -208,7 +210,7 @@ def _generate_one(ep, config, r2_client, dry_run=False):
         return (ep, None)
 
 
-def run_backfill(config, dry_run=False, workers=4):
+def run_backfill(config, dry_run=False, workers=4, episode_id=None):
     """Main entry point for backfilling episode cover art."""
     t0 = time.time()
 
@@ -218,7 +220,7 @@ def run_backfill(config, dry_run=False, workers=4):
     anchor_eps, anchor_tree = (
         _find_anchor_episodes_needing_images(anchor_path)
         if anchor_path.exists() else ([], None))
-    db_eps = _find_db_episodes_needing_images()
+    db_eps = _find_db_episodes_needing_images(episode_id=episode_id)
 
     all_eps = anchor_eps + db_eps
     if not all_eps:
@@ -315,13 +317,21 @@ def main():
     parser.add_argument(
         "--workers", type=int, default=4,
         help="parallel image generation workers (default: 4)")
+    parser.add_argument(
+        "--episode-id", type=int,
+        help="limit backfill to one DB episode id")
     args = parser.parse_args()
 
     config_path = Path(__file__).parent / "config.yaml"
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    run_backfill(config, dry_run=args.dry_run, workers=args.workers)
+    run_backfill(
+        config,
+        dry_run=args.dry_run,
+        workers=args.workers,
+        episode_id=args.episode_id,
+    )
 
 
 if __name__ == "__main__":

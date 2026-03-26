@@ -3,6 +3,7 @@
 
 const GITHUB_REPO = 'mcgrof/ai-post-transformers';
 const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
+const PUBLISH_JOB_PROGRESS_STEPS = ['publish', 'viz', 'cover', 'site', 'verify'];
 
 // ============================================================================
 // STYLES - Dark theme matching dash.do-not-panic.com
@@ -2053,6 +2054,9 @@ async function handleAPI(path, request, env) {
       if (request.method !== 'POST') return { error: 'Method not allowed' };
       return await reviewDraft(request, env);
 
+    case '/api/publish':
+      return await handlePublishAPI(request, env);
+
     case '/api/generate':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
       return await generatePodcast(request, env);
@@ -2118,6 +2122,15 @@ async function getDrafts(env) {
 
     // Get list of draft MP3s from PODCAST_BUCKET
     const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    const publishJobs = await listPublishJobs(env);
+    const latestPublishJobByDraft = new Map();
+    for (const job of publishJobs) {
+      if (!job?.draft_key) continue;
+      const current = latestPublishJobByDraft.get(job.draft_key);
+      if (!current || (job.created_at || '') > (current.created_at || '')) {
+        latestPublishJobByDraft.set(job.draft_key, job);
+      }
+    }
     const drafts = [];
 
     for (const obj of list.objects) {
@@ -2146,7 +2159,8 @@ async function getDrafts(env) {
         duration: episode?.duration || 'Unknown',
         description: episode?.description || '',
         audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
-        episodeId: episode?.id || null
+        episodeId: episode?.id || null,
+        publish_job: summarizePublishJob(latestPublishJobByDraft.get(obj.key)),
       });
     }
 
@@ -2345,30 +2359,444 @@ async function submitPapers(request, env) {
 async function reviewDraft(request, env) {
   try {
     const body = await request.json();
-    const { key, action, reason } = body;
+    const {
+      key,
+      action,
+      reason,
+      jobId,
+      adminId,
+      adminName,
+      leaseSeconds,
+    } = body;
     const ts = Date.now();
+    const effectiveAdminId = adminId || 'admin';
+    const effectiveAdminName = adminName || effectiveAdminId;
     
     // Write review (append-only, race-free)
-    const reviewKey = `reviews/${key.replace(/\//g, '_')}/${ts}.json`;
+    const reviewTarget = key || jobId || 'unknown';
+    const reviewKey = `reviews/${reviewTarget.replace(/\//g, '_')}/${ts}.json`;
     await env.ADMIN_BUCKET.put(reviewKey, JSON.stringify({
-      key, action, reason: reason || '',
+      key: key || null,
+      job_id: jobId || null,
+      action,
+      reason: reason || '',
+      admin_id: effectiveAdminId,
+      admin_name: effectiveAdminName,
       timestamp: new Date().toISOString(),
     }));
     
-    // If approved, add to publish queue
-    if (action === 'approve') {
-      const queueKey = `publish-queue/${ts}-${key.replace(/\//g, '_')}.json`;
-      await env.ADMIN_BUCKET.put(queueKey, JSON.stringify({
-        key, 
-        approved_at: new Date().toISOString(),
-        status: 'pending_publish'
-      }));
+    if (action === 'approve' || action === 'approve_for_publish') {
+      if (!key) {
+        return { error: 'Missing draft key' };
+      }
+      const job = await createOrUpdatePublishJob(env, {
+        key,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
+      return {
+        success: true,
+        action,
+        key,
+        publish_job: job,
+      };
+    }
+
+    if (action === 'claim_publish') {
+      const job = await updatePublishJobClaim(env, {
+        jobId,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+        leaseSeconds,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'release_publish_claim') {
+      const job = await releasePublishJob(env, {
+        jobId,
+        adminId: effectiveAdminId,
+        reason,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'retry_publish') {
+      const job = await retryPublishJob(env, {
+        jobId,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'refresh_job_status') {
+      const job = await loadPublishJobById(env, jobId);
+      return { success: true, action, publish_job: job };
     }
     
     return { success: true, action, key };
   } catch (error) {
     return { error: error.message };
   }
+}
+
+async function handlePublishAPI(request, env) {
+  try {
+    if (request.method === 'GET') {
+      const url = new URL(request.url);
+      const jobId = url.searchParams.get('jobId');
+      const draftKey = url.searchParams.get('draftKey');
+      const job = jobId
+        ? await loadPublishJobById(env, jobId)
+        : await findLatestPublishJobForDraft(env, draftKey);
+      return {
+        success: true,
+        action: 'get_publish_status',
+        publish_job: summarizePublishJob(job),
+      };
+    }
+
+    if (request.method !== 'POST') {
+      return { error: 'Method not allowed' };
+    }
+
+    const body = await request.json();
+    const action = body.action || 'get_publish_status';
+    const effectiveAdminId = body.adminId || 'admin';
+    const effectiveAdminName = body.adminName || effectiveAdminId;
+
+    if (action === 'get_publish_status' || action === 'refresh_job_status') {
+      const job = body.jobId
+        ? await loadPublishJobById(env, body.jobId)
+        : await findLatestPublishJobForDraft(env, body.draftKey);
+      return {
+        success: true,
+        action,
+        publish_job: summarizePublishJob(job),
+      };
+    }
+
+    if (action === 'claim_publish') {
+      const job = await updatePublishJobClaim(env, {
+        jobId: body.jobId,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+        leaseSeconds: body.leaseSeconds,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'release_publish_claim') {
+      const job = await releasePublishJob(env, {
+        jobId: body.jobId,
+        adminId: effectiveAdminId,
+        reason: body.reason,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'retry_publish') {
+      const job = await retryPublishJob(env, {
+        jobId: body.jobId,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
+      return { success: true, action, publish_job: job };
+    }
+
+    return { error: `Unsupported publish action: ${action}` };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+function makePublishJobId(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return [
+    'pub',
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    pad(date.getUTCHours()) + pad(date.getUTCMinutes()) + pad(date.getUTCSeconds()),
+  ].join('_');
+}
+
+function createPublishJobRecord({
+  jobId,
+  key,
+  title,
+  episodeId,
+  approvedByAdminId,
+  approvedByName,
+  createdAt,
+}) {
+  const draftStem = key.replace(/\.(mp3|txt|json|srt|png)$/i, '');
+  const progress = {};
+  for (const step of PUBLISH_JOB_PROGRESS_STEPS) {
+    progress[step] = 'pending';
+  }
+  return {
+    job_id: jobId,
+    episode_id: episodeId || null,
+    draft_id: episodeId || null,
+    draft_key: key,
+    draft_stem: draftStem,
+    title: title || draftStem.split('/').pop(),
+    state: 'approved_for_publish',
+    created_at: createdAt,
+    updated_at: createdAt,
+    approved_by_admin_id: approvedByAdminId,
+    approved_by_name: approvedByName,
+    claimed_by_admin_id: null,
+    claimed_by_name: null,
+    claimed_at: null,
+    lease_expires_at: null,
+    last_heartbeat_at: null,
+    released_at: null,
+    release_reason: null,
+    requirements: {
+      viz: true,
+      cover: true,
+      publish_site: true,
+      verify: true,
+    },
+    progress,
+    step_timestamps: {},
+    artifacts: {
+      audio_url: null,
+      srt_url: null,
+      page_url: null,
+      viz_url: null,
+      cover_url: null,
+      thumb_url: null,
+    },
+    error: null,
+    history: [{
+      timestamp: createdAt,
+      action: 'created',
+      state: 'approved_for_publish',
+    }],
+  };
+}
+
+function appendPublishJobHistory(job, action, extra = {}) {
+  job.history = job.history || [];
+  job.history.push({
+    timestamp: new Date().toISOString(),
+    action,
+    ...extra,
+  });
+}
+
+async function savePublishJob(env, job) {
+  const record = publishJobRecordForSave(job);
+  record.updated_at = new Date().toISOString();
+  const key = `publish-jobs/${record.job_id}.json`;
+  await env.ADMIN_BUCKET.put(key, JSON.stringify(record));
+  return summarizePublishJob(record);
+}
+
+function publishJobRecordForSave(job) {
+  if (!job) {
+    return job;
+  }
+  const { claimed_by, lease, ...record } = job;
+  return record;
+}
+
+async function loadPublishJobById(env, jobId, { summarize = true } = {}) {
+  if (!jobId) {
+    throw new Error('Missing job ID');
+  }
+  const obj = await env.ADMIN_BUCKET.get(`publish-jobs/${jobId}.json`);
+  if (!obj) {
+    throw new Error(`Publish job not found: ${jobId}`);
+  }
+  const job = await obj.json();
+  return summarize ? summarizePublishJob(job) : job;
+}
+
+async function listPublishJobs(env) {
+  const listed = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
+  const jobs = [];
+  for (const obj of listed.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    jobs.push(summarizePublishJob(await current.json()));
+  }
+  return jobs;
+}
+
+async function findLatestPublishJobForDraft(env, draftKey, { summarize = true } = {}) {
+  if (!draftKey) {
+    return null;
+  }
+  const listed = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
+  let latest = null;
+
+  for (const obj of listed.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    const job = await current.json();
+    if (job.draft_key !== draftKey) continue;
+    if (!latest || (job.created_at || '') > (latest.created_at || '')) {
+      latest = job;
+    }
+  }
+
+  return summarize ? summarizePublishJob(latest) : latest;
+}
+
+function summarizePublishJob(job) {
+  if (!job) {
+    return null;
+  }
+  const claimedByAdminId = job.claimed_by_admin_id || null;
+  const claimedByName = job.claimed_by_name || null;
+  const leaseExpiresAt = job.lease_expires_at || null;
+  const lastHeartbeatAt = job.last_heartbeat_at || null;
+  const leaseActive = !!(leaseExpiresAt && new Date(leaseExpiresAt) > new Date());
+  return {
+    ...job,
+    claimed_by: claimedByAdminId ? {
+      admin_id: claimedByAdminId,
+      name: claimedByName || claimedByAdminId,
+    } : null,
+    lease: {
+      active: leaseActive,
+      claimed_at: job.claimed_at || null,
+      lease_expires_at: leaseExpiresAt,
+      last_heartbeat_at: lastHeartbeatAt,
+    },
+  };
+}
+
+async function findManifestDraft(env, draftKey) {
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  if (!manifestData) {
+    return null;
+  }
+  const manifest = await manifestData.json();
+  const filename = draftKey.split('/').pop();
+  const basename = filename.replace(/\.mp3$/, '');
+  return (manifest.drafts || []).find((draft) => {
+    return draft.draft_key === draftKey
+      || draft.filename === filename
+      || draft.basename === basename
+      || basename === `ep${draft.id}`;
+  }) || null;
+}
+
+async function createOrUpdatePublishJob(env, { key, adminId, adminName }) {
+  const now = new Date().toISOString();
+  const existing = await findLatestPublishJobForDraft(env, key, { summarize: false });
+
+  if (existing && ['publish_claimed', 'publish_running', 'publish_completed'].includes(existing.state)) {
+    return existing;
+  }
+
+  if (existing) {
+    existing.state = 'approved_for_publish';
+    existing.approved_by_admin_id = adminId;
+    existing.approved_by_name = adminName;
+    existing.claimed_by_admin_id = null;
+    existing.claimed_by_name = null;
+    existing.claimed_at = null;
+    existing.lease_expires_at = null;
+    existing.last_heartbeat_at = null;
+    existing.released_at = null;
+    existing.release_reason = null;
+    existing.error = null;
+    for (const [step, status] of Object.entries(existing.progress || {})) {
+      if (status === 'failed') {
+        existing.progress[step] = 'pending';
+      }
+    }
+    appendPublishJobHistory(existing, 'reapproved', {
+      admin_id: adminId,
+      admin_name: adminName,
+    });
+    return await savePublishJob(env, existing);
+  }
+
+  const draft = await findManifestDraft(env, key);
+  const job = createPublishJobRecord({
+    jobId: makePublishJobId(),
+    key,
+    title: draft?.title,
+    episodeId: draft?.id || null,
+    approvedByAdminId: adminId,
+    approvedByName: adminName,
+    createdAt: now,
+  });
+  appendPublishJobHistory(job, 'approved_for_publish', {
+    admin_id: adminId,
+    admin_name: adminName,
+  });
+  return await savePublishJob(env, job);
+}
+
+async function updatePublishJobClaim(env, { jobId, adminId, adminName, leaseSeconds }) {
+  const job = await loadPublishJobById(env, jobId);
+  const now = new Date();
+  const activeLease = job.lease_expires_at && new Date(job.lease_expires_at) > now;
+  if (activeLease && job.claimed_by_admin_id && job.claimed_by_admin_id !== adminId) {
+    throw new Error(`Job already claimed by ${job.claimed_by_admin_id}`);
+  }
+  const seconds = Number(leaseSeconds || 900);
+  job.state = 'publish_claimed';
+  job.claimed_by_admin_id = adminId;
+  job.claimed_by_name = adminName;
+  job.claimed_at = now.toISOString();
+  job.last_heartbeat_at = now.toISOString();
+  job.lease_expires_at = new Date(now.getTime() + seconds * 1000).toISOString();
+  appendPublishJobHistory(job, 'claimed', {
+    admin_id: adminId,
+    admin_name: adminName,
+  });
+  return await savePublishJob(env, job);
+}
+
+async function releasePublishJob(env, { jobId, adminId, reason }) {
+  const job = await loadPublishJobById(env, jobId);
+  if (job.claimed_by_admin_id && job.claimed_by_admin_id !== adminId) {
+    throw new Error(`Job claimed by ${job.claimed_by_admin_id}`);
+  }
+  job.state = 'publish_released';
+  job.claimed_by_admin_id = null;
+  job.claimed_by_name = null;
+  job.claimed_at = null;
+  job.last_heartbeat_at = null;
+  job.lease_expires_at = null;
+  job.released_at = new Date().toISOString();
+  job.release_reason = reason || '';
+  appendPublishJobHistory(job, 'released', {
+    admin_id: adminId,
+    reason: reason || '',
+  });
+  return await savePublishJob(env, job);
+}
+
+async function retryPublishJob(env, { jobId, adminId, adminName }) {
+  const job = await loadPublishJobById(env, jobId);
+  job.state = 'approved_for_publish';
+  job.error = null;
+  job.claimed_by_admin_id = null;
+  job.claimed_by_name = null;
+  job.claimed_at = null;
+  job.last_heartbeat_at = null;
+  job.lease_expires_at = null;
+  for (const step of PUBLISH_JOB_PROGRESS_STEPS) {
+    if ((job.progress || {})[step] === 'failed') {
+      job.progress[step] = 'pending';
+    }
+  }
+  appendPublishJobHistory(job, 'retry_requested', {
+    admin_id: adminId,
+    admin_name: adminName,
+  });
+  return await savePublishJob(env, job);
 }
 
 // Queue podcast generation

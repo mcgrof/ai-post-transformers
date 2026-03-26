@@ -1,6 +1,6 @@
 PYTHON = .venv/bin/python
 
-.PHONY: queue publish publish-site gen-viz backfill-images test
+.PHONY: queue publish publish-site gen-viz backfill-images test test-publish
 
 queue:
 	$(PYTHON) gen-podcast.py queue
@@ -23,3 +23,11 @@ backfill-images:
 
 test:
 	$(PYTHON) -m pytest tests/ -v
+
+test-publish:
+	$(PYTHON) -m pytest \
+		tests/test_publish_jobs.py \
+		tests/test_publish_job_store.py \
+		tests/test_publish_job_runner.py \
+		tests/test_publish_state_machine.py -v
+	node --test admin/src/worker.test.js
