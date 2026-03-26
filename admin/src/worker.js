@@ -989,7 +989,7 @@ function baseHTML(title, content, activePage) {
           <div class="logo-icon">🎙️</div>
           <span>Admin Dashboard</span>
         </a>
-        <button type="button" class="release-chip" onclick="copyReleaseTag()" title="Copy release tag to clipboard" aria-label="Copy release tag to clipboard">${ADMIN_RELEASE_TAG}</button>
+        <button type="button" class="release-chip" data-release="${ADMIN_RELEASE_TAG}" onclick="copyReleaseTag(event)" title="Copy release tag to clipboard" aria-label="Copy release tag to clipboard">${ADMIN_RELEASE_TAG}</button>
         <nav>
           <a href="/"${activePage === 'dashboard' ? ' class="active"' : ''}>Dashboard</a>
           <a href="/drafts"${activePage === 'drafts' ? ' class="active"' : ''}>Drafts</a>
@@ -1767,8 +1767,14 @@ function showToast(message, type = 'success') {
   setTimeout(() => toast.remove(), 4000);
 }
 
-async function copyReleaseTag() {
-  const tag = '${ADMIN_RELEASE_TAG}';
+async function copyReleaseTag(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const tag = event && event.currentTarget && event.currentTarget.dataset
+    ? event.currentTarget.dataset.release
+    : '${ADMIN_RELEASE_TAG}';
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(tag);
