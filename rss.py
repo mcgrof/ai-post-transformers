@@ -84,6 +84,87 @@ def _plain_text_description(desc_html):
     return text
 
 
+
+
+def _format_sources_html(sources_raw):
+    """Render a Sources section into stable HTML even when the feed stored it
+    as flattened numbered items, title/url blobs, or raw back-to-back URLs.
+    """
+    if not sources_raw:
+        return ""
+
+    body = re.sub(r'^\s*Sources:\s*', '', sources_raw.strip(), flags=re.I)
+    body = html.unescape(body)
+    body = re.sub(r'(?<!^)(\d+\.\s)', r'\n\1', body)
+    body = re.sub(r'(?<!^)(https?://)', r'\n\1', body)
+    body = re.sub(r'[ \t]+', ' ', body)
+    body = re.sub(r'\n\s*', '\n', body).strip()
+
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    rendered = ['Sources:']
+    pending_title = None
+
+    def flush_title():
+        nonlocal pending_title
+        if pending_title:
+            rendered.append(html.escape(pending_title.strip()))
+            pending_title = None
+
+    for line in lines:
+        if re.match(r'^https?://', line):
+            flush_title()
+            for url in re.findall(r'https?://[^\s,)]+', line):
+                esc_url = html.escape(url)
+                rendered.append(f'     <a href="{esc_url}" target="_blank">{esc_url}</a>')
+            continue
+
+        if re.match(r'^\d+\.\s', line):
+            flush_title()
+            pending_title = line
+            continue
+
+        if pending_title:
+            pending_title += ' ' + line
+        else:
+            rendered.append(html.escape(line))
+
+    flush_title()
+    return '<br>'.join(line for line in rendered if line.strip())
+
+
+
+
+def _normalize_description_html(desc_html):
+    """Repair malformed stored description HTML before rendering/searching.
+
+    Older episodes may contain a card-sources block with all URLs flattened into
+    one giant anchor. Rebuild that block from its visible text so the page style
+    stays consistent with modern episodes.
+    """
+    if not desc_html:
+        return ""
+
+    def _fix_block(match):
+        inner = match.group(1)
+        plain = re.sub(r'<br\s*/?>', '\n', inner)
+        plain = re.sub(r'<[^>]+>', '', plain)
+        plain = html.unescape(plain).strip()
+        fixed = _format_sources_html(plain if plain.lower().startswith('sources:') else 'Sources: ' + plain)
+        return '<div class="card-sources">' + fixed + '</div>'
+
+    desc_html = re.sub(r'<div class="card-sources">(.*?)</div>', _fix_block, desc_html, flags=re.S)
+
+    if '<div class="card-sources">' not in desc_html and 'Sources:' in desc_html:
+        prefix, suffix = desc_html.split('Sources:', 1)
+        suffix_plain = re.sub(r'<br\s*/?>', '\n', suffix)
+        suffix_plain = re.sub(r'<[^>]+>', '', suffix_plain)
+        suffix_plain = html.unescape(suffix_plain).strip()
+        fixed = _format_sources_html('Sources: ' + suffix_plain)
+        desc_html = prefix.rstrip() + '<div class="card-sources">' + fixed + '</div>'
+
+    return desc_html
+
+
 def _build_search_index(episodes, legacy_slugs=None):
     """Build a full-catalog search index for homepage search.
 
@@ -96,13 +177,15 @@ def _build_search_index(episodes, legacy_slugs=None):
     for ep in episodes:
         slug = ep.get("slug") or _slug_from_title(ep.get("title", ""))
         feed_slugs.add(slug)
-        desc_plain = _truncate_sentence(_plain_text_description(ep.get("description", "")), 240)
+        desc_full = _plain_text_description(_normalize_description_html(ep.get("description", "")))
+        desc_plain = _truncate_sentence(desc_full, 240)
         search_idx.append({
             "t": ep.get("title", ""),
             "d": ep.get("date", ""),
             "s": slug,
             "u": f"episodes/{slug}/",
             "x": desc_plain,
+            "q": desc_full,
             "i": ep.get("thumb_url") or ep.get("image_url", ""),
             "l": False,
         })
@@ -115,6 +198,7 @@ def _build_search_index(episodes, legacy_slugs=None):
             "s": slug,
             "u": f"episodes/{slug}/",
             "x": "Legacy episode",
+            "q": _title_from_slug(slug),
             "i": "",
             "l": True,
         })
@@ -847,7 +931,7 @@ def generate_index(config, feed_path=None):
         slug = ep.get("slug", "")
         title = ep.get("title", "")
         date = ep.get("date", "")
-        desc = ep.get("description", "")
+        desc = _normalize_description_html(ep.get("description", ""))
         # Strip HTML tags from description for data attribute
         desc_plain = re.sub(r"<[^>]+>", "", desc)
         desc_plain = html.unescape(desc_plain)[:200]
@@ -1027,11 +1111,12 @@ function escapeHtml(value) {{
 function scoreEpisode(item, terms) {{
   const title = (item.t || '').toLowerCase();
   const desc = (item.x || '').toLowerCase();
+  const queryText = (item.q || item.x || '').toLowerCase();
   const date = (item.d || '').toLowerCase();
   let score = 0;
   for (const term of terms) {{
     const inTitle = title.includes(term);
-    const inDesc = desc.includes(term);
+    const inDesc = queryText.includes(term);
     const inDate = date.includes(term);
     if (!inTitle && !inDesc && !inDate) return -1;
     if (title === term) score += 80;
@@ -1660,7 +1745,7 @@ h1 {{
   <div class="ep-date">{html.escape(ep["date"])}</div>
   {audio_html}
   <div class="ep-links">{links_html}</div>
-  <div class="ep-desc">{ep["description"]}</div>
+  <div class="ep-desc">{_normalize_description_html(ep["description"])}</div>
 </div>
 
 <div class="footer">
