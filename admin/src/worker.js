@@ -1114,6 +1114,47 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// ── Display-title fallback for queue cards ────────────────────
+// Opaque identifiers like "ep102" or bare draft stems should never
+// be the primary label shown to the operator.  This helper walks a
+// fallback chain until it finds something human-readable.
+//
+// Order:  enriched paper title → explicit title (if not opaque) →
+//         human-readable slug from key → raw key (last resort).
+const OPAQUE_ID_RE = /^ep\d+$/i;
+const DRAFT_STEM_RE = /^(\d{4}-\d{2}-\d{2}-)?(.*?)(-[a-f0-9]{4,8})?$/;
+
+function humanizeSlug(slug) {
+  if (!slug) return '';
+  const m = slug.match(DRAFT_STEM_RE);
+  const core = m ? m[2] : slug;
+  if (!core) return '';
+  return core.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function displayTitle(item) {
+  // 1. Enriched paper title (from metadata enrichment on first URL)
+  if (item.metadata) {
+    const urls = item.urls || [];
+    for (const u of urls) {
+      const m = item.metadata[u];
+      if (m && m.enrichment_status === 'done' && m.title) return m.title;
+    }
+  }
+  // 2. Explicit title if it's not an opaque ID
+  if (item.title && !OPAQUE_ID_RE.test(item.title)) return item.title;
+  // 3. Human-readable slug derived from key or draft_stem
+  const stem = item.draft_stem || item.key || '';
+  const base = stem.split('/').pop().replace(/\.\w+$/, '');
+  if (base) {
+    const friendly = humanizeSlug(base);
+    if (friendly) return friendly;
+  }
+  // 4. Explicit title even if opaque (last resort before raw key)
+  if (item.title) return item.title;
+  return item.key || 'Untitled';
+}
+
 function splitDraftSources(text) {
   const raw = String(text || '');
   const match = raw.match(/(?:\n\s*Sources:\s*\n?|Sources:\s*)/i);
@@ -1272,7 +1313,7 @@ function draftsPageWithData(data) {
     <div class="card" style="margin-bottom:1.5rem">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h3 style="margin:0 0 4px">${d.title || d.key}${d.revision && d.revision > 1 ? ` <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:normal">(v${d.revision})</span>` : ''}</h3>
+          <h3 style="margin:0 0 4px">${escapeHtml(displayTitle(d))}${d.revision && d.revision > 1 ? ` <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:normal">(v${d.revision})</span>` : ''}</h3>
           <div style="color:var(--text-secondary);font-size:0.813rem">
             📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}
           </div>
@@ -1358,11 +1399,52 @@ function submissionStatusBadge(status) {
   return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:${info.color}22;color:${info.color}">${info.label}</span>`;
 }
 
-function renderSubmissionRow(sub) {
-  const urlList = (sub.urls || []).map(u => {
+function renderSubmissionMetadata(sub) {
+  const meta = sub.metadata || {};
+  const urls = sub.urls || [];
+  let html = '';
+  for (const u of urls) {
+    const m = meta[u];
     const short = u.length > 80 ? u.substring(0, 77) + '...' : u;
-    return `<a href="${escapeHtml(u)}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:0.813rem">${escapeHtml(short)}</a>`;
-  }).join('<br>');
+    const link = `<a href="${escapeHtml(u)}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:0.813rem">`;
+
+    if (m && m.enrichment_status === 'done' && m.title) {
+      // Enriched: show title as link, date + summary snippet below
+      html += `${link}<strong>${escapeHtml(m.title)}</strong></a>`;
+      const parts = [];
+      if (m.published) {
+        parts.push(m.published.substring(0, 10));
+      }
+      if (m.arxiv_id) {
+        parts.push(`arXiv:${m.arxiv_id}`);
+      }
+      if (parts.length > 0) {
+        html += `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:1px">${escapeHtml(parts.join(' · '))}</div>`;
+      }
+      if (m.summary) {
+        const snippet = m.summary.length > 180 ? m.summary.substring(0, 177) + '...' : m.summary;
+        html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">${escapeHtml(snippet)}</div>`;
+      }
+    } else if (m && m.enrichment_status === 'pending') {
+      // Pending enrichment
+      html += `${link}${escapeHtml(short)}</a>`;
+      html += `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:1px;font-style:italic">⏳ Enriching metadata…</div>`;
+    } else if (m && m.enrichment_status === 'failed') {
+      // Failed enrichment — show URL with note
+      html += `${link}${escapeHtml(short)}</a>`;
+      html += `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:1px">Metadata unavailable</div>`;
+    } else {
+      // No metadata at all or unsupported source
+      html += `${link}${escapeHtml(short)}</a>`;
+    }
+    html += '<div style="margin-bottom:6px"></div>';
+  }
+  return html;
+}
+
+function renderSubmissionRow(sub) {
+  const title = displayTitle(sub);
+  const metaHtml = renderSubmissionMetadata(sub);
   const timeStr = new Date(sub.timestamp).toLocaleString();
   const badge = submissionStatusBadge(sub.status);
   const errorLine = sub.error
@@ -1388,7 +1470,8 @@ function renderSubmissionRow(sub) {
     <div style="padding:12px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
         <div style="flex:1">
-          ${urlList}
+          <div style="font-weight:600;font-size:0.95rem;margin-bottom:6px">${escapeHtml(title)}</div>
+          ${metaHtml}
           ${instrLine}
           ${claimedLine}
           ${errorLine}
@@ -1538,7 +1621,7 @@ function queuePageWithData(data, subsData) {
       </div>`;
 
     items.forEach((p, i) => {
-      const title = p.title || 'Untitled';
+      const title = displayTitle(p);
       const abstract = (p.abstract || '').substring(0, 200) + ((p.abstract || '').length > 200 ? '...' : '');
       const arxivUrl = p.arxiv_id ? 'https://arxiv.org/abs/' + p.arxiv_id : '#';
       const pdfUrl = p.arxiv_id ? 'https://arxiv.org/pdf/' + p.arxiv_id : '#';
@@ -1547,7 +1630,7 @@ function queuePageWithData(data, subsData) {
         <div style="padding:12px 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
             <div style="flex:1">
-              <a href="${arxivUrl}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:0.95rem">${title}</a>
+              <a href="${arxivUrl}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:0.95rem">${escapeHtml(title)}</a>
               <p style="color:var(--text-secondary);font-size:0.813rem;margin:4px 0 0">${abstract}</p>
             </div>
             <button class="btn btn-success" onclick="quickGenerateUrl('${pdfUrl}')" style="font-size:0.75rem;padding:4px 10px;white-space:nowrap">🎙️</button>
@@ -1822,32 +1905,7 @@ function submitPage(subsData) {
   if (submissions.length === 0) {
     recentHtml = '<div class="empty-state" style="padding:2rem 0"><p style="color:var(--text-secondary)">No submissions yet</p></div>';
   } else {
-    recentHtml = submissions.map(sub => {
-      const urlList = (sub.urls || []).map(u => {
-        const short = u.length > 80 ? u.substring(0, 77) + '...' : u;
-        return `<a href="${escapeHtml(u)}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:0.813rem">${escapeHtml(short)}</a>`;
-      }).join('<br>');
-      const badge = submissionStatusBadge(sub.status);
-      const timeStr = sub.timestamp ? new Date(sub.timestamp).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '';
-      const claimedLine = sub.claimed_by
-        ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary)">Assigned to: <strong style="color:var(--text-primary)">${escapeHtml(sub.claimed_by)}</strong></div>`
-        : '';
-      const instrLine = sub.instructions
-        ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary);font-style:italic">${escapeHtml(sub.instructions.substring(0, 120))}${sub.instructions.length > 120 ? '...' : ''}</div>`
-        : '';
-      const errorLine = sub.error
-        ? `<div style="color:var(--danger);font-size:0.75rem;margin-top:4px">Error: ${escapeHtml(sub.error)}</div>`
-        : '';
-      return `<div style="padding:12px 0;border-bottom:1px solid var(--border-color)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-          <div style="flex:1">
-            ${urlList}${instrLine}${claimedLine}${errorLine}
-            <div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px">${timeStr}</div>
-          </div>
-          <div style="text-align:right">${badge}</div>
-        </div>
-      </div>`;
-    }).join('');
+    recentHtml = submissions.map(sub => renderSubmissionRow(sub)).join('');
   }
 
   return `
@@ -2202,7 +2260,7 @@ async function loadDrafts() {
 
     container.innerHTML = '<div class="draft-list">' + data.drafts.map(function(draft) {
       return '<div class="draft-item" data-key="' + draft.key + '">'
-        + '<div class="draft-header"><div><div class="draft-title">' + (draft.title || draft.key) + '</div>'
+        + '<div class="draft-header"><div><div class="draft-title">' + (draft.title || 'Untitled') + '</div>'
         + '<div class="draft-meta"><span>📅 ' + (draft.date || 'Unknown date') + '</span><span>⏱️ ' + (draft.duration || 'Unknown duration') + '</span></div>'
         + '</div></div>'
         + '<div class="draft-description" style="line-height:1.55">'
@@ -2407,7 +2465,28 @@ async function loadSubmissions() {
       const st = sub.status || 'submitted';
       const c = statusColors[st] || '#8b949e';
       const l = statusLabels[st] || st;
-      const urls = (sub.urls || [sub.url]).map(u => '<div style="font-size:0.875rem">' + escapeHtml(u) + '</div>').join('');
+      const meta = sub.metadata || {};
+      let urlsHtml = '';
+      (sub.urls || [sub.url]).forEach(u => {
+        const m = meta[u];
+        const short = u.length > 80 ? u.substring(0, 77) + '...' : u;
+        if (m && m.enrichment_status === 'done' && m.title) {
+          urlsHtml += '<div style="margin-bottom:4px"><a href="' + escapeHtml(u) + '" target="_blank" style="color:var(--accent,#58a6ff);text-decoration:none;font-size:0.875rem"><strong>' + escapeHtml(m.title) + '</strong></a>';
+          const parts = [];
+          if (m.published) parts.push(m.published.substring(0, 10));
+          if (m.arxiv_id) parts.push('arXiv:' + m.arxiv_id);
+          if (parts.length) urlsHtml += '<div style="font-size:0.7rem;color:var(--text-muted,#8b949e)">' + escapeHtml(parts.join(' \\u00b7 ')) + '</div>';
+          if (m.summary) {
+            const snip = m.summary.length > 180 ? m.summary.substring(0, 177) + '...' : m.summary;
+            urlsHtml += '<div style="font-size:0.75rem;color:var(--text-secondary,#8b949e);margin-top:1px">' + escapeHtml(snip) + '</div>';
+          }
+          urlsHtml += '</div>';
+        } else if (m && m.enrichment_status === 'pending') {
+          urlsHtml += '<div style="margin-bottom:4px"><div style="font-size:0.875rem">' + escapeHtml(short) + '</div><div style="font-size:0.7rem;color:var(--text-muted,#8b949e);font-style:italic">\\u23f3 Enriching metadata\\u2026</div></div>';
+        } else {
+          urlsHtml += '<div style="font-size:0.875rem;margin-bottom:4px">' + escapeHtml(short) + '</div>';
+        }
+      });
       const claimedLine = sub.claimed_by
         ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Assigned to: ' + escapeHtml(sub.claimed_by) + '</div>'
         : '';
@@ -2418,7 +2497,7 @@ async function loadSubmissions() {
         ? '<div style="font-size:0.75rem;color:#f85149;margin-top:2px">Error: ' + escapeHtml(sub.error) + '</div>'
         : '';
       return \`<div class="submission-item" style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border-color,#30363d)">
-        <div style="flex:1">\${urls}\${instrLine}\${claimedLine}\${errorLine}<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">\${new Date(sub.timestamp).toLocaleString()}</div></div>
+        <div style="flex:1">\${urlsHtml}\${instrLine}\${claimedLine}\${errorLine}<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">\${new Date(sub.timestamp).toLocaleString()}</div></div>
         <span style="padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:\${c}22;color:\${c};white-space:nowrap;margin-left:12px">\${l}</span>
       </div>\`;
     }).join('');
@@ -2481,7 +2560,7 @@ async function handleSubmit(e) {
       // redirect and replaces the list with an error.
       const container = document.getElementById('submissions-container');
       if (container) {
-        const urlsHtml = cleanUrls.map(u => '<div style="font-size:0.875rem">' + escapeHtml(u) + '</div>').join('');
+        const urlsHtml = cleanUrls.map(u => '<div style="margin-bottom:4px"><div style="font-size:0.875rem">' + escapeHtml(u) + '</div><div style="font-size:0.7rem;color:var(--text-muted,#8b949e);font-style:italic">\\u23f3 Enriching metadata\\u2026</div></div>').join('');
         const instrHtml = instrText
           ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(instrText.substring(0, 120)) + (instrText.length > 120 ? '...' : '') + '</div>'
           : '';
@@ -2553,6 +2632,8 @@ async function loadIssues() {
 // ============================================================================
 // WORKER HANDLER
 // ============================================================================
+export { displayTitle, humanizeSlug, OPAQUE_ID_RE };
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -2572,7 +2653,7 @@ export default {
     try {
       // API Routes
       if (path.startsWith('/api/')) {
-        const apiResponse = await handleAPI(path, request, env);
+        const apiResponse = await handleAPI(path, request, env, ctx);
         return new Response(JSON.stringify(apiResponse), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
@@ -2648,7 +2729,7 @@ export default {
 // ============================================================================
 // API HANDLERS
 // ============================================================================
-async function handleAPI(path, request, env) {
+async function handleAPI(path, request, env, ctx) {
   switch (path) {
     case '/api/drafts':
       return await getDrafts(env);
@@ -2670,7 +2751,11 @@ async function handleAPI(path, request, env) {
 
     case '/api/submit':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
-      return await submitPapers(request, env);
+      return await submitPapers(request, env, ctx);
+
+    case '/api/submissions/enrich':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await triggerEnrichment(request, env, ctx);
 
     case '/api/submissions/status':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
@@ -2790,9 +2875,9 @@ async function getDrafts(env) {
         });
       }
 
-      drafts.push({
+      const draft = {
         key: obj.key,
-        title: episode?.title || baseName,
+        title: episode?.title || null,
         date: episode?.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
         duration: episode?.duration || 'Unknown',
         description: episode?.description || '',
@@ -2802,7 +2887,11 @@ async function getDrafts(env) {
         revision: episode?.revision || null,
         revision_state: episode?.revision_state || null,
         episode_key: episode?.episode_key || null,
-      });
+      };
+      // Resolve display title through the fallback chain so opaque
+      // identifiers like "ep102" never surface as the primary label.
+      draft.title = displayTitle(draft);
+      drafts.push(draft);
     }
 
     // Filter out superseded and rejected revisions from default view.
@@ -2946,6 +3035,7 @@ async function getSubmissions(env) {
               claimed_by: sub.claimed_by || null,
               error: sub.error || null,
               draft_stem: sub.draft_stem || null,
+              metadata: sub.metadata || null,
               updated_at: sub.updated_at || sub.timestamp,
             });
           }
@@ -2981,6 +3071,101 @@ async function getIssues() {
   }
 }
 
+// ============================================================================
+// SUBMISSION METADATA ENRICHMENT
+// ============================================================================
+
+// Extract arXiv ID from various URL formats.
+// Supports /abs/, /pdf/, and bare IDs like 2401.12345 or 2401.12345v2.
+function extractArxivId(url) {
+  const m = url.match(/arxiv\.org\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5}(?:v\d+)?)/);
+  if (m) return m[1].replace(/v\d+$/, '');
+  return null;
+}
+
+// Fetch metadata for a single arXiv paper via the Atom API.
+// Returns { title, published, summary } or null on failure.
+async function fetchArxivMetadata(arxivId) {
+  try {
+    const res = await fetch(
+      `https://export.arxiv.org/api/query?id_list=${arxivId}&max_results=1`,
+      { headers: { 'User-Agent': 'AI-Post-Transformers-Admin/1.0' } }
+    );
+    if (!res.ok) return null;
+    const xml = await res.text();
+
+    // Parse title — strip newlines and collapse whitespace
+    const titleMatch = xml.match(/<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/);
+    const title = titleMatch
+      ? titleMatch[1].replace(/\s+/g, ' ').trim()
+      : null;
+
+    // Parse published date
+    const pubMatch = xml.match(/<entry>[\s\S]*?<published>([\s\S]*?)<\/published>/);
+    const published = pubMatch ? pubMatch[1].trim() : null;
+
+    // Parse summary/abstract — strip newlines, collapse whitespace
+    const sumMatch = xml.match(/<summary>([\s\S]*?)<\/summary>/);
+    const summary = sumMatch
+      ? sumMatch[1].replace(/\s+/g, ' ').trim()
+      : null;
+
+    if (!title) return null;
+    return { title, published, summary };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Enrich a single submission record with metadata for each URL.
+// Writes the enriched record back to R2. Safe to call multiple times.
+async function enrichSubmissionMetadata(key, env) {
+  try {
+    const obj = await env.ADMIN_BUCKET.get(key);
+    if (!obj) return;
+    const sub = await obj.json();
+    const urls = sub.urls || [];
+    if (urls.length === 0) return;
+
+    const metadata = sub.metadata || {};
+    let changed = false;
+
+    for (const url of urls) {
+      // Skip URLs already enriched (done or unsupported)
+      if (metadata[url] && metadata[url].enrichment_status !== 'pending') continue;
+
+      const arxivId = extractArxivId(url);
+      if (!arxivId) {
+        // Non-arXiv URL — mark as unsupported with URL as fallback title
+        metadata[url] = { enrichment_status: 'unsupported' };
+        changed = true;
+        continue;
+      }
+
+      const result = await fetchArxivMetadata(arxivId);
+      if (result) {
+        metadata[url] = {
+          title: result.title,
+          published: result.published,
+          summary: result.summary,
+          arxiv_id: arxivId,
+          enrichment_status: 'done',
+        };
+      } else {
+        metadata[url] = { enrichment_status: 'failed', arxiv_id: arxivId };
+      }
+      changed = true;
+    }
+
+    if (changed) {
+      sub.metadata = metadata;
+      await env.ADMIN_BUCKET.put(key, JSON.stringify(sub));
+    }
+  } catch (e) {
+    // Enrichment is best-effort; don't propagate errors
+  }
+}
+
 // Submission lifecycle statuses:
 //   submitted            — URLs received, awaiting generation pickup
 //   generation_claimed   — a worker has claimed this submission
@@ -3003,7 +3188,7 @@ const SUBMISSION_STATUSES = [
 ];
 
 // Submit papers
-async function submitPapers(request, env) {
+async function submitPapers(request, env, ctx) {
   try {
     const { urls, instructions } = await request.json();
 
@@ -3022,15 +3207,60 @@ async function submitPapers(request, env) {
     const timestamp = new Date().toISOString();
     const key = `submissions/${timestamp.replace(/[:.]/g, '-')}.json`;
 
+    // Initialize metadata with pending status for each URL
+    const metadata = {};
+    for (const url of urls) {
+      metadata[url] = { enrichment_status: 'pending' };
+    }
+
     await env.ADMIN_BUCKET.put(key, JSON.stringify({
       urls,
       instructions: instructions || null,
       timestamp,
       status: 'submitted',
+      metadata,
       status_history: [{ status: 'submitted', at: timestamp }],
     }));
 
+    // Fire-and-forget metadata enrichment via arXiv API
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(enrichSubmissionMetadata(key, env));
+    }
+
     return { success: true, count: urls.length };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+// Manual re-enrichment trigger for one or all submissions
+async function triggerEnrichment(request, env, ctx) {
+  try {
+    const body = await request.json();
+    const key = body.key; // optional — enrich a specific submission
+
+    if (key) {
+      // Enrich a single submission
+      if (ctx && ctx.waitUntil) {
+        ctx.waitUntil(enrichSubmissionMetadata(key, env));
+      } else {
+        await enrichSubmissionMetadata(key, env);
+      }
+      return { success: true, key };
+    }
+
+    // Enrich all submissions that have pending metadata
+    const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+    const promises = [];
+    for (const obj of list.objects) {
+      promises.push(enrichSubmissionMetadata(obj.key, env));
+    }
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(Promise.all(promises));
+    } else {
+      await Promise.all(promises);
+    }
+    return { success: true, count: list.objects.length };
   } catch (error) {
     return { error: error.message };
   }
@@ -3278,7 +3508,7 @@ function createPublishJobRecord({
     draft_id: episodeId || null,
     draft_key: key,
     draft_stem: draftStem,
-    title: title || draftStem.split('/').pop(),
+    title: displayTitle({ title, key, draft_stem: draftStem }),
     state: 'approved_for_publish',
     created_at: createdAt,
     updated_at: createdAt,

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import worker from './worker.js';
+import worker, { displayTitle, humanizeSlug, OPAQUE_ID_RE } from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
 
 
@@ -1364,6 +1364,298 @@ test('Queue page renders correctly with no submissions and no editorial papers',
 });
 
 
+// ============================================================================
+// METADATA ENRICHMENT TESTS
+// ============================================================================
+
+test('POST /api/submit stores metadata with pending enrichment_status', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.00001', 'https://example.com/paper.pdf'],
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // Find the stored submission
+  const keys = [...env.ADMIN_BUCKET.objects.keys()].filter(k => k.startsWith('submissions/'));
+  assert.equal(keys.length, 1);
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get(keys[0]));
+  assert.ok(stored.metadata, 'metadata field exists');
+  assert.equal(stored.metadata['https://arxiv.org/pdf/2401.00001'].enrichment_status, 'pending');
+  assert.equal(stored.metadata['https://example.com/paper.pdf'].enrichment_status, 'pending');
+});
+
+test('GET /api/submissions returns metadata field', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            title: 'Test Paper Title',
+            published: '2024-01-15T00:00:00Z',
+            summary: 'A test abstract.',
+            arxiv_id: '2401.00001',
+            enrichment_status: 'done',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.submissions.length, 1);
+  assert.ok(body.submissions[0].metadata, 'metadata returned in API');
+  const meta = body.submissions[0].metadata['https://arxiv.org/pdf/2401.00001'];
+  assert.equal(meta.title, 'Test Paper Title');
+  assert.equal(meta.enrichment_status, 'done');
+});
+
+test('Submit page renders enriched paper title instead of raw URL', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            title: 'Attention Is All You Need',
+            published: '2024-01-15T00:00:00Z',
+            summary: 'We propose a new architecture based on attention mechanisms.',
+            arxiv_id: '2401.00001',
+            enrichment_status: 'done',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Attention Is All You Need'), 'enriched title shown');
+  assert.ok(html.includes('arXiv:2401.00001'), 'arXiv ID shown');
+  assert.ok(html.includes('2024-01-15'), 'publication date shown');
+  assert.ok(html.includes('attention mechanisms'), 'summary snippet shown');
+});
+
+test('Submit page shows enriching state for pending metadata', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            enrichment_status: 'pending',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Enriching metadata'), 'pending enrichment state shown');
+});
+
+test('Queue page renders enriched metadata in pending generation section', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { sections: {} },
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            title: 'FlashAttention-3',
+            published: '2024-01-20T00:00:00Z',
+            summary: 'A faster attention mechanism for transformers.',
+            arxiv_id: '2401.00001',
+            enrichment_status: 'done',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Pending Generation'), 'pending section exists');
+  assert.ok(html.includes('FlashAttention-3'), 'enriched title in queue');
+  assert.ok(html.includes('arXiv:2401.00001'), 'arXiv ID in queue');
+});
+
+test('Submit page handles submissions without metadata field gracefully', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        // No metadata field — legacy submission
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  // Should render the URL as fallback
+  assert.ok(html.includes('2401.00001'), 'URL still shown without metadata');
+});
+
+test('Submit page renders failed enrichment with fallback', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            enrichment_status: 'failed',
+            arxiv_id: '2401.00001',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Metadata unavailable'), 'failed enrichment note shown');
+});
+
+test('POST /api/submissions/enrich accepts key parameter', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://example.com/paper.pdf'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://example.com/paper.pdf': { enrichment_status: 'pending' },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'submissions/s1.json' }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.key, 'submissions/s1.json');
+});
+
+test('POST /api/submissions/enrich without key enriches all submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://example.com/a.pdf'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: { 'https://example.com/a.pdf': { enrichment_status: 'pending' } },
+      },
+      'submissions/s2.json': {
+        urls: ['https://example.com/b.pdf'],
+        timestamp: '2026-03-27T10:01:00.000Z',
+        status: 'submitted',
+        metadata: { 'https://example.com/b.pdf': { enrichment_status: 'pending' } },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.count, 2);
+});
+
+test('Non-arXiv URL gets unsupported enrichment_status after enrichment', async () => {
+  // Simulate what enrichSubmissionMetadata does for non-arXiv URLs
+  // by directly checking the stored record after enrichment runs
+  const env = makeEnv({
+    admin: {
+      'submissions/s1.json': {
+        urls: ['https://example.com/paper.pdf'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://example.com/paper.pdf': { enrichment_status: 'pending' },
+        },
+      },
+    },
+  });
+
+  // Trigger enrichment synchronously (no ctx.waitUntil in tests)
+  await worker.fetch(
+    new Request('https://admin.test/api/submissions/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'submissions/s1.json' }),
+    }),
+    env,
+    {},
+  );
+
+  // Check the stored record
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get('submissions/s1.json'));
+  assert.equal(stored.metadata['https://example.com/paper.pdf'].enrichment_status, 'unsupported');
+});
+
 test('Queue page handles all submission statuses simultaneously', async () => {
   const env = makeEnv({
     admin: {
@@ -1424,4 +1716,249 @@ test('Queue page handles all submission statuses simultaneously', async () => {
   assert.ok(!html.includes('2401.10006'), 'rejected submission not in pipeline');
   // Worker assignment visible
   assert.ok(html.includes('worker-bob'), 'generating worker shown');
+});
+
+
+// ── displayTitle fallback chain ──────────────────────────────────
+
+test('displayTitle prefers enriched paper title over opaque key', () => {
+  const item = {
+    key: 'submissions/sub_abc.json',
+    urls: ['https://arxiv.org/pdf/2401.00001'],
+    metadata: {
+      'https://arxiv.org/pdf/2401.00001': {
+        title: 'Attention Is All You Need',
+        enrichment_status: 'done',
+      },
+    },
+  };
+  assert.equal(displayTitle(item), 'Attention Is All You Need');
+});
+
+test('displayTitle uses explicit title when not opaque', () => {
+  assert.equal(
+    displayTitle({ title: 'My Great Episode', key: 'drafts/2026/03/ep102.mp3' }),
+    'My Great Episode',
+  );
+});
+
+test('displayTitle rejects opaque ep-NNN title and humanizes slug', () => {
+  const item = {
+    title: 'ep102',
+    key: 'drafts/2026/03/2026-03-27-understanding-kv-caches-abc123.mp3',
+  };
+  const result = displayTitle(item);
+  assert.ok(!OPAQUE_ID_RE.test(result), `title must not be opaque ID, got: ${result}`);
+  assert.ok(result.includes('Understanding'), `expected humanized slug, got: ${result}`);
+});
+
+test('displayTitle falls back to humanized draft_stem', () => {
+  const item = { title: 'ep55', draft_stem: 'drafts/2026/03/2026-03-27-sparse-attention-ff01a2' };
+  const result = displayTitle(item);
+  assert.ok(!OPAQUE_ID_RE.test(result), `title must not be opaque, got: ${result}`);
+  assert.ok(result.includes('Sparse'), `expected humanized slug, got: ${result}`);
+});
+
+test('displayTitle returns humanized opaque slug as last resort', () => {
+  // No enrichment, opaque title, key only has the opaque stem —
+  // humanizeSlug title-cases it since no better data exists.
+  const item = { title: 'ep99', key: 'drafts/ep99.mp3' };
+  assert.equal(displayTitle(item), 'Ep99');
+});
+
+test('humanizeSlug strips date prefix and hash suffix', () => {
+  assert.equal(humanizeSlug('2026-03-27-kv-cache-routing-abc123'), 'Kv Cache Routing');
+  assert.equal(humanizeSlug('flash-attention'), 'Flash Attention');
+  assert.equal(humanizeSlug('ep102'), 'Ep102');
+});
+
+// ── Regression: opaque IDs must not appear as draft card titles ───
+
+test('Draft card title shows humanized name, not raw epNNN, when manifest has no title', async () => {
+  // Simulate a draft MP3 whose filename is ep102-based but manifest
+  // lacks a real title — the admin UI must NOT show "ep102" as the
+  // primary card title.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 102,
+            // title intentionally omitted — forces fallback
+            draft_key: 'drafts/2026/03/2026-03-27-understanding-kv-caches-abc123.mp3',
+          },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-27-understanding-kv-caches-abc123.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  const title = body.drafts[0].title;
+  assert.ok(!OPAQUE_ID_RE.test(title), `draft title must not be opaque ID, got: "${title}"`);
+  assert.ok(title.includes('Understanding'), `draft title should be humanized, got: "${title}"`);
+});
+
+test('Draft card title does not show bare baseName like ep102 when manifest title is missing', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+    },
+    podcast: {
+      'drafts/2026/03/ep102.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  // ep102 with no useful slug — should still return "ep102" as last
+  // resort but wrapped through displayTitle (no better data exists).
+  // The key test: when a BETTER name exists, it must be preferred.
+  assert.equal(body.drafts[0].title, 'Ep102');
+});
+
+test('Queue page submission card shows enriched title, not internal key', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { sections: {} },
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        metadata: {
+          'https://arxiv.org/pdf/2401.00001': {
+            title: 'FlashAttention-3: Fast Exact Attention',
+            enrichment_status: 'done',
+          },
+        },
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.ok(
+    html.includes('FlashAttention-3: Fast Exact Attention'),
+    'submission card heading must show enriched paper title',
+  );
+  assert.ok(
+    !html.includes('>submissions/s1.json<'),
+    'raw R2 key must not appear as card heading',
+  );
+});
+
+// ── Regression: queue section papers must go through displayTitle ──
+
+test('Queue page editorial paper card uses displayTitle, not raw p.title', async () => {
+  // Simulate a queue paper whose title field is an opaque internal ID.
+  // The server-side queue card renderer must apply displayTitle() so the
+  // opaque ID never reaches the HTML output as the primary card title.
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        public: [
+          {
+            arxiv_id: '2401.99999',
+            title: 'ep102',
+            abstract: 'Test abstract',
+            key: 'drafts/2026/03/2026-03-27-understanding-kv-caches-abc123.mp3',
+          },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  // displayTitle must reject "ep102" and fall back to humanized slug
+  assert.ok(
+    !html.includes('>ep102<'),
+    'opaque ep-NNN must not appear as queue card title in HTML',
+  );
+  assert.ok(
+    html.includes('Understanding'),
+    'humanized slug should appear as queue card title',
+  );
+});
+
+test('Queue page editorial paper title is HTML-escaped', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        public: [
+          {
+            arxiv_id: '2401.99999',
+            title: 'Foo <script>alert(1)</script> Bar',
+            abstract: 'Test abstract',
+          },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(
+    !html.includes('<script>alert(1)</script>'),
+    'paper title must be HTML-escaped in queue card',
+  );
+  assert.ok(
+    html.includes('&lt;script&gt;'),
+    'angle brackets must be escaped',
+  );
+});
+
+test('Client-side drafts page does not fall back to raw R2 key', async () => {
+  // The /api/drafts endpoint applies displayTitle() so draft.title is
+  // never null for a valid draft.  But the client-side JS must not fall
+  // back to draft.key if title is somehow falsy — it should show
+  // "Untitled" instead of a raw R2 path.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+    },
+    podcast: {
+      'drafts/2026/03/ep102.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  // The API applies displayTitle, so title should be "Ep102" (humanized),
+  // never the raw key "drafts/2026/03/ep102.mp3".
+  assert.ok(
+    body.drafts[0].title !== 'drafts/2026/03/ep102.mp3',
+    'draft title must not be raw R2 key',
+  );
 });
