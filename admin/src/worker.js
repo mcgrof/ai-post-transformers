@@ -1781,23 +1781,67 @@ async function copyReleaseTag(event) {
     event.preventDefault();
     event.stopPropagation();
   }
-  const tag = event && event.currentTarget && event.currentTarget.dataset
-    ? event.currentTarget.dataset.release
-    : '${ADMIN_RELEASE_TAG}';
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(tag);
-    } else {
-      const input = document.createElement('input');
-      input.value = tag;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand('copy');
-      input.remove();
+  const button = event && event.currentTarget ? event.currentTarget : null;
+  const tag = button && button.dataset ? button.dataset.release : '${ADMIN_RELEASE_TAG}';
+
+  async function tryNavigatorClipboard() {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) return false;
+    await navigator.clipboard.writeText(tag);
+    return true;
+  }
+
+  function tryExecCommand() {
+    const textarea = document.createElement('textarea');
+    textarea.value = tag;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-1000px';
+    textarea.style.left = '-1000px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (err) {
+      ok = false;
     }
-    showToast('Copied release tag: ' + tag);
+    textarea.remove();
+    return ok;
+  }
+
+  function flashCopied() {
+    if (!button) return;
+    const previous = button.innerHTML;
+    button.innerHTML = '<span aria-hidden="true">✅</span><span>Copied!</span>';
+    setTimeout(() => {
+      button.innerHTML = previous;
+    }, 1200);
+  }
+
+  try {
+    let copied = false;
+    try {
+      copied = await tryNavigatorClipboard();
+    } catch (err) {
+      copied = false;
+    }
+    if (!copied) {
+      copied = tryExecCommand();
+    }
+    if (copied) {
+      flashCopied();
+      showToast('Copied release tag: ' + tag);
+      return;
+    }
+
+    window.prompt('Copy release tag:', tag);
+    showToast('Clipboard blocked — release tag shown for manual copy', 'error');
   } catch (err) {
-    showToast('Failed to copy release tag', 'error');
+    window.prompt('Copy release tag:', tag);
+    showToast('Clipboard blocked — release tag shown for manual copy', 'error');
   }
 }
 
