@@ -1857,7 +1857,7 @@ function escapeHtml(str) {
 
 function splitDraftSources(text) {
   const raw = String(text || '');
-  const match = raw.match(/(?:\n\s*Sources:\s*\n?|Sources:\s*)/i);
+  const match = raw.match(/(?:\\n\\s*Sources:\\s*\\n?|Sources:\\s*)/i);
   if (!match) {
     return { body: raw.trim(), sources: '' };
   }
@@ -1871,12 +1871,12 @@ function splitDraftSources(text) {
 function formatDraftSourcesHtml(sourcesRaw, preview = false) {
   if (!sourcesRaw) return '';
   let body = String(sourcesRaw || '');
-  body = body.replace(/(\d+\.\s)/g, '\n$1');
-  body = body.replace(/(https?:\/\/)/g, '\n$1');
+  body = body.replace(/(\d+\.\s)/g, '\\n$1');
+  body = body.replace(/(https?:\\/\\/)/g, '\\n$1');
   body = body.replace(/[ 	]+/g, ' ');
-  body = body.replace(/\n\s*/g, '\n').trim();
+  body = body.replace(/\\n\\s*/g, '\\n').trim();
 
-  const lines = body.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const lines = body.split(/\\n+/).map(line => line.trim()).filter(Boolean);
   const rendered = [];
   let pendingTitle = null;
   let sourceCount = 0;
@@ -1890,9 +1890,9 @@ function formatDraftSourcesHtml(sourcesRaw, preview = false) {
   }
 
   for (const line of lines) {
-    if (/^https?:\/\//i.test(line)) {
+    if (/^https?:\\/\\//i.test(line)) {
       flushTitle();
-      const urls = line.match(/https?:\/\/[^\s,)]+/g) || [];
+      const urls = line.match(/https?:\\/\\/[^\\s,)]+/g) || [];
       for (const url of urls) {
         const esc = escapeHtml(url);
         rendered.push('<a href="' + esc + '" target="_blank" rel="noopener noreferrer">' + esc + '</a>');
@@ -1923,8 +1923,8 @@ function formatDraftDescription(desc, preview = false) {
   const parts = splitDraftSources(text);
   const bodyText = preview && parts.body.length > 220 ? parts.body.slice(0, 220).trimEnd() + '...' : parts.body;
 
-  let html = escapeHtml(bodyText).replace(/\n/g, '<br>');
-  html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+  let html = escapeHtml(bodyText).replace(/\\n/g, '<br>');
+  html = html.replace(/(<br>\\s*){3,}/g, '<br><br>');
   if (parts.sources) {
     html += formatDraftSourcesHtml(parts.sources, preview);
   }

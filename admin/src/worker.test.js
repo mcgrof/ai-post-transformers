@@ -483,6 +483,20 @@ test('GET /drafts shows the deployed admin release tag', async () => {
   assert.ok(html.includes('Copy release tag to clipboard'));
 });
 
+test('GET /drafts emits syntactically valid client script', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  const match = html.match(/<script>\n([\s\S]*?)\n<\/script>\n<\/body>/);
+
+  assert.ok(match, 'expected embedded client script block');
+  assert.doesNotThrow(() => new vm.Script(match[1]));
+});
+
 test('GET /api/version exposes the deployed admin release tag', async () => {
   const env = makeEnv();
   const response = await worker.fetch(
