@@ -1,5 +1,9 @@
 // Systemd unit generation and Cloudflare Access identity helpers
-// for the publish-worker automation tab.
+// for the podcast-worker automation tab.
+//
+// The worker service runs two phases on each timer tick:
+//   1. Generation pickup — process pending submissions into drafts
+//   2. Publish pickup — claim and execute approved publish jobs
 
 /**
  * Extract admin identity from Cloudflare Access JWT headers.
@@ -15,19 +19,21 @@ export function getAdminIdentity(request) {
 }
 
 /**
- * Generate a systemd user service unit for the publish worker.
+ * Generate a systemd user service unit that runs both the generation
+ * worker (pick up pending submissions) and the publish worker
+ * (claim and process approved publish jobs) in sequence.
  */
 export function generateSystemdService(adminId) {
   return `[Unit]
-Description=AI Post Transformers publish worker (${adminId})
+Description=AI Post Transformers podcast worker (${adminId})
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=%h/.config/publish-worker/env
+EnvironmentFile=%h/.config/podcast-worker/env
 ExecStart=%h/devel/ai-post-transformers/.venv/bin/python \\
-    %h/devel/ai-post-transformers/scripts/run_publish_worker.py \\
+    %h/devel/ai-post-transformers/scripts/run_podcast_worker.py \\
     --admin-id ${adminId} \\
     --once \\
     --verify-remote \\
@@ -46,7 +52,7 @@ WantedBy=default.target
  */
 export function generateSystemdTimer() {
   return `[Unit]
-Description=Periodic trigger for publish-worker
+Description=Periodic trigger for podcast-worker
 
 [Timer]
 OnBootSec=1min
@@ -63,7 +69,7 @@ WantedBy=timers.target
  * Generate a skeleton environment file with placeholders.
  */
 export function generateEnvFile() {
-  return `# Publish-worker credentials — fill in before enabling the timer.
+  return `# Podcast-worker credentials — fill in before enabling the timer.
 # R2 / S3-compatible object storage
 AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 AWS_ACCESS_KEY_ID=
@@ -79,20 +85,20 @@ AWS_SECRET_ACCESS_KEY=
  */
 export function generateInstallCommands() {
   return `# 1. Create config directory and save environment file
-mkdir -p ~/.config/publish-worker
-# (copy the env file contents above into ~/.config/publish-worker/env)
+mkdir -p ~/.config/podcast-worker
+# (copy the env file contents above into ~/.config/podcast-worker/env)
 
 # 2. Install systemd user units
 mkdir -p ~/.config/systemd/user
-cp publish-worker.service ~/.config/systemd/user/
-cp publish-worker.timer   ~/.config/systemd/user/
+cp podcast-worker.service ~/.config/systemd/user/
+cp podcast-worker.timer   ~/.config/systemd/user/
 
 # 3. Reload and enable
 systemctl --user daemon-reload
-systemctl --user enable --now publish-worker.timer
+systemctl --user enable --now podcast-worker.timer
 
 # 4. Check status
-systemctl --user status publish-worker.timer
-journalctl --user -u publish-worker.service -f
+systemctl --user status podcast-worker.timer
+journalctl --user -u podcast-worker.service -f
 `;
 }

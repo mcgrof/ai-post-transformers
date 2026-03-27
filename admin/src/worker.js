@@ -1342,8 +1342,71 @@ function draftsPage() {
 
 
 
-function queuePageWithData(data) {
-  const papers = data.papers || {};
+function submissionStatusBadge(status) {
+  const map = {
+    submitted:            { label: 'Submitted',        color: 'var(--accent)' },
+    pending:              { label: 'Submitted',        color: 'var(--accent)' },
+    generation_claimed:   { label: 'Claimed',          color: 'var(--warning)' },
+    generation_running:   { label: 'Generating Draft', color: 'var(--warning)' },
+    draft_generated:      { label: 'Draft Ready',      color: 'var(--success)' },
+    generation_failed:    { label: 'Failed',           color: 'var(--danger)' },
+    approved_for_publish: { label: 'Approved',         color: 'var(--purple)' },
+    published:            { label: 'Published',        color: 'var(--success)' },
+    rejected:             { label: 'Rejected',         color: 'var(--danger)' },
+  };
+  const info = map[status] || { label: status, color: 'var(--text-secondary)' };
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:${info.color}22;color:${info.color}">${info.label}</span>`;
+}
+
+function renderSubmissionRow(sub) {
+  const urlList = (sub.urls || []).map(u => {
+    const short = u.length > 80 ? u.substring(0, 77) + '...' : u;
+    return `<a href="${escapeHtml(u)}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:0.813rem">${escapeHtml(short)}</a>`;
+  }).join('<br>');
+  const timeStr = new Date(sub.timestamp).toLocaleString();
+  const badge = submissionStatusBadge(sub.status);
+  const errorLine = sub.error
+    ? `<div style="color:var(--danger);font-size:0.75rem;margin-top:4px">Error: ${escapeHtml(sub.error)}</div>`
+    : '';
+  const draftLine = sub.draft_stem
+    ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary)">Draft: ${escapeHtml(sub.draft_stem)}</div>`
+    : '';
+  const retryBtn = sub.status === 'generation_failed' && sub.key
+    ? `<button class="btn btn-secondary" onclick="retrySubmission('${escapeHtml(sub.key)}')" style="font-size:0.7rem;padding:3px 8px;margin-top:6px">🔄 Retry</button>`
+    : '';
+  const instrLine = sub.instructions
+    ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary);font-style:italic">${escapeHtml(sub.instructions.substring(0, 120))}${sub.instructions.length > 120 ? '...' : ''}</div>`
+    : '';
+  const isPending = sub.status === 'submitted' || sub.status === 'pending';
+  const claimedLine = sub.claimed_by
+    ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary)">Assigned to: <strong style="color:var(--text-primary)">${escapeHtml(sub.claimed_by)}</strong></div>`
+    : isPending
+      ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-muted)">Open — any generation worker can claim</div>`
+      : '';
+
+  return `
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="flex:1">
+          ${urlList}
+          ${instrLine}
+          ${claimedLine}
+          ${errorLine}
+          ${draftLine}
+          ${retryBtn}
+          <div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px">${timeStr}</div>
+        </div>
+        <div style="text-align:right">
+          ${badge}
+        </div>
+      </div>
+    </div>`;
+}
+
+function queuePageWithData(data, subsData) {
+  // Use sections (keyed by section name) rather than the flat papers array
+  const papers = data.sections || {};
+  const submissions = (subsData && subsData.submissions) || [];
   const sections = [
     {key: 'bridge', label: '🌉 Bridge Papers', desc: 'Papers connecting memory/storage with broader AI interest'},
     {key: 'public', label: '🌍 Public Interest', desc: 'High-impact papers for general AI audience'},
@@ -1355,11 +1418,26 @@ function queuePageWithData(data) {
   let totalPapers = 0;
   sections.forEach(s => { totalPapers += (papers[s.key] || []).length; });
 
+  // Partition submissions into generation-focused groups
+  const pendingSubs = submissions.filter(s =>
+    s.status === 'submitted' || s.status === 'pending'
+  );
+  const generatingSubs = submissions.filter(s =>
+    ['generation_claimed', 'generation_running'].includes(s.status)
+  );
+  const failedSubs = submissions.filter(s =>
+    s.status === 'generation_failed'
+  );
+  const draftReadySubs = submissions.filter(s =>
+    s.status === 'draft_generated'
+  );
+  const generationPipelineCount = pendingSubs.length + generatingSubs.length + failedSubs.length + draftReadySubs.length;
+
   let html = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
       <div>
         <h1>Editorial Queue</h1>
-        <p>${totalPapers} papers scored and ranked by the editorial algorithm</p>
+        <p>${totalPapers} editorial papers · ${generationPipelineCount} in generation pipeline</p>
       </div>
       <div style="display:flex;gap:8px">
         <a href="https://podcast.do-not-panic.com/queue.html" target="_blank" class="btn btn-primary">📊 Full Queue ↗</a>
@@ -1375,8 +1453,80 @@ function queuePageWithData(data) {
       </div>
     </div>`;
 
+  // --- Pending generation section (submitted, not yet picked up) ---
+  if (pendingSubs.length > 0) {
+    html += `<div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <h2 style="margin:0">⏳ Pending Generation <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${pendingSubs.length})</span></h2>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">Awaiting pickup by a generation worker — anyone with systemd timer can claim these</p>
+        </div>
+      </div>`;
+    pendingSubs.forEach(sub => { html += renderSubmissionRow(sub); });
+    html += '</div>';
+  }
+
+  // --- Active generation (claimed or running) ---
+  if (generatingSubs.length > 0) {
+    html += `<div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <h2 style="margin:0">🔄 Generating <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${generatingSubs.length})</span></h2>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">A worker is actively generating these episodes</p>
+        </div>
+      </div>`;
+    generatingSubs.forEach(sub => { html += renderSubmissionRow(sub); });
+    html += '</div>';
+  }
+
+  // --- Draft ready (generated but not yet reviewed) ---
+  if (draftReadySubs.length > 0) {
+    html += `<div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <h2 style="margin:0">✅ Draft Ready <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${draftReadySubs.length})</span></h2>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">Generation complete — head to <a href="/drafts" style="color:var(--accent)">Drafts</a> to review and approve</p>
+        </div>
+      </div>`;
+    draftReadySubs.forEach(sub => { html += renderSubmissionRow(sub); });
+    html += '</div>';
+  }
+
+  // --- Failed generation ---
+  if (failedSubs.length > 0) {
+    html += `<div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <h2 style="margin:0">❌ Generation Failed <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${failedSubs.length})</span></h2>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">These submissions hit errors during generation</p>
+        </div>
+      </div>`;
+    failedSubs.forEach(sub => { html += renderSubmissionRow(sub); });
+    html += '</div>';
+  }
+
+  // Collect arXiv IDs from submissions that are past the editorial stage
+  // so we can suppress them from the editorial queue (they're already handled).
+  // This includes papers in any active generation state, not just published —
+  // a paper being generated or with a ready draft doesn't need editorial action.
+  const handledStatuses = [
+    'generation_claimed', 'generation_running', 'draft_generated',
+    'approved_for_publish', 'published',
+  ];
+  const handledArxivIds = new Set();
+  submissions.filter(s => handledStatuses.includes(s.status)).forEach(s => {
+    (s.urls || []).forEach(u => {
+      const m = u.match(/(\d{4}\.\d{4,5})/);
+      if (m) handledArxivIds.add(m[1]);
+    });
+  });
+
   sections.forEach(s => {
-    const items = papers[s.key] || [];
+    const allItems = papers[s.key] || [];
+    // Filter out papers that already have a published or approved submission
+    const items = allItems.filter(p =>
+      !p.arxiv_id || !handledArxivIds.has(p.arxiv_id)
+    );
     if (items.length === 0) return;
 
     html += `<div class="card" style="margin-top:1.5rem">
@@ -1425,6 +1575,23 @@ function queuePageWithData(data) {
         });
         showToast('Queued for generation!');
       } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+    }
+    async function retrySubmission(key) {
+      try {
+        const res = await fetch('/api/submissions/status', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ key, status: 'submitted' }),
+          credentials: 'same-origin'
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Reset to submitted — awaiting generation pickup');
+          setTimeout(() => location.reload(), 800);
+        } else {
+          showToast(data.error || 'Retry failed', 'error');
+        }
+      } catch(e) { showToast('Retry failed: ' + e.message, 'error'); }
     }
   </script>`;
 
@@ -1648,7 +1815,41 @@ function conferenceFAST26Page() {
   return conferenceDetailPage('fast26');
 }
 
-function submitPage() {
+function submitPage(subsData) {
+  const submissions = (subsData && subsData.submissions) || [];
+
+  let recentHtml = '';
+  if (submissions.length === 0) {
+    recentHtml = '<div class="empty-state" style="padding:2rem 0"><p style="color:var(--text-secondary)">No submissions yet</p></div>';
+  } else {
+    recentHtml = submissions.map(sub => {
+      const urlList = (sub.urls || []).map(u => {
+        const short = u.length > 80 ? u.substring(0, 77) + '...' : u;
+        return `<a href="${escapeHtml(u)}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:0.813rem">${escapeHtml(short)}</a>`;
+      }).join('<br>');
+      const badge = submissionStatusBadge(sub.status);
+      const timeStr = sub.timestamp ? new Date(sub.timestamp).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '';
+      const claimedLine = sub.claimed_by
+        ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary)">Assigned to: <strong style="color:var(--text-primary)">${escapeHtml(sub.claimed_by)}</strong></div>`
+        : '';
+      const instrLine = sub.instructions
+        ? `<div style="font-size:0.75rem;margin-top:4px;color:var(--text-secondary);font-style:italic">${escapeHtml(sub.instructions.substring(0, 120))}${sub.instructions.length > 120 ? '...' : ''}</div>`
+        : '';
+      const errorLine = sub.error
+        ? `<div style="color:var(--danger);font-size:0.75rem;margin-top:4px">Error: ${escapeHtml(sub.error)}</div>`
+        : '';
+      return `<div style="padding:12px 0;border-bottom:1px solid var(--border-color)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+          <div style="flex:1">
+            ${urlList}${instrLine}${claimedLine}${errorLine}
+            <div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px">${timeStr}</div>
+          </div>
+          <div style="text-align:right">${badge}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   return `
     <div class="page-header">
       <h1>Submit Papers</h1>
@@ -1697,17 +1898,8 @@ Other ideas:
 
     <div class="card" style="margin-top: 1.5rem;">
       <h2>Recent Submissions</h2>
-      <div id="submissions-container">
-        <div class="loading">
-          <div class="spinner"></div>
-          Loading submissions...
-        </div>
-      </div>
+      <div id="submissions-container">${recentHtml}</div>
     </div>
-
-    <script>
-      loadSubmissions();
-    </script>
   `;
 }
 
@@ -1764,13 +1956,16 @@ function automationPage(data) {
   return `
     <div class="page-header">
       <h1>Automation / Systemd</h1>
-      <p>Publish-worker systemd units for <strong>${esc(adminEmail || adminId)}</strong></p>
+      <p>Podcast worker systemd units for <strong>${esc(adminEmail || adminId)}</strong></p>
+      <p style="color:var(--text-secondary);font-size:0.813rem;margin-top:4px">
+        The worker runs two phases each tick: (1) pick up pending submissions and generate drafts, (2) claim and process approved publish jobs.
+      </p>
     </div>
 
     <div class="card" style="margin-bottom:1rem">
       <h3 style="margin:0 0 0.5rem">Service Unit</h3>
       <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
-        Install as <code>~/.config/systemd/user/publish-worker.service</code>
+        Install as <code>~/.config/systemd/user/podcast-worker.service</code>
       </p>
       <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(service)}</code></pre>
     </div>
@@ -1778,7 +1973,7 @@ function automationPage(data) {
     <div class="card" style="margin-bottom:1rem">
       <h3 style="margin:0 0 0.5rem">Timer Unit</h3>
       <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
-        Install as <code>~/.config/systemd/user/publish-worker.timer</code>
+        Install as <code>~/.config/systemd/user/podcast-worker.timer</code>
       </p>
       <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(timer)}</code></pre>
     </div>
@@ -1786,7 +1981,7 @@ function automationPage(data) {
     <div class="card" style="margin-bottom:1rem">
       <h3 style="margin:0 0 0.5rem">Environment File</h3>
       <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
-        Install as <code>~/.config/publish-worker/env</code> — fill in credentials
+        Install as <code>~/.config/podcast-worker/env</code> — fill in credentials
       </p>
       <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(envFile)}</code></pre>
     </div>
@@ -2196,6 +2391,7 @@ async function generatePodcast(paperId) {
 // Submissions
 async function loadSubmissions() {
   const container = document.getElementById('submissions-container');
+  if (!container) return;
   try {
     const res = await fetch('/api/submissions');
     const data = await res.json();
@@ -2205,20 +2401,42 @@ async function loadSubmissions() {
       return;
     }
 
-    container.innerHTML = data.submissions.map(sub => \`
-      <div class="submission-item">
-        <div class="submission-url">\${sub.url}</div>
-        <div class="submission-time">\${new Date(sub.timestamp).toLocaleString()}</div>
-      </div>
-    \`).join('');
+    container.innerHTML = data.submissions.map(sub => {
+      const statusColors = {submitted:'#58a6ff',pending:'#58a6ff',generation_claimed:'#d29922',generation_running:'#d29922',draft_generated:'#3fb950',generation_failed:'#f85149',approved_for_publish:'#a371f7',published:'#3fb950',rejected:'#f85149'};
+      const statusLabels = {submitted:'Submitted',pending:'Submitted',generation_claimed:'Claimed',generation_running:'Generating',draft_generated:'Draft Ready',generation_failed:'Failed',approved_for_publish:'Approved',published:'Published',rejected:'Rejected'};
+      const st = sub.status || 'submitted';
+      const c = statusColors[st] || '#8b949e';
+      const l = statusLabels[st] || st;
+      const urls = (sub.urls || [sub.url]).map(u => '<div style="font-size:0.875rem">' + escapeHtml(u) + '</div>').join('');
+      const claimedLine = sub.claimed_by
+        ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Assigned to: ' + escapeHtml(sub.claimed_by) + '</div>'
+        : '';
+      const instrLine = sub.instructions
+        ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(sub.instructions.substring(0, 120)) + (sub.instructions.length > 120 ? '...' : '') + '</div>'
+        : '';
+      const errorLine = sub.error
+        ? '<div style="font-size:0.75rem;color:#f85149;margin-top:2px">Error: ' + escapeHtml(sub.error) + '</div>'
+        : '';
+      return \`<div class="submission-item" style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border-color,#30363d)">
+        <div style="flex:1">\${urls}\${instrLine}\${claimedLine}\${errorLine}<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">\${new Date(sub.timestamp).toLocaleString()}</div></div>
+        <span style="padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:\${c}22;color:\${c};white-space:nowrap;margin-left:12px">\${l}</span>
+      </div>\`;
+    }).join('');
   } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p style="color: var(--danger);">Failed to load submissions</p></div>';
+    // Don't wipe server-rendered content on fetch failure (e.g. CF Access redirect).
+    // Show a toast so the operator knows the refresh failed, but keep stale content visible.
+    if (typeof showToast === 'function') {
+      showToast('Could not refresh submissions list', 'error');
+    }
   }
 }
 
 async function handleSubmit(e) {
   e.preventDefault();
-  const urls = document.getElementById('urls').value.trim().split('\\n').filter(u => u.trim());
+  const urlsField = document.getElementById('urls');
+  const instrField = document.getElementById('instructions');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  const urls = urlsField.value.trim().split('\\n').filter(u => u.trim());
 
   if (urls.length === 0) {
     showToast('Please enter at least one URL', 'error');
@@ -2233,22 +2451,62 @@ async function handleSubmit(e) {
     return;
   }
 
+  // Disable button and show progress
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+  }
+
   try {
+    const cleanUrls = urls.map(u => u.trim());
+    const instrText = instrField.value.trim() || null;
     const res = await fetch('/api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, instructions: document.getElementById('instructions').value.trim() || null })
+      body: JSON.stringify({ urls: cleanUrls, instructions: instrText })
     });
+    if (!res.ok) {
+      let msg = 'Server error (' + res.status + ')';
+      try { const d = await res.json(); if (d.error) msg = d.error; } catch (_) {}
+      showToast(msg, 'error');
+      return;
+    }
     const data = await res.json();
     if (data.success) {
-      showToast('Papers submitted successfully');
-      document.getElementById('urls').value = '';
-      loadSubmissions();
+      showToast('Submitted ' + data.count + ' paper' + (data.count !== 1 ? 's' : '') + ' — pending generation pickup');
+      urlsField.value = '';
+      instrField.value = '';
+      // Optimistically render the new submission instead of re-fetching.
+      // This avoids the failure mode where loadSubmissions() hits a CF Access
+      // redirect and replaces the list with an error.
+      const container = document.getElementById('submissions-container');
+      if (container) {
+        const urlsHtml = cleanUrls.map(u => '<div style="font-size:0.875rem">' + escapeHtml(u) + '</div>').join('');
+        const instrHtml = instrText
+          ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(instrText.substring(0, 120)) + (instrText.length > 120 ? '...' : '') + '</div>'
+          : '';
+        const now = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        const newRow = '<div style="padding:12px 0;border-bottom:1px solid var(--border-color,#30363d)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">'
+          + '<div style="flex:1">' + urlsHtml + instrHtml
+          + '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">' + now + '</div></div>'
+          + '<span style="padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:#58a6ff22;color:#58a6ff;white-space:nowrap;margin-left:12px">Submitted</span>'
+          + '</div></div>';
+        // Remove empty-state placeholder if present
+        const empty = container.querySelector('.empty-state');
+        if (empty) empty.remove();
+        container.insertAdjacentHTML('afterbegin', newRow);
+      }
     } else {
       showToast(data.error || 'Failed to submit papers', 'error');
     }
   } catch (err) {
     showToast('Failed to submit: ' + err.message, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit Papers';
+    }
   }
 }
 
@@ -2337,13 +2595,15 @@ export default {
           break;
         case '/queue':
           const queueData = await getQueue(env);
-          html = baseHTML('Queue', queuePageWithData(queueData), 'queue');
+          const queueSubs = await getSubmissions(env);
+          html = baseHTML('Queue', queuePageWithData(queueData, queueSubs), 'queue');
           break;
         case '/conferences':
           html = baseHTML('Conferences', conferencesPage(), 'conferences');
           break;
         case '/submit':
-          html = baseHTML('Submit', submitPage(), 'submit');
+          const submitSubs = await getSubmissions(env);
+          html = baseHTML('Submit', submitPage(submitSubs), 'submit');
           break;
         case '/issues':
           const issuesData = await getIssues();
@@ -2411,6 +2671,10 @@ async function handleAPI(path, request, env) {
     case '/api/submit':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
       return await submitPapers(request, env);
+
+    case '/api/submissions/status':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await updateSubmissionStatus(request, env);
 
     case '/api/review':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
@@ -2661,7 +2925,7 @@ function queueScore(record) {
   return 0;
 }
 
-// Get submissions
+// Get submissions — returns full records with status and R2 key
 async function getSubmissions(env) {
   try {
     const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
@@ -2673,9 +2937,17 @@ async function getSubmissions(env) {
         if (data) {
           const sub = await data.json();
           if (sub.urls) {
-            for (const url of sub.urls) {
-              submissions.push({ url, timestamp: sub.timestamp });
-            }
+            submissions.push({
+              key: obj.key,
+              urls: sub.urls,
+              instructions: sub.instructions || null,
+              timestamp: sub.timestamp,
+              status: sub.status || 'submitted',
+              claimed_by: sub.claimed_by || null,
+              error: sub.error || null,
+              draft_stem: sub.draft_stem || null,
+              updated_at: sub.updated_at || sub.timestamp,
+            });
           }
         }
       } catch (e) {
@@ -2685,7 +2957,7 @@ async function getSubmissions(env) {
 
     // Sort by timestamp descending
     submissions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    return { submissions: submissions.slice(0, 50) };
+    return { submissions: submissions.slice(0, 100) };
   } catch (error) {
     return { error: error.message, submissions: [] };
   }
@@ -2709,10 +2981,31 @@ async function getIssues() {
   }
 }
 
+// Submission lifecycle statuses:
+//   submitted            — URLs received, awaiting generation pickup
+//   generation_claimed   — a worker has claimed this submission
+//   generation_running   — gen-podcast.py is actively generating
+//   draft_generated      — draft produced, awaiting review
+//   generation_failed    — generation attempt failed
+//   approved_for_publish — draft approved (maps to publish job)
+//   published            — episode is live
+//   rejected             — operator rejected the submission
+
+const SUBMISSION_STATUSES = [
+  'submitted',
+  'generation_claimed',
+  'generation_running',
+  'draft_generated',
+  'generation_failed',
+  'approved_for_publish',
+  'published',
+  'rejected',
+];
+
 // Submit papers
 async function submitPapers(request, env) {
   try {
-    const { urls } = await request.json();
+    const { urls, instructions } = await request.json();
 
     if (!urls || !Array.isArray(urls) || urls.length === 0) {
       return { error: 'No URLs provided' };
@@ -2731,11 +3024,50 @@ async function submitPapers(request, env) {
 
     await env.ADMIN_BUCKET.put(key, JSON.stringify({
       urls,
+      instructions: instructions || null,
       timestamp,
-      status: 'pending'
+      status: 'submitted',
+      status_history: [{ status: 'submitted', at: timestamp }],
     }));
 
     return { success: true, count: urls.length };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+// Update submission status (used by generation worker)
+async function updateSubmissionStatus(request, env) {
+  try {
+    const { key, status, claimed_by, error: errorMsg, draft_stem } = await request.json();
+
+    if (!key || !status) {
+      return { error: 'Missing key or status' };
+    }
+    if (!SUBMISSION_STATUSES.includes(status)) {
+      return { error: `Invalid status: ${status}` };
+    }
+
+    const existing = await env.ADMIN_BUCKET.get(key);
+    if (!existing) {
+      return { error: `Submission not found: ${key}` };
+    }
+
+    const sub = await existing.json();
+    const now = new Date().toISOString();
+
+    sub.status = status;
+    sub.updated_at = now;
+    if (claimed_by) sub.claimed_by = claimed_by;
+    if (errorMsg) sub.error = errorMsg;
+    if (draft_stem) sub.draft_stem = draft_stem;
+
+    const history = sub.status_history || [];
+    history.push({ status, at: now, ...(claimed_by ? { by: claimed_by } : {}) });
+    sub.status_history = history;
+
+    await env.ADMIN_BUCKET.put(key, JSON.stringify(sub));
+    return { success: true, key, status };
   } catch (error) {
     return { error: error.message };
   }

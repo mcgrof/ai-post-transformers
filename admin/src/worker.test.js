@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 
 import worker from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
@@ -684,4 +685,743 @@ test('GET and POST /api/publish expose publish status and actions', async () => 
   assert.equal(releaseBody.publish_job.state, 'publish_released');
   assert.equal(releaseBody.publish_job.claimed_by, null);
   assert.equal(releaseBody.publish_job.release_reason, 'pause');
+});
+
+
+// =========================================================================
+// Submission lifecycle tests
+// =========================================================================
+
+test('POST /api/submit stores submission with status submitted', async () => {
+  const env = makeEnv();
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        instructions: 'Focus on memory systems',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  assert.equal(body.count, 1);
+
+  const keys = [...env.ADMIN_BUCKET.objects.keys()];
+  const subKey = keys.find((k) => k.startsWith('submissions/'));
+  assert.ok(subKey, 'submission key was written to R2');
+
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get(subKey));
+  assert.equal(stored.status, 'submitted');
+  assert.deepEqual(stored.urls, ['https://arxiv.org/pdf/2401.00001']);
+  assert.equal(stored.instructions, 'Focus on memory systems');
+  assert.ok(Array.isArray(stored.status_history));
+  assert.equal(stored.status_history[0].status, 'submitted');
+});
+
+
+test('GET /api/submissions returns status and key fields', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/2026-03-27T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        instructions: 'test instructions',
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-1',
+        status_history: [
+          { status: 'submitted', at: '2026-03-27T10:00:00.000Z' },
+          { status: 'generation_running', at: '2026-03-27T10:01:00.000Z' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions'),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.submissions.length, 1);
+  const sub = body.submissions[0];
+  assert.equal(sub.status, 'generation_running');
+  assert.equal(sub.claimed_by, 'worker-1');
+  assert.equal(sub.key, 'submissions/2026-03-27T10-00-00-000Z.json');
+  assert.deepEqual(sub.urls, ['https://arxiv.org/pdf/2401.00001']);
+  assert.equal(sub.instructions, 'test instructions');
+});
+
+
+test('POST /api/submissions/status updates submission status', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/2026-03-27T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+        status_history: [{ status: 'submitted', at: '2026-03-27T10:00:00.000Z' }],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/2026-03-27T10-00-00-000Z.json',
+        status: 'generation_claimed',
+        claimed_by: 'worker-1',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  assert.equal(body.status, 'generation_claimed');
+
+  const stored = JSON.parse(
+    env.ADMIN_BUCKET.objects.get('submissions/2026-03-27T10-00-00-000Z.json'),
+  );
+  assert.equal(stored.status, 'generation_claimed');
+  assert.equal(stored.claimed_by, 'worker-1');
+  assert.equal(stored.status_history.length, 2);
+  assert.equal(stored.status_history[1].status, 'generation_claimed');
+});
+
+
+test('POST /api/submissions/status rejects invalid status', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/test.json': {
+        urls: ['https://example.com'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/test.json',
+        status: 'invalid_status',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.ok(body.error.includes('Invalid status'));
+});
+
+
+test('POST /api/submissions/status records draft_stem and error', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/test.json': {
+        urls: ['https://example.com/paper.pdf'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_running',
+        status_history: [{ status: 'submitted', at: '2026-03-27T10:00:00.000Z' }],
+      },
+    },
+  });
+
+  // Simulate successful generation
+  const successResponse = await worker.fetch(
+    new Request('https://admin.test/api/submissions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/test.json',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-27-example-abc123',
+      }),
+    }),
+    env,
+    {},
+  );
+  const successBody = await successResponse.json();
+  assert.equal(successBody.success, true);
+
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get('submissions/test.json'));
+  assert.equal(stored.draft_stem, 'drafts/2026/03/2026-03-27-example-abc123');
+  assert.equal(stored.status, 'draft_generated');
+});
+
+
+test('Queue page renders Pending Generation section for submitted papers', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [{ arxiv_id: '2401.00001', title: 'Test', max_axis_score: 0.5 }],
+      },
+      'submissions/2026-03-27T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/pdf/2401.99999'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Pending Generation'), 'page includes Pending Generation section');
+  assert.ok(html.includes('2401.99999'), 'page includes submitted URL');
+  assert.ok(html.includes('Submitted'), 'page shows Submitted badge');
+  assert.ok(html.includes('1 in generation pipeline'), 'header shows pipeline count');
+});
+
+
+test('Queue page shows Generating section with claimed_by info', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/2026-03-27T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/pdf/2401.55555'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-mcgrof',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Generating'), 'page includes Generating section');
+  assert.ok(html.includes('worker-mcgrof'), 'page shows who is generating');
+  assert.ok(html.includes('Assigned to'), 'page shows assignment label');
+});
+
+
+test('Queue page hides already-approved submissions from pipeline', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.11111'],
+        timestamp: '2026-03-27T09:00:00.000Z',
+        status: 'approved_for_publish',
+      },
+      'submissions/sub2.json': {
+        urls: ['https://arxiv.org/pdf/2401.22222'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'published',
+      },
+      'submissions/sub3.json': {
+        urls: ['https://arxiv.org/pdf/2401.33333'],
+        timestamp: '2026-03-27T11:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // Only the submitted one should appear in the pipeline sections
+  assert.ok(html.includes('2401.33333'), 'pending submission shown');
+  assert.ok(html.includes('1 in generation pipeline'), 'only 1 in pipeline');
+  // approved/published should NOT be in the generation sections
+  assert.ok(!html.includes('Pending Generation') || !html.includes('2401.11111'),
+    'approved submission not in pending generation');
+});
+
+
+test('Queue page filters published papers from editorial sections', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [
+          { arxiv_id: '2401.00001', title: 'Already Published Paper', max_axis_score: 0.9 },
+          { arxiv_id: '2401.00002', title: 'New Paper', max_axis_score: 0.7 },
+        ],
+      },
+      'submissions/pub.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-20T10:00:00.000Z',
+        status: 'published',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Already Published Paper'),
+    'published paper should be filtered from editorial queue');
+  assert.ok(html.includes('New Paper'),
+    'unpublished paper should remain in editorial queue');
+});
+
+
+test('Queue page shows Draft Ready section for draft_generated submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.77777'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-27-test-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Draft Ready'), 'page includes Draft Ready section');
+  assert.ok(html.includes('2401.77777'), 'draft ready submission URL shown');
+});
+
+
+test('Queue page shows Generation Failed section with error info', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.88888'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_failed',
+        error: 'PDF extraction failed',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Generation Failed'), 'page includes Failed section');
+  assert.ok(html.includes('PDF extraction failed'), 'error message shown');
+});
+
+
+test('GET /submit server-renders submissions without client-side spinner', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.44444'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('2401.44444'), 'submission URL rendered server-side');
+  assert.ok(html.includes('Submitted'), 'status badge rendered server-side');
+  // Should NOT have a loading spinner for submissions
+  assert.ok(!html.includes('Loading submissions'), 'no client-side loading spinner');
+});
+
+
+test('GET /submit shows empty state when no submissions exist', async () => {
+  const env = makeEnv();
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('No submissions yet'), 'shows empty state');
+  assert.ok(html.includes('Submit Papers'), 'form is present');
+});
+
+
+test('GET /submit shows claimed_by for in-progress submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.66666'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-alice',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('worker-alice'), 'claimed_by shown on submit page');
+  assert.ok(html.includes('Assigned to'), 'assignment label shown');
+});
+
+
+// =========================================================================
+// Corner-case and extended tests
+// =========================================================================
+
+test('POST /api/submit rejects empty URL list', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls: [] }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error, 'should return an error for empty urls');
+});
+
+
+test('POST /api/submit rejects invalid URL format', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls: ['not-a-url'] }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error, 'should return an error for invalid URL');
+  assert.ok(body.error.includes('Invalid URL'), 'error mentions invalid URL');
+});
+
+
+test('POST /api/submit stores null instructions when omitted', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls: ['https://arxiv.org/pdf/2401.99999'] }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const keys = [...env.ADMIN_BUCKET.objects.keys()];
+  const subKey = keys.find((k) => k.startsWith('submissions/'));
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get(subKey));
+  assert.equal(stored.instructions, null, 'instructions should be null when omitted');
+});
+
+
+test('POST /api/submissions/status resets failed submission to submitted for retry', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/failed.json': {
+        urls: ['https://arxiv.org/pdf/2401.55555'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_failed',
+        error: 'PDF extraction failed',
+        status_history: [
+          { status: 'submitted', at: '2026-03-27T10:00:00.000Z' },
+          { status: 'generation_failed', at: '2026-03-27T10:05:00.000Z' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/failed.json',
+        status: 'submitted',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.status, 'submitted');
+
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get('submissions/failed.json'));
+  assert.equal(stored.status, 'submitted');
+  assert.equal(stored.status_history.length, 3, 'retry adds new history entry');
+  assert.equal(stored.status_history[2].status, 'submitted');
+});
+
+
+test('POST /api/submissions/status returns error for missing submission', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submissions/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/nonexistent.json',
+        status: 'generation_claimed',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error, 'should return error for missing submission');
+  assert.ok(body.error.includes('not found'), 'error mentions not found');
+});
+
+
+test('Queue page shows "Open" pickup info for unassigned pending submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.12345'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Open'), 'shows open pickup info for unassigned submission');
+  assert.ok(html.includes('any generation worker'), 'explains any worker can claim');
+});
+
+
+test('Queue page shows retry button for failed submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.88888'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_failed',
+        error: 'Timeout',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Retry'), 'failed submission has retry button');
+  assert.ok(html.includes('retrySubmission'), 'retry button calls retrySubmission');
+});
+
+
+test('Queue page filters papers in active generation from editorial sections', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [
+          { arxiv_id: '2401.00001', title: 'Being Generated', max_axis_score: 0.9 },
+          { arxiv_id: '2401.00002', title: 'Still In Queue', max_axis_score: 0.7 },
+        ],
+      },
+      'submissions/gen.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-1',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Being Generated'),
+    'paper in active generation should be filtered from editorial queue');
+  assert.ok(html.includes('Still In Queue'),
+    'unrelated paper should remain in editorial queue');
+});
+
+
+test('Queue page filters draft_generated papers from editorial sections', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        public: [
+          { arxiv_id: '2401.00003', title: 'Draft Already Done', max_axis_score: 0.8 },
+        ],
+      },
+      'submissions/done.json': {
+        urls: ['https://arxiv.org/pdf/2401.00003'],
+        timestamp: '2026-03-27T09:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/test-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Draft Already Done'),
+    'paper with ready draft should be filtered from editorial sections');
+  assert.ok(html.includes('Draft Ready'),
+    'paper should appear in Draft Ready section instead');
+});
+
+
+test('Queue page renders correctly with no submissions and no editorial papers', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [], public: [], memory: [] },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Editorial Queue'), 'page title present');
+  assert.ok(html.includes('0 editorial papers'), 'shows zero editorial papers');
+  assert.ok(html.includes('0 in generation pipeline'), 'shows zero in pipeline');
+  assert.ok(!html.includes('Pending Generation'), 'no pending section when empty');
+});
+
+
+test('Queue page handles all submission statuses simultaneously', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { bridge: [] },
+      'submissions/s1.json': {
+        urls: ['https://arxiv.org/pdf/2401.10001'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+      'submissions/s2.json': {
+        urls: ['https://arxiv.org/pdf/2401.10002'],
+        timestamp: '2026-03-27T10:01:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-bob',
+      },
+      'submissions/s3.json': {
+        urls: ['https://arxiv.org/pdf/2401.10003'],
+        timestamp: '2026-03-27T10:02:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/test',
+      },
+      'submissions/s4.json': {
+        urls: ['https://arxiv.org/pdf/2401.10004'],
+        timestamp: '2026-03-27T10:03:00.000Z',
+        status: 'generation_failed',
+        error: 'OOM',
+      },
+      'submissions/s5.json': {
+        urls: ['https://arxiv.org/pdf/2401.10005'],
+        timestamp: '2026-03-27T10:04:00.000Z',
+        status: 'published',
+      },
+      'submissions/s6.json': {
+        urls: ['https://arxiv.org/pdf/2401.10006'],
+        timestamp: '2026-03-27T10:05:00.000Z',
+        status: 'rejected',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // Pipeline count should include submitted + generating + draft_ready + failed = 4
+  assert.ok(html.includes('4 in generation pipeline'), 'pipeline count is 4');
+  // Sections present
+  assert.ok(html.includes('Pending Generation'), 'pending section present');
+  assert.ok(html.includes('Generating'), 'generating section present');
+  assert.ok(html.includes('Draft Ready'), 'draft ready section present');
+  assert.ok(html.includes('Generation Failed'), 'failed section present');
+  // Published and rejected should NOT appear in any pipeline section
+  assert.ok(!html.includes('2401.10005'), 'published submission not in pipeline');
+  assert.ok(!html.includes('2401.10006'), 'rejected submission not in pipeline');
+  // Worker assignment visible
+  assert.ok(html.includes('worker-bob'), 'generating worker shown');
 });
