@@ -2,6 +2,13 @@
 // Cloudflare Worker with inline HTML
 
 import { ADMIN_RELEASE_TAG } from './release.js';
+import {
+  getAdminIdentity,
+  generateSystemdService,
+  generateSystemdTimer,
+  generateEnvFile,
+  generateInstallCommands,
+} from './systemd.js';
 
 const GITHUB_REPO = 'mcgrof/ai-post-transformers';
 const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
@@ -1006,6 +1013,7 @@ function baseHTML(title, content, activePage) {
           <a href="/conferences"${activePage === 'conferences' ? ' class="active"' : ''}>Conferences</a>
           <a href="/submit"${activePage === 'submit' ? ' class="active"' : ''}>Submit</a>
           <a href="/issues"${activePage === 'issues' ? ' class="active"' : ''}>Issues</a>
+          <a href="/automation"${activePage === 'automation' ? ' class="active"' : ''}>Automation</a>
         </nav>
       </div>
     </div>
@@ -1264,7 +1272,7 @@ function draftsPageWithData(data) {
     <div class="card" style="margin-bottom:1.5rem">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h3 style="margin:0 0 4px">${d.title || d.key}</h3>
+          <h3 style="margin:0 0 4px">${d.title || d.key}${d.revision && d.revision > 1 ? ` <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:normal">(v${d.revision})</span>` : ''}</h3>
           <div style="color:var(--text-secondary);font-size:0.813rem">
             📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}
           </div>
@@ -1747,6 +1755,46 @@ function issuesPage() {
     <script>
       loadIssues();
     </script>
+  `;
+}
+
+function automationPage(data) {
+  const { adminEmail, adminId, service, timer, envFile, installCommands } = data;
+  const esc = escapeHtml;
+  return `
+    <div class="page-header">
+      <h1>Automation / Systemd</h1>
+      <p>Publish-worker systemd units for <strong>${esc(adminEmail || adminId)}</strong></p>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <h3 style="margin:0 0 0.5rem">Service Unit</h3>
+      <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
+        Install as <code>~/.config/systemd/user/publish-worker.service</code>
+      </p>
+      <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(service)}</code></pre>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <h3 style="margin:0 0 0.5rem">Timer Unit</h3>
+      <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
+        Install as <code>~/.config/systemd/user/publish-worker.timer</code>
+      </p>
+      <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(timer)}</code></pre>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <h3 style="margin:0 0 0.5rem">Environment File</h3>
+      <p style="color:var(--text-secondary);font-size:0.813rem;margin-bottom:0.5rem">
+        Install as <code>~/.config/publish-worker/env</code> — fill in credentials
+      </p>
+      <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(envFile)}</code></pre>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <h3 style="margin:0 0 0.5rem">Install Commands</h3>
+      <pre style="background:var(--bg-tertiary);padding:1rem;border-radius:6px;overflow-x:auto;font-size:0.813rem;line-height:1.5"><code>${esc(installCommands)}</code></pre>
+    </div>
   `;
 }
 
@@ -2301,6 +2349,18 @@ export default {
           const issuesData = await getIssues();
           html = baseHTML('Issues', issuesPageWithData(issuesData), 'issues');
           break;
+        case '/automation':
+          const identity = getAdminIdentity(request);
+          const systemdData = {
+            adminEmail: identity.email,
+            adminId: identity.id,
+            service: generateSystemdService(identity.id),
+            timer: generateSystemdTimer(),
+            envFile: generateEnvFile(),
+            installCommands: generateInstallCommands(),
+          };
+          html = baseHTML('Automation', automationPage(systemdData), 'automation');
+          break;
         default:
           if (confMatch) {
             const confId = confMatch[1];
@@ -2362,6 +2422,18 @@ async function handleAPI(path, request, env) {
     case '/api/generate':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
       return await generatePodcast(request, env);
+
+    case '/api/systemd': {
+      const identity = getAdminIdentity(request);
+      return {
+        admin_email: identity.email,
+        admin_id: identity.id,
+        service: generateSystemdService(identity.id),
+        timer: generateSystemdTimer(),
+        env_file: generateEnvFile(),
+        install_commands: generateInstallCommands(),
+      };
+    }
 
     default:
       return { error: 'Not found' };
@@ -2463,10 +2535,22 @@ async function getDrafts(env) {
         audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
         episodeId: episode?.id || null,
         publish_job: summarizePublishJob(latestPublishJobByDraft.get(obj.key)),
+        revision: episode?.revision || null,
+        revision_state: episode?.revision_state || null,
+        episode_key: episode?.episode_key || null,
       });
     }
 
-    return { drafts };
+    // Filter out superseded and rejected revisions from default view.
+    // Also filter already-published episodes still lingering as drafts.
+    const activeDrafts = drafts.filter(d => {
+      const rs = d.revision_state;
+      if (rs === 'superseded' || rs === 'rejected') return false;
+      if (rs === 'published') return false;
+      return true;
+    });
+
+    return { drafts: activeDrafts, all_drafts: drafts };
   } catch (error) {
     return { error: error.message, drafts: [] };
   }
@@ -2736,7 +2820,25 @@ async function reviewDraft(request, env) {
       const job = await loadPublishJobById(env, jobId);
       return { success: true, action, publish_job: job };
     }
-    
+
+    if (action === 'reject_episode') {
+      // Reject all active draft revisions for a logical episode.
+      // The episode_key is passed from the client side.
+      const episodeKey = body.episode_key;
+      if (!episodeKey) {
+        return { error: 'Missing episode_key for reject_episode' };
+      }
+      // Mark the rejection in the review log (already done above).
+      // The actual draft state cleanup is handled by the manifest
+      // update on the Python/generation side. Record intent here.
+      return {
+        success: true,
+        action,
+        episode_key: episodeKey,
+        message: `Rejection recorded for all drafts of "${episodeKey}"`,
+      };
+    }
+
     return { success: true, action, key };
   } catch (error) {
     return { error: error.message };
