@@ -55,6 +55,17 @@ def _find_episode(job: dict) -> dict | None:
     return None
 
 
+def _publish_draft_stem(job: dict, episode: dict | None = None) -> str:
+    episode = episode or _find_episode(job)
+    audio = (episode or {}).get("audio_file") or ""
+    if audio:
+        return os.path.splitext(audio)[0]
+    draft_key = job.get("draft_key") or ""
+    if draft_key:
+        return os.path.splitext(draft_key)[0]
+    return job["draft_stem"]
+
+
 def _url_for_public_path(path: str | None) -> str | None:
     if not path:
         return None
@@ -152,6 +163,15 @@ def _verify_remote_urls(artifacts: dict) -> dict:
     return results
 
 
+def _resolve_publish_draft(job: dict) -> str:
+    episode = _find_episode(job)
+    if episode and episode.get("audio_file"):
+        return os.path.splitext(episode["audio_file"])[0]
+    if job.get("draft_key"):
+        return os.path.splitext(job["draft_key"])[0]
+    return job["draft_stem"]
+
+
 def _update_job_with_heartbeat(
     job: dict,
     *,
@@ -182,7 +202,8 @@ def process_job(
     try:
         start_step(job, "publish")
         save_job(job, store=store)
-        _run_shell(f".venv/bin/python gen-podcast.py publish --draft '{job['draft_stem']}'")
+        publish_draft = _resolve_publish_draft(job)
+        _run_shell(f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'")
         complete_step(job, "publish", _episode_artifacts(job))
         _update_job_with_heartbeat(
             job, admin_id=admin_id, lease_seconds=lease_seconds, store=store

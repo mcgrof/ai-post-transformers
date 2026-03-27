@@ -99,3 +99,33 @@ def test_process_job_marks_failed_step_when_command_fails(monkeypatch, tmp_path)
     assert loaded["progress"]["publish"] == "done"
     assert loaded["progress"]["viz"] == "failed"
     assert loaded["error"]["step"] == "viz"
+
+
+def test_process_job_resolves_legacy_draft_stem_from_episode_audio(monkeypatch, tmp_path):
+    store = LocalPublishJobStore(root=tmp_path)
+    job = make_job_record(
+        draft_key="drafts/ep110.mp3",
+        title="Splitwise: Phase-Split LLM Inference",
+        episode_id=110,
+    )
+    claim_job(job, admin_id="admin-1", admin_name="mcgrof")
+    path = save_job(job, store=store)
+
+    commands = []
+    artifacts = ArtifactSequence()
+
+    monkeypatch.setattr("scripts.publish_job_runner._run_shell", lambda command, cwd=Path('.'): commands.append(command))
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._find_episode",
+        lambda job: {
+            "id": 110,
+            "audio_file": "drafts/2026/03/2026-03-26-splitwise-phase-split-llm-inference-e8945b.mp3",
+        },
+    )
+
+    finished = process_job(path, admin_id="admin-1", admin_name="mcgrof", store=store)
+
+    assert finished["state"] == "publish_completed"
+    assert commands[0] == ".venv/bin/python gen-podcast.py publish --draft 'drafts/2026/03/2026-03-26-splitwise-phase-split-llm-inference-e8945b'"
