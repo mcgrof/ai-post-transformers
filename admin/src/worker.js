@@ -1120,7 +1120,7 @@ function escapeHtml(str) {
 // fallback chain until it finds something human-readable.
 //
 // Order:  enriched paper title → explicit title (if not opaque) →
-//         human-readable slug from key → raw key (last resort).
+//         URL-derived fallback → human-readable slug from key → generic label.
 const OPAQUE_ID_RE = /^ep\d+$/i;
 const DRAFT_STEM_RE = /^(\d{4}-\d{2}-\d{2}-)?(.*?)(-[a-f0-9]{4,8})?$/;
 
@@ -1130,6 +1130,27 @@ function humanizeSlug(slug) {
   const core = m ? m[2] : slug;
   if (!core) return '';
   return core.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function titleFromUrl(item) {
+  const url = (item.urls && item.urls[0]) || item.url || '';
+  if (!url) return '';
+  const arxiv = url.match(/(\d{4}\.\d{4,5})(?:v\d+)?/);
+  if (arxiv) return `arXiv ${arxiv[1]}`;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname && u.pathname !== '/' ? u.pathname : '';
+    return `${host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+function genericTitle(item) {
+  if ((item.urls && item.urls.length) || item.url) return 'Submitted paper';
+  if (item.draft_stem || (item.key || '').includes('draft')) return 'Draft episode';
+  return 'Untitled';
 }
 
 function displayTitle(item) {
@@ -1143,16 +1164,18 @@ function displayTitle(item) {
   }
   // 2. Explicit title if it's not an opaque ID
   if (item.title && !OPAQUE_ID_RE.test(item.title)) return item.title;
-  // 3. Human-readable slug derived from key or draft_stem
+  // 3. URL-derived human fallback (better than opaque internal ids)
+  const urlTitle = titleFromUrl(item);
+  if (urlTitle) return urlTitle;
+  // 4. Human-readable slug derived from key or draft_stem, but not opaque ids
   const stem = item.draft_stem || item.key || '';
   const base = stem.split('/').pop().replace(/\.\w+$/, '');
-  if (base) {
+  if (base && !OPAQUE_ID_RE.test(base)) {
     const friendly = humanizeSlug(base);
-    if (friendly) return friendly;
+    if (friendly && !OPAQUE_ID_RE.test(friendly.replace(/\s+/g, ''))) return friendly;
   }
-  // 4. Explicit title even if opaque (last resort before raw key)
-  if (item.title) return item.title;
-  return item.key || 'Untitled';
+  // 5. Generic human fallback only — never expose opaque ids as main label
+  return genericTitle(item);
 }
 
 function splitDraftSources(text) {

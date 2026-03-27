@@ -1759,11 +1759,9 @@ test('displayTitle falls back to humanized draft_stem', () => {
   assert.ok(result.includes('Sparse'), `expected humanized slug, got: ${result}`);
 });
 
-test('displayTitle returns humanized opaque slug as last resort', () => {
-  // No enrichment, opaque title, key only has the opaque stem —
-  // humanizeSlug title-cases it since no better data exists.
+test('displayTitle never exposes opaque ep-NNN slug as last resort', () => {
   const item = { title: 'ep99', key: 'drafts/ep99.mp3' };
-  assert.equal(displayTitle(item), 'Ep99');
+  assert.equal(displayTitle(item), 'Draft episode');
 });
 
 test('humanizeSlug strips date prefix and hash suffix', () => {
@@ -1824,10 +1822,7 @@ test('Draft card title does not show bare baseName like ep102 when manifest titl
   );
   const body = await response.json();
   assert.equal(body.drafts.length, 1);
-  // ep102 with no useful slug — should still return "ep102" as last
-  // resort but wrapped through displayTitle (no better data exists).
-  // The key test: when a BETTER name exists, it must be preferred.
-  assert.equal(body.drafts[0].title, 'Ep102');
+  assert.equal(body.drafts[0].title, 'Draft episode');
 });
 
 test('Queue page submission card shows enriched title, not internal key', async () => {
@@ -1863,6 +1858,32 @@ test('Queue page submission card shows enriched title, not internal key', async 
     !html.includes('>submissions/s1.json<'),
     'raw R2 key must not appear as card heading',
   );
+});
+
+test('Queue page submission card uses URL fallback instead of opaque epNNN title', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': { sections: {} },
+      'submissions/s1.json': {
+        title: 'ep102',
+        draft_stem: 'ep102',
+        urls: ['https://arxiv.org/pdf/2603.17187'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'submitted',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.ok(html.includes('arXiv 2603.17187'));
+  assert.ok(!html.includes('>Ep102<'));
+  assert.ok(!html.includes('>ep102<'));
 });
 
 // ── Regression: queue section papers must go through displayTitle ──
