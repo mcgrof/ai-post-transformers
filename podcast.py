@@ -15,6 +15,7 @@ from db import (
     insert_podcast, update_podcast, link_podcast_paper, list_podcasts,
     get_today_papers, get_covered_topics, add_covered_topics,
 )
+from draft_revisions import detect_revision, assign_revision
 from elevenlabs_client import create_podcast, finalize_podcast, save_transcript, generate_srt
 from image_gen import generate_episode_image
 from pdf_utils import download_and_extract
@@ -568,6 +569,16 @@ def generate_podcast(config, arxiv_id=None):
         image_file=image_file,
     )
     link_podcast_paper(conn, podcast_id, paper["arxiv_id"])
+
+    # Assign revision tracking
+    ep_key, rev, superseded = detect_revision(conn, title,
+                                              exclude_id=podcast_id)
+    assign_revision(conn, podcast_id, ep_key, rev, superseded)
+    if rev > 1:
+        print(f"[Podcast] Revision v{rev} of logical episode "
+              f"'{ep_key}' (superseded {len(superseded)} older)",
+              file=sys.stderr)
+
     conn.close()
 
     print(f"\nPodcast generated successfully!", file=sys.stderr)
@@ -735,7 +746,14 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     # Download and extract text from all PDFs
     papers_text = []
     for url in urls:
-        text = download_and_extract(url)
+        try:
+            text = download_and_extract(url)
+        except Exception as exc:
+            print(
+                f"[Podcast] Warning: Failed to extract text from {url}: {exc}",
+                file=sys.stderr,
+            )
+            continue
         if not text.strip():
             print(f"[Podcast] Warning: No text extracted from {url}, skipping",
                   file=sys.stderr)
@@ -868,6 +886,17 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
         description=description,
         image_file=image_file,
     )
+
+    # Assign revision tracking
+    ep_key, rev, superseded = detect_revision(conn, title,
+                                              source_urls=json.dumps(urls),
+                                              exclude_id=podcast_id)
+    assign_revision(conn, podcast_id, ep_key, rev, superseded)
+    if rev > 1:
+        print(f"[Podcast] Revision v{rev} of logical episode "
+              f"'{ep_key}' (superseded {len(superseded)} older)",
+              file=sys.stderr)
+
     conn.close()
 
     print(f"\nPodcast generated successfully!", file=sys.stderr)

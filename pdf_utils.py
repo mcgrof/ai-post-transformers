@@ -1,11 +1,26 @@
 """PDF download and text extraction utilities."""
 
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 import requests
 from pypdf import PdfReader
+
+
+_ARXIV_ABS_RE = re.compile(
+    r"https?://(?:www\.)?arxiv\.org/(?:abs|html)/"
+    r"(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?(?:[?#].*)?$"
+)
+
+
+def _normalize_pdf_url(url):
+    """Normalize common paper URLs into direct PDF URLs when possible."""
+    match = _ARXIV_ABS_RE.match(url or "")
+    if not match:
+        return url
+    return f"https://arxiv.org/pdf/{match.group(1)}.pdf"
 
 
 def download_pdf(url, timeout=60):
@@ -18,18 +33,37 @@ def download_pdf(url, timeout=60):
     Returns:
         Path to the downloaded temporary file.
     """
-    print(f"[PDF] Downloading {url}...", file=sys.stderr)
-    resp = requests.get(url, timeout=timeout, stream=True)
+    resolved_url = _normalize_pdf_url(url)
+    if resolved_url != url:
+        print(f"[PDF] Normalized {url} -> {resolved_url}", file=sys.stderr)
+
+    print(f"[PDF] Downloading {resolved_url}...", file=sys.stderr)
+    resp = requests.get(resolved_url, timeout=timeout, stream=True)
     resp.raise_for_status()
+
+    content_type = (resp.headers.get("content-type") or "").lower()
+    if content_type and "pdf" not in content_type and "octet-stream" not in content_type:
+        raise ValueError(
+            f"URL did not return a PDF: {resolved_url} "
+            f"(content-type: {content_type})"
+        )
 
     suffix = ".pdf"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     for chunk in resp.iter_content(chunk_size=8192):
-        tmp.write(chunk)
+        if chunk:
+            tmp.write(chunk)
     tmp.close()
 
+    path = Path(tmp.name)
+    with path.open("rb") as fh:
+        magic = fh.read(5)
+    if magic != b"%PDF-":
+        path.unlink(missing_ok=True)
+        raise ValueError(f"URL did not return a valid PDF: {resolved_url}")
+
     print(f"[PDF] Saved to {tmp.name}", file=sys.stderr)
-    return Path(tmp.name)
+    return path
 
 
 def extract_text(pdf_path):
