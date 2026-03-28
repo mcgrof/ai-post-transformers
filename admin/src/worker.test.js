@@ -1983,3 +1983,106 @@ test('Client-side drafts page does not fall back to raw R2 key', async () => {
     'draft title must not be raw R2 key',
   );
 });
+
+
+// ---------------------------------------------------------------------------
+// Stale draft suppression via publish_completed job status
+// ---------------------------------------------------------------------------
+
+test('GET /api/drafts filters out drafts with publish_completed publish job', async () => {
+  // Simulate a draft whose R2 MP3 still exists (cleanup failed) but
+  // whose publish job has already completed successfully.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+      'publish-jobs/pub_2026_03_20_120000.json': JSON.stringify({
+        job_id: 'pub_2026_03_20_120000',
+        draft_key: 'drafts/leworldmodel.mp3',
+        state: 'publish_completed',
+        created_at: '2026-03-20T12:00:00Z',
+        progress: { publish: 'done', viz: 'done', cover: 'done', site: 'done', verify: 'done' },
+      }),
+    },
+    podcast: {
+      'drafts/leworldmodel.mp3': 'audio-bytes',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  // The draft should be filtered out because its publish job is completed
+  assert.equal(body.drafts.length, 0,
+    'draft with publish_completed job should not appear in active drafts');
+});
+
+
+test('GET /api/drafts keeps drafts with pending publish job', async () => {
+  // A draft whose publish job is still approved (not completed)
+  // should remain visible.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{ id: 50, title: 'Good Draft', date: '2026-03-25' }],
+      },
+      'publish-jobs/pub_2026_03_25_100000.json': JSON.stringify({
+        job_id: 'pub_2026_03_25_100000',
+        draft_key: 'drafts/ep50.mp3',
+        state: 'approved_for_publish',
+        created_at: '2026-03-25T10:00:00Z',
+        progress: { publish: 'pending', viz: 'pending', cover: 'pending', site: 'pending', verify: 'pending' },
+      }),
+    },
+    podcast: {
+      'drafts/ep50.mp3': 'audio-bytes',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1,
+    'draft with approved_for_publish job should remain visible');
+});
+
+
+// ---------------------------------------------------------------------------
+// Queue editorial filtering includes submitted/pending submissions
+// ---------------------------------------------------------------------------
+
+test('Queue page filters editorial papers that match submitted submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': JSON.stringify({
+        bridge: [
+          { arxiv_id: '2401.99999', title: 'Already Submitted Paper', abstract: 'Test' },
+          { arxiv_id: '2401.88888', title: 'Untouched Paper', abstract: 'Test' },
+        ],
+      }),
+      'submissions/sub1.json': JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.99999'],
+        status: 'submitted',
+        timestamp: '2026-03-27T10:00:00Z',
+      }),
+    },
+    podcast: {},
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  // The submitted paper should be filtered from editorial sections
+  assert.ok(!html.includes('Already Submitted Paper'),
+    'paper with submitted status should be filtered from editorial queue');
+  assert.ok(html.includes('Untouched Paper'),
+    'paper without submission should remain in editorial queue');
+});

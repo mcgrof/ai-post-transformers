@@ -1616,6 +1616,7 @@ function queuePageWithData(data, subsData) {
   // This includes papers in any active generation state, not just published —
   // a paper being generated or with a ready draft doesn't need editorial action.
   const handledStatuses = [
+    'submitted', 'pending',
     'generation_claimed', 'generation_running', 'draft_generated',
     'approved_for_publish', 'published',
   ];
@@ -2918,11 +2919,14 @@ async function getDrafts(env) {
     }
 
     // Filter out superseded and rejected revisions from default view.
-    // Also filter already-published episodes still lingering as drafts.
+    // Also filter already-published episodes still lingering as drafts
+    // (either via revision_state or a completed publish job whose R2
+    // cleanup failed, leaving the MP3 orphaned on the bucket).
     const activeDrafts = drafts.filter(d => {
       const rs = d.revision_state;
       if (rs === 'superseded' || rs === 'rejected') return false;
       if (rs === 'published') return false;
+      if (d.publish_job && d.publish_job.state === 'publish_completed') return false;
       return true;
     });
 
