@@ -1,5 +1,4 @@
 import subprocess
-from pathlib import Path
 
 from scripts.publish_job_runner import process_job
 from scripts.publish_job_store import LocalPublishJobStore
@@ -43,7 +42,10 @@ def test_process_job_runs_publish_pipeline_in_order(monkeypatch, tmp_path):
     commands = []
     artifacts = ArtifactSequence()
 
-    monkeypatch.setattr("scripts.publish_job_runner._run_shell", lambda command, cwd=Path('.'): commands.append(command))
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
     monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
     monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
 
@@ -78,12 +80,12 @@ def test_process_job_marks_failed_step_when_command_fails(monkeypatch, tmp_path)
     artifacts = ArtifactSequence()
     commands = []
 
-    def fake_run(command, cwd=Path('.')):
+    def fake_run(command, **kwargs):
         commands.append(command)
         if "gen-viz" in command:
             raise subprocess.CalledProcessError(returncode=1, cmd=command)
 
-    monkeypatch.setattr("scripts.publish_job_runner._run_shell", fake_run)
+    monkeypatch.setattr("scripts.publish_job_runner._run_shell_with_heartbeat", fake_run)
     monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
     monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
 
@@ -114,7 +116,10 @@ def test_process_job_resolves_legacy_draft_stem_from_episode_audio(monkeypatch, 
     commands = []
     artifacts = ArtifactSequence()
 
-    monkeypatch.setattr("scripts.publish_job_runner._run_shell", lambda command, cwd=Path('.'): commands.append(command))
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
     monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
     monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
     monkeypatch.setattr(
@@ -129,3 +134,60 @@ def test_process_job_resolves_legacy_draft_stem_from_episode_audio(monkeypatch, 
 
     assert finished["state"] == "publish_completed"
     assert commands[0] == ".venv/bin/python gen-podcast.py publish --draft 'drafts/2026/03/2026-03-26-splitwise-phase-split-llm-inference-e8945b'"
+
+
+def test_process_job_skips_duplicate_running_invocation(monkeypatch, tmp_path):
+    store, path, job = _seed_job(tmp_path)
+    job = load_job(path, store=store)
+    job["state"] = "publish_running"
+    job["progress"]["publish"] = "running"
+    save_job(job, store=store)
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: (_ for _ in ()).throw(
+            AssertionError("duplicate invocation should not run commands")
+        ),
+    )
+
+    returned = process_job(path, admin_id="admin-1", admin_name="mcgrof", store=store)
+
+    assert returned["state"] == "publish_running"
+    loaded = load_job(path, store=store)
+    assert loaded["progress"]["publish"] == "running"
+
+
+def test_run_shell_with_heartbeat_renews_lease_during_long_step(monkeypatch):
+    updates = []
+
+    class FakeProc:
+        def __init__(self):
+            self.calls = 0
+
+        def wait(self, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+            return 0
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.subprocess.Popen",
+        lambda *args, **kwargs: FakeProc(),
+    )
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._update_job_with_heartbeat",
+        lambda job, **kwargs: updates.append(job["job_id"]),
+    )
+
+    from scripts.publish_job_runner import _run_shell_with_heartbeat
+
+    _run_shell_with_heartbeat(
+        "true",
+        job={"job_id": "pub_2026_03_28_130000"},
+        admin_id="admin-1",
+        lease_seconds=900,
+        store=object(),
+        heartbeat_interval=1,
+    )
+
+    assert updates == ["pub_2026_03_28_130000"]

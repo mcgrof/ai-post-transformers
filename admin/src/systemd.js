@@ -32,12 +32,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=%h/.config/podcast-worker/env
-ExecStart=%h/devel/ai-post-transformers/.venv/bin/python \\
-    %h/devel/ai-post-transformers/scripts/run_podcast_worker.py \\
-    --admin-id ${adminId} \\
-    --once \\
-    --verify-remote \\
-    --store auto
+WorkingDirectory=%h/devel/ai-post-transformers
+ExecStart=/usr/bin/flock -n -E 0 %t/podcast-worker.lock /bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && exec .venv/bin/python scripts/run_podcast_worker.py --admin-id ${adminId} --admin-name "$ADMIN_NAME" --once --verify-remote --store auto'
 Restart=no
 StandardOutput=journal
 StandardError=journal
@@ -56,7 +52,7 @@ Description=Periodic trigger for podcast-worker
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=2min
+OnUnitInactiveSec=2min
 AccuracySec=15s
 Persistent=true
 
@@ -93,11 +89,14 @@ mkdir -p ~/.config/systemd/user
 cp podcast-worker.service ~/.config/systemd/user/
 cp podcast-worker.timer   ~/.config/systemd/user/
 
-# 3. Reload and enable
+# 3. Disable the old split publish timer if it exists
+systemctl --user disable --now podcast-publish-worker.timer 2>/dev/null || true
+
+# 4. Reload and enable
 systemctl --user daemon-reload
 systemctl --user enable --now podcast-worker.timer
 
-# 4. Check status
+# 5. Check status
 systemctl --user status podcast-worker.timer
 journalctl --user -u podcast-worker.service -f
 `;

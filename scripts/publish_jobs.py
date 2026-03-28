@@ -199,7 +199,8 @@ def load_job(path_or_id: str | Path, root: Path | None = None, store=None) -> di
     resolved_store = _resolve_store(store=store, root=root)
     if resolved_store.__class__.__name__ != "LocalPublishJobStore":
         return resolved_store.load_job(path_or_id)
-    path = job_path(str(path_or_id), root=root)
+    local_root = getattr(resolved_store, "root", root)
+    path = job_path(str(path_or_id), root=local_root)
     with open(path, encoding="utf-8") as handle:
         job = json.load(handle)
     validate_job(job)

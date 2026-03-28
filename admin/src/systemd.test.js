@@ -73,6 +73,17 @@ test('service unit uses %h specifier for home directory', () => {
   assert.ok(unit.includes('%h/'));
 });
 
+test('service unit runs from the repo working directory', () => {
+  const unit = generateSystemdService('u');
+  assert.ok(unit.includes('WorkingDirectory=%h/devel/ai-post-transformers'));
+});
+
+test('service unit uses flock to skip duplicate launches', () => {
+  const unit = generateSystemdService('u');
+  assert.ok(unit.includes('/usr/bin/flock -n -E 0'));
+  assert.ok(unit.includes('%t/podcast-worker.lock'));
+});
+
 test('service unit runs run_podcast_worker.py with --once', () => {
   const unit = generateSystemdService('u');
   assert.ok(unit.includes('run_podcast_worker.py'));
@@ -98,9 +109,10 @@ test('timer unit has required sections', () => {
   assert.ok(unit.includes('[Install]'));
 });
 
-test('timer unit has OnUnitActiveSec for periodic firing', () => {
+test('timer unit has OnUnitInactiveSec for periodic firing', () => {
   const unit = generateSystemdTimer();
-  assert.ok(unit.includes('OnUnitActiveSec='));
+  assert.ok(unit.includes('OnUnitInactiveSec='));
+  assert.ok(!unit.includes('OnUnitActiveSec='));
 });
 
 test('timer unit targets timers.target', () => {
@@ -145,8 +157,9 @@ test('install commands include daemon-reload', () => {
   assert.ok(cmds.includes('systemctl --user daemon-reload'));
 });
 
-test('install commands enable the timer', () => {
+test('install commands disable old split timers and enable the new one', () => {
   const cmds = generateInstallCommands();
+  assert.ok(cmds.includes('disable --now podcast-publish-worker.timer'));
   assert.ok(cmds.includes('enable --now podcast-worker.timer'));
 });
 

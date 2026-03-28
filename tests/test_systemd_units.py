@@ -88,6 +88,17 @@ def test_service_runs_combined_worker(service_unit: str):
     assert "run_publish_worker.py" not in service_unit
 
 
+def test_service_uses_working_directory_and_flock(service_unit: str):
+    assert "WorkingDirectory=%h/devel/ai-post-transformers" in service_unit
+    assert "/usr/bin/flock -n -E 0" in service_unit
+    assert "%t/podcast-worker.lock" in service_unit
+
+
+def test_timer_uses_on_unit_inactive(timer_unit: str):
+    assert "OnUnitInactiveSec=" in timer_unit
+    assert "OnUnitActiveSec=" not in timer_unit
+
+
 # ---- systemd-analyze verify (skip if unavailable) ----
 
 _HAS_SYSTEMD_ANALYZE = shutil.which("systemd-analyze") is not None

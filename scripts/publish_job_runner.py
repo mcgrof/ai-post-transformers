@@ -29,6 +29,7 @@ from scripts.publish_jobs import (
 )
 
 PODCAST_DOMAIN = "https://podcast.do-not-panic.com"
+STEP_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 def _run_shell(command: str, *, cwd: Path = ROOT) -> None:
@@ -38,6 +39,44 @@ def _run_shell(command: str, *, cwd: Path = ROOT) -> None:
         cwd=str(cwd),
         check=True,
     )
+
+
+def _run_shell_with_heartbeat(
+    command: str,
+    *,
+    job: dict,
+    admin_id: str,
+    lease_seconds: int,
+    store,
+    cwd: Path = ROOT,
+    heartbeat_interval: int = STEP_HEARTBEAT_INTERVAL_SECONDS,
+) -> None:
+    wrapped = f"source ~/.enhance-bash >/dev/null 2>&1 && {command}"
+    proc = subprocess.Popen(
+        ["bash", "-lc", wrapped],
+        cwd=str(cwd),
+    )
+    while True:
+        try:
+            returncode = proc.wait(timeout=heartbeat_interval)
+        except subprocess.TimeoutExpired:
+            try:
+                _update_job_with_heartbeat(
+                    job,
+                    admin_id=admin_id,
+                    lease_seconds=lease_seconds,
+                    store=store,
+                )
+            except Exception as exc:  # pragma: no cover - best effort heartbeat
+                print(
+                    f"[publish-job-runner] heartbeat warning for {job['job_id']}: {exc}",
+                    file=sys.stderr,
+                )
+            continue
+
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode=returncode, cmd=command)
+        return
 
 
 def _find_episode(job: dict) -> dict | None:
@@ -183,6 +222,13 @@ def _update_job_with_heartbeat(
     save_job(job, store=store)
 
 
+def _running_step(job: dict) -> str | None:
+    for step in ("verify", "site", "cover", "viz", "publish"):
+        if job.get("progress", {}).get(step) == "running":
+            return step
+    return None
+
+
 def process_job(
     job_path: str | Path,
     *,
@@ -199,11 +245,25 @@ def process_job(
             f"job {job['job_id']} is claimed by {job.get('claimed_by_admin_id')}"
         )
 
+    active_step = _running_step(job)
+    if job.get("state") == "publish_running" and active_step:
+        print(
+            f"[publish-job-runner] Job {job['job_id']} is already running "
+            f"step {active_step}; skipping duplicate invocation"
+        )
+        return job
+
     try:
         start_step(job, "publish")
         save_job(job, store=store)
         publish_draft = _resolve_publish_draft(job)
-        _run_shell(f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'")
+        _run_shell_with_heartbeat(
+            f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'",
+            job=job,
+            admin_id=admin_id,
+            lease_seconds=lease_seconds,
+            store=store,
+        )
         complete_step(job, "publish", _episode_artifacts(job))
         _update_job_with_heartbeat(
             job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
@@ -214,7 +274,13 @@ def process_job(
             save_job(job, store=store)
             artifacts = _episode_artifacts(job)
             public_stem = os.path.splitext(artifacts["audio_file"])[0]
-            _run_shell(f".venv/bin/python gen-podcast.py gen-viz --draft '{public_stem}'")
+            _run_shell_with_heartbeat(
+                f".venv/bin/python gen-podcast.py gen-viz --draft '{public_stem}'",
+                job=job,
+                admin_id=admin_id,
+                lease_seconds=lease_seconds,
+                store=store,
+            )
             complete_step(job, "viz", _episode_artifacts(job))
             _update_job_with_heartbeat(
                 job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
@@ -230,7 +296,13 @@ def process_job(
             artifacts = _episode_artifacts(job)
             episode_id = artifacts.get("episode_id") or job.get("episode_id")
             if episode_id:
-                _run_shell(f".venv/bin/python backfill_images.py --episode-id {episode_id}")
+                _run_shell_with_heartbeat(
+                    f".venv/bin/python backfill_images.py --episode-id {episode_id}",
+                    job=job,
+                    admin_id=admin_id,
+                    lease_seconds=lease_seconds,
+                    store=store,
+                )
             complete_step(job, "cover", _episode_artifacts(job))
             _update_job_with_heartbeat(
                 job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
@@ -242,7 +314,13 @@ def process_job(
         if job["requirements"].get("publish_site", True):
             start_step(job, "site")
             save_job(job, store=store)
-            _run_shell("make publish-site")
+            _run_shell_with_heartbeat(
+                "make publish-site",
+                job=job,
+                admin_id=admin_id,
+                lease_seconds=lease_seconds,
+                store=store,
+            )
             complete_step(job, "site", _episode_artifacts(job))
             _update_job_with_heartbeat(
                 job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
@@ -279,10 +357,7 @@ def process_job(
 
 
 def _current_running_step(job: dict) -> str:
-    for step in ("verify", "site", "cover", "viz", "publish"):
-        if job.get("progress", {}).get(step) == "running":
-            return step
-    return "publish"
+    return _running_step(job) or "publish"
 
 
 def main() -> int:

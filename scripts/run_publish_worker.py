@@ -14,19 +14,80 @@ if str(ROOT) not in sys.path:
 
 from scripts.publish_job_runner import process_job
 from scripts.publish_job_store import get_publish_job_store
-from scripts.publish_jobs import claim_next_available, list_jobs
+from scripts.publish_jobs import (
+    claim_next_available,
+    lease_is_active,
+    list_jobs,
+    load_job,
+    release_job,
+    save_job,
+)
+
+
+def _jobs_for_admin(
+    admin_id: str,
+    *,
+    store,
+    states: set[str],
+    require_active_lease: bool | None = None,
+) -> list[dict]:
+    jobs = []
+    for job in list_jobs(store=store):
+        if job.get("claimed_by_admin_id") != admin_id:
+            continue
+        if job.get("state") not in states:
+            continue
+        if require_active_lease is not None and lease_is_active(job) != require_active_lease:
+            continue
+        jobs.append(job)
+    jobs.sort(key=lambda item: (item.get("created_at") or "", item["job_id"]))
+    return jobs
 
 
 def _claimed_jobs_for_admin(admin_id: str, *, store) -> list[dict]:
-    jobs = []
+    return _jobs_for_admin(
+        admin_id,
+        store=store,
+        states={"publish_claimed"},
+    )
+
+
+def _running_jobs_for_admin(admin_id: str, *, store) -> list[dict]:
+    return _jobs_for_admin(
+        admin_id,
+        store=store,
+        states={"publish_running"},
+        require_active_lease=True,
+    )
+
+
+def _release_stale_running_jobs(*, store) -> int:
+    released = 0
     for job in list_jobs(store=store):
-        if job.get("claimed_by_admin_id") == admin_id and job.get("state") in {
-            "publish_claimed",
-            "publish_running",
-        }:
-            jobs.append(job)
-    jobs.sort(key=lambda item: (item.get("created_at") or "", item["job_id"]))
-    return jobs
+        if job.get("state") != "publish_running":
+            continue
+        if lease_is_active(job):
+            continue
+        owner = job.get("claimed_by_admin_id")
+        if not owner:
+            continue
+
+        current = load_job(job["job_id"], store=store)
+        if current.get("state") != "publish_running" or lease_is_active(current):
+            continue
+
+        release_job(
+            current,
+            admin_id=owner,
+            reason="lease expired while publish step was running",
+        )
+        save_job(current, store=store)
+        released += 1
+        print(
+            "[publish-worker] Released stale running job "
+            f"{current['job_id']} claimed by {owner}"
+        )
+    return released
 
 
 def _process_claimed(
@@ -59,6 +120,17 @@ def run_once(
     *,
     store,
 ) -> int:
+    _release_stale_running_jobs(store=store)
+
+    running = _running_jobs_for_admin(admin_id, store=store)
+    if running:
+        running_ids = ", ".join(job["job_id"] for job in running)
+        print(
+            "[publish-worker] Active running job already claimed by "
+            f"{admin_id}: {running_ids}; skipping new claim"
+        )
+        return 0
+
     processed = _process_claimed(
         admin_id, admin_name, lease_seconds, verify_remote, store=store
     )
