@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -113,6 +114,40 @@ def _url_for_public_path(path: str | None) -> str | None:
     return f"{PODCAST_DOMAIN}/{rel}"
 
 
+def _published_media_url(path: str | None) -> str | None:
+    if not path:
+        return None
+    return f"{PODCAST_DOMAIN}/episodes/{Path(path).name}"
+
+
+def _slugify_episode_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    cleaned = re.sub(r"^\s*Episode:\s*", "", title, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", cleaned.lower()).strip("-")
+    return slug or None
+
+
+def _episode_page_url(episode: dict, audio_file: str | None) -> str | None:
+    episode_key = episode.get("episode_key")
+    if episode_key:
+        key = str(episode_key).lstrip("/")
+        return f"{PODCAST_DOMAIN}/{key.rstrip('/')}/"
+
+    title_slug = _slugify_episode_title(episode.get("title"))
+    if title_slug:
+        candidate = ROOT / "podcasts" / "episodes" / title_slug / "index.html"
+        if candidate.exists():
+            return f"{PODCAST_DOMAIN}/episodes/{title_slug}/"
+
+    if audio_file:
+        slug = os.path.splitext(os.path.basename(audio_file))[0]
+        return f"{PODCAST_DOMAIN}/episodes/{slug}/"
+    return None
+
+
 def _resolve_local_path(path: str | None) -> Path | None:
     if not path:
         return None
@@ -131,18 +166,15 @@ def _episode_artifacts(job: dict) -> dict:
     image_file = episode.get("image_file")
     stem = os.path.splitext(audio_file)[0] if audio_file else None
     srt_file = f"{stem}.srt" if stem else None
-    page_url = None
-    if audio_file:
-        slug = os.path.splitext(os.path.basename(audio_file))[0]
-        page_url = f"{PODCAST_DOMAIN}/episodes/{slug}/"
+    page_url = _episode_page_url(episode, audio_file)
 
     artifacts = {
         "audio_file": audio_file,
         "image_file": image_file,
         "srt_file": srt_file,
-        "audio_url": _url_for_public_path(audio_file),
+        "audio_url": _published_media_url(audio_file),
         "cover_url": _url_for_public_path(image_file),
-        "srt_url": _url_for_public_path(srt_file),
+        "srt_url": _published_media_url(srt_file),
         "page_url": page_url,
         "viz_url": _extract_viz_url(episode.get("description") or ""),
         "thumb_url": _thumbnail_url(audio_file),

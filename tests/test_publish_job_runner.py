@@ -157,6 +157,32 @@ def test_process_job_skips_duplicate_running_invocation(monkeypatch, tmp_path):
     assert loaded["progress"]["publish"] == "running"
 
 
+def test_episode_artifacts_use_published_episode_urls(monkeypatch, tmp_path):
+    from scripts.publish_job_runner import _episode_artifacts
+
+    podcasts_dir = tmp_path / "podcasts" / "episodes" / "turboquant-online-vector-quantization-with-near-optimal-distortion-rate"
+    podcasts_dir.mkdir(parents=True)
+    (podcasts_dir / "index.html").write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("scripts.publish_job_runner.ROOT", tmp_path)
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._find_episode",
+        lambda job: {
+            "id": 103,
+            "title": "Episode: TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate",
+            "audio_file": str(tmp_path / "drafts/2026/03/2026-03-25-turboquant-online-vector-quantiz-1967b7.mp3"),
+            "image_file": None,
+            "description": "",
+        },
+    )
+
+    artifacts = _episode_artifacts({"job_id": "pub_2026_03_26_211734"})
+
+    assert artifacts["audio_url"] == "https://podcast.do-not-panic.com/episodes/2026-03-25-turboquant-online-vector-quantiz-1967b7.mp3"
+    assert artifacts["srt_url"] == "https://podcast.do-not-panic.com/episodes/2026-03-25-turboquant-online-vector-quantiz-1967b7.srt"
+    assert artifacts["page_url"] == "https://podcast.do-not-panic.com/episodes/turboquant-online-vector-quantization-with-near-optimal-distortion-rate/"
+
+
 def test_verify_falls_back_to_remote_when_local_missing(monkeypatch, tmp_path):
     """When local audio/srt files are gone but remote URLs return 200,
     verification should pass — this is the TurboQuant-style scenario
