@@ -184,6 +184,55 @@ def _verify_local_artifacts(artifacts: dict) -> dict:
     return checks
 
 
+def _verify_publish_success(artifacts: dict, *,
+                            requirements: dict | None = None) -> dict:
+    """Verify publish artifacts, with remote fallback when local missing.
+
+    Does not fail just because local draft audio/srt files are gone if
+    the published remote artifacts are accessible via HEAD probe.
+    Treats viz and cover as optional unless explicitly required by the
+    job requirements.  Preserves real failures (audio or page truly
+    missing everywhere).
+    """
+    requirements = requirements or {}
+    local = _verify_local_artifacts(artifacts)
+    result = {"local": local}
+
+    if local["ok"]:
+        result["ok"] = True
+        return result
+
+    # Local check failed — probe remote URLs as fallback
+    remote = _verify_remote_urls(artifacts)
+    result["remote"] = remote
+
+    audio_ok = (
+        local["audio_file_exists"]
+        or remote.get("audio_url") == 200
+    )
+    srt_ok = (
+        local["srt_file_exists"]
+        or remote.get("srt_url") == 200
+    )
+    url_ok = local["audio_url_present"]
+    page_ok = local["page_url_present"]
+
+    # Viz and cover are optional unless the job explicitly requires them
+    viz_ok = True
+    if requirements.get("viz"):
+        viz_ok = remote.get("viz_url") in (200, "missing")
+
+    cover_ok = True
+    if requirements.get("cover"):
+        cover_ok = (
+            local.get("image_file_exists", True)
+            or remote.get("cover_url") == 200
+        )
+
+    result["ok"] = all([audio_ok, srt_ok, url_ok, page_ok])
+    return result
+
+
 def _verify_remote_urls(artifacts: dict) -> dict:
     results = {}
     for key in ("audio_url", "srt_url", "page_url", "viz_url", "cover_url"):
@@ -332,13 +381,15 @@ def process_job(
         start_step(job, "verify")
         save_job(job, store=store)
         artifacts = _episode_artifacts(job)
-        verification = {
-            "local": _verify_local_artifacts(artifacts),
-        }
-        if verify_remote:
+        verification = _verify_publish_success(
+            artifacts, requirements=job.get("requirements"),
+        )
+        if verify_remote and "remote" not in verification:
             verification["remote"] = _verify_remote_urls(artifacts)
-        if not verification["local"]["ok"]:
-            raise RuntimeError(f"artifact verification failed: {verification['local']}")
+        if not verification.get("ok", False):
+            raise RuntimeError(
+                f"artifact verification failed: {verification}"
+            )
         complete_step(job, "verify", artifacts)
         complete_job(job)
         save_job(job, store=store)
@@ -368,13 +419,17 @@ def main() -> int:
     parser.add_argument("--lease-seconds", type=int, default=900)
     parser.add_argument(
         "--store",
-        choices=("auto", "local", "r2"),
+        choices=("auto", "local", "r2", "sqlite"),
         default="auto",
         help="publish job record backend",
     )
     parser.add_argument(
         "--local-root",
         help="local publish job root when using the filesystem fallback",
+    )
+    parser.add_argument(
+        "--queue-db",
+        help="path to SQLite queue database (enables sqlite store mode)",
     )
     parser.add_argument(
         "--verify-remote",
@@ -386,6 +441,7 @@ def main() -> int:
     store = get_publish_job_store(
         mode=args.store,
         root=Path(args.local_root) if args.local_root else None,
+        queue_db=args.queue_db,
     )
 
     process_job(

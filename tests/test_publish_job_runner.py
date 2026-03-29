@@ -157,6 +157,91 @@ def test_process_job_skips_duplicate_running_invocation(monkeypatch, tmp_path):
     assert loaded["progress"]["publish"] == "running"
 
 
+def test_verify_falls_back_to_remote_when_local_missing(monkeypatch, tmp_path):
+    """When local audio/srt files are gone but remote URLs return 200,
+    verification should pass — this is the TurboQuant-style scenario
+    where publish completed but local draft cleanup removed the files."""
+    from scripts.publish_job_runner import _verify_publish_success
+
+    artifacts = {
+        "audio_file": str(tmp_path / "nonexistent.mp3"),
+        "srt_file": str(tmp_path / "nonexistent.srt"),
+        "image_file": None,
+        "audio_url": "https://podcast.do-not-panic.com/episodes/test.mp3",
+        "srt_url": "https://podcast.do-not-panic.com/episodes/test.srt",
+        "page_url": "https://podcast.do-not-panic.com/episodes/test/",
+        "viz_url": None,
+        "cover_url": None,
+    }
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._verify_remote_urls",
+        lambda a: {
+            "audio_url": 200,
+            "srt_url": 200,
+            "page_url": 200,
+            "viz_url": "missing",
+            "cover_url": "missing",
+        },
+    )
+
+    result = _verify_publish_success(artifacts)
+    assert result["ok"] is True
+    assert result["remote"]["audio_url"] == 200
+
+
+def test_verify_fails_when_audio_missing_everywhere(monkeypatch, tmp_path):
+    """When audio is missing both locally and remotely, verify must fail."""
+    from scripts.publish_job_runner import _verify_publish_success
+
+    artifacts = {
+        "audio_file": str(tmp_path / "nonexistent.mp3"),
+        "srt_file": str(tmp_path / "nonexistent.srt"),
+        "image_file": None,
+        "audio_url": "https://podcast.do-not-panic.com/episodes/test.mp3",
+        "srt_url": "https://podcast.do-not-panic.com/episodes/test.srt",
+        "page_url": "https://podcast.do-not-panic.com/episodes/test/",
+    }
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._verify_remote_urls",
+        lambda a: {
+            "audio_url": 404,
+            "srt_url": 200,
+            "page_url": 200,
+        },
+    )
+
+    result = _verify_publish_success(artifacts)
+    assert result["ok"] is False
+
+
+def test_verify_treats_viz_as_optional_by_default(monkeypatch, tmp_path):
+    """Viz/infographic missing should not fail verify unless the job
+    explicitly requires it."""
+    from scripts.publish_job_runner import _verify_publish_success
+
+    artifacts = {
+        "audio_file": str(tmp_path / "exists.mp3"),
+        "srt_file": str(tmp_path / "exists.srt"),
+        "image_file": None,
+        "audio_url": "https://podcast.do-not-panic.com/episodes/test.mp3",
+        "srt_url": "https://podcast.do-not-panic.com/episodes/test.srt",
+        "page_url": "https://podcast.do-not-panic.com/episodes/test/",
+        "viz_url": None,
+        "cover_url": None,
+    }
+
+    # Create the local files so local check passes
+    (tmp_path / "exists.mp3").write_bytes(b"audio")
+    (tmp_path / "exists.srt").write_bytes(b"srt")
+
+    result = _verify_publish_success(
+        artifacts, requirements={"viz": False, "cover": False},
+    )
+    assert result["ok"] is True
+
+
 def test_run_shell_with_heartbeat_renews_lease_during_long_step(monkeypatch):
     updates = []
 
