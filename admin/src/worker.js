@@ -1322,6 +1322,27 @@ function renderDraftActionButtons(draft) {
     + '<button class="btn btn-danger" onclick="openRejectModal(\'' + draft.key + '\')">✕ Reject</button>';
 }
 
+function renderRejectModal() {
+  return `
+    <div id="reject-modal" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Reject Draft</h3>
+          <button class="modal-close" onclick="closeRejectModal()">&times;</button>
+        </div>
+        <div class="form-group">
+          <label for="reject-reason">Reason for rejection</label>
+          <textarea id="reject-reason" placeholder="Enter the reason for rejecting this draft..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="confirmReject()">Reject Draft</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function draftsPageWithData(data, subsData) {
   const drafts = data.drafts || [];
 
@@ -1402,7 +1423,7 @@ function draftsPageWithData(data, subsData) {
     </div>
   `}).join('');
 
-  return `<div class="page-header"><h1>Draft Review</h1><p>${allDrafts.length} episodes pending review</p></div>${cards}`;
+  return `<div class="page-header"><h1>Draft Review</h1><p>${allDrafts.length} episodes pending review</p></div>${cards}${renderRejectModal()}`;
 }
 
 function draftsPage() {
@@ -1419,22 +1440,7 @@ function draftsPage() {
       </div>
     </div>
 
-    <div id="reject-modal" class="modal-overlay" style="display: none;">
-      <div class="modal">
-        <div class="modal-header">
-          <h3 class="modal-title">Reject Draft</h3>
-          <button class="modal-close" onclick="closeRejectModal()">&times;</button>
-        </div>
-        <div class="form-group">
-          <label for="reject-reason">Reason for rejection</label>
-          <textarea id="reject-reason" placeholder="Enter the reason for rejecting this draft..."></textarea>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
-          <button class="btn btn-danger" onclick="confirmReject()">Reject Draft</button>
-        </div>
-      </div>
-    </div>
+    ${renderRejectModal()}
 
     <script>
       loadDrafts();

@@ -615,6 +615,37 @@ test('GET /drafts server-rendered page reflects approved state in action buttons
   assert.ok(html.includes('Approved'), 'button label must show Approved state');
 });
 
+test('GET /drafts server-rendered page includes reject modal for live button flow', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 18,
+            title: 'Rejectable Draft',
+            draft_key: 'drafts/2026/03/rejectable.mp3',
+          },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/rejectable.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('id="reject-modal"'), 'server-rendered drafts page must include the reject modal');
+  assert.ok(html.includes('id="reject-reason"'), 'server-rendered drafts page must include the reject reason textarea');
+  assert.ok(html.includes('openRejectModal('), 'reject button wiring should still be present');
+});
+
 
 test('GET /drafts renders public-style clickable source blocks for malformed draft sources', async () => {
   const env = makeEnv({
