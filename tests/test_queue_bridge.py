@@ -19,8 +19,12 @@ from scripts.queue_bridge import (
     sync_submissions_to_r2,
     sync_publish_jobs_from_r2,
     sync_publish_jobs_to_r2,
+    sync_publish_results_from_r2,
+    sync_publish_results_to_r2,
     sync_down,
     sync_up,
+    queue_status,
+    _format_status_text,
     _summary_string,
 )
 from scripts.queue_store import SQLiteQueueStore
@@ -82,6 +86,7 @@ class FakeR2PublishJobStore:
 
     def __init__(self):
         self._jobs: dict[str, dict] = {}
+        self._results: dict[str, dict] = {}
 
     def list_jobs(self) -> list[dict]:
         from scripts.publish_jobs import validate_job
@@ -110,6 +115,24 @@ class FakeR2PublishJobStore:
         validate_job(job)
         self._jobs[job["job_id"]] = deepcopy(job)
         return job["job_id"]
+
+    def save_result(self, job_id, result) -> str:
+        self._results[job_id] = deepcopy(result)
+        return job_id
+
+    def load_result(self, job_id) -> dict | None:
+        r = self._results.get(job_id)
+        if r is None:
+            return None
+        return deepcopy(r)
+
+    def list_results(self) -> list[dict]:
+        results = []
+        for job_id in sorted(self._results):
+            data = deepcopy(self._results[job_id])
+            data.setdefault("job_id", job_id)
+            results.append(data)
+        return results
 
 
 def _put_json(client, bucket, key, data):
@@ -382,6 +405,106 @@ class TestSyncPublishJobsToR2:
 
 
 # ---------------------------------------------------------------------------
+# Import/export publish results
+# ---------------------------------------------------------------------------
+
+
+class TestSyncPublishResultsFromR2:
+    def test_imports_new_result(self, store, r2_pub_store):
+        r2_pub_store.save_result("pub_001", {
+            "job_id": "pub_001",
+            "ok": True,
+            "updated_at": _ts(5),
+        })
+
+        counts = sync_publish_results_from_r2(
+            store, r2_store=r2_pub_store
+        )
+        assert counts["imported"] == 1
+
+        loaded = store.load_result("pub_001")
+        assert loaded is not None
+        assert loaded["ok"] is True
+
+    def test_skips_when_local_is_newer(self, store, r2_pub_store):
+        store.save_result("pub_001", {
+            "job_id": "pub_001",
+            "ok": True,
+            "updated_at": _ts(0),
+        })
+        r2_pub_store.save_result("pub_001", {
+            "job_id": "pub_001",
+            "ok": False,
+            "updated_at": _ts(10),
+        })
+
+        counts = sync_publish_results_from_r2(
+            store, r2_store=r2_pub_store
+        )
+        assert counts["imported"] == 0
+        assert counts["skipped"] == 1
+
+        loaded = store.load_result("pub_001")
+        assert loaded["ok"] is True
+
+    def test_updates_when_r2_is_newer(self, store, r2_pub_store):
+        store.save_result("pub_001", {
+            "job_id": "pub_001",
+            "ok": False,
+            "updated_at": _ts(10),
+        })
+        r2_pub_store.save_result("pub_001", {
+            "job_id": "pub_001",
+            "ok": True,
+            "updated_at": _ts(0),
+        })
+
+        counts = sync_publish_results_from_r2(
+            store, r2_store=r2_pub_store
+        )
+        assert counts["imported"] == 1
+
+        loaded = store.load_result("pub_001")
+        assert loaded["ok"] is True
+
+
+class TestSyncPublishResultsToR2:
+    def test_exports_new_result(self, store, r2_pub_store):
+        store.save_result("pub_002", {
+            "job_id": "pub_002",
+            "ok": True,
+            "updated_at": _ts(0),
+        })
+
+        counts = sync_publish_results_to_r2(
+            store, r2_store=r2_pub_store
+        )
+        assert counts["exported"] == 1
+
+        loaded = r2_pub_store.load_result("pub_002")
+        assert loaded is not None
+        assert loaded["ok"] is True
+
+    def test_skips_when_r2_is_newer(self, store, r2_pub_store):
+        store.save_result("pub_002", {
+            "job_id": "pub_002",
+            "ok": False,
+            "updated_at": _ts(10),
+        })
+        r2_pub_store.save_result("pub_002", {
+            "job_id": "pub_002",
+            "ok": True,
+            "updated_at": _ts(0),
+        })
+
+        counts = sync_publish_results_to_r2(
+            store, r2_store=r2_pub_store
+        )
+        assert counts["exported"] == 0
+        assert counts["skipped"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Full sync cycle
 # ---------------------------------------------------------------------------
 
@@ -462,6 +585,131 @@ class TestSummaryString:
         assert "[queue-bridge] down ::" in s
         assert "submissions:" in s
         assert "publish_jobs:" in s
+
+
+# ---------------------------------------------------------------------------
+# Queue status / health report
+# ---------------------------------------------------------------------------
+
+
+class TestQueueStatus:
+    def test_reports_drift_and_missing_draft_mp3(self, store, client, r2_pub_store):
+        _put_json(client, BUCKET, "submissions/ready.json", {
+            "status": "draft_generated",
+            "draft_stem": "drafts/2026/03/ready",
+            "updated_at": _ts(10),
+        })
+        _put_json(client, BUCKET, "submissions/missing.json", {
+            "status": "draft_generated",
+            "draft_stem": "drafts/2026/03/missing",
+            "updated_at": _ts(10),
+        })
+        store.save_submission("submissions/ready.json", {
+            "status": "draft_generated",
+            "draft_stem": "drafts/2026/03/ready",
+            "updated_at": _ts(0),
+        })
+        store.save_submission("submissions/missing.json", {
+            "status": "draft_generated",
+            "draft_stem": "drafts/2026/03/missing",
+            "updated_at": _ts(0),
+        })
+        store.save_submission("submissions/local-only.json", {
+            "status": "generation_running",
+            "updated_at": _ts(0),
+        })
+
+        client.put_object(
+            Bucket="ai-post-transformers",
+            Key="drafts/2026/03/ready.mp3",
+            Body=b"mp3",
+            ContentType="audio/mpeg",
+        )
+
+        local_job = make_job_record(
+            draft_key="drafts/2026/03/ready.mp3",
+            job_id="pub_2026_03_29_120000",
+            created_at=_ts(30),
+        )
+        local_job["updated_at"] = _ts(0)
+        store.save_job(local_job)
+
+        remote_job = make_job_record(
+            draft_key="drafts/2026/03/ready.mp3",
+            job_id="pub_2026_03_29_120000",
+            created_at=_ts(30),
+        )
+        remote_job["updated_at"] = _ts(10)
+        r2_pub_store.save_job(remote_job)
+
+        store.save_result("pub_2026_03_29_120000", {
+            "job_id": "pub_2026_03_29_120000",
+            "updated_at": _ts(0),
+        })
+        r2_pub_store.save_result("pub_2026_03_29_120000", {
+            "job_id": "pub_2026_03_29_120000",
+            "updated_at": _ts(10),
+        })
+
+        status = queue_status(
+            store,
+            bucket=BUCKET,
+            client=client,
+            r2_publish_store=r2_pub_store,
+            podcast_bucket="ai-post-transformers",
+            podcast_client=client,
+        )
+
+        assert status["submissions"]["only_local"] == 1
+        assert status["submissions"]["newer_local"] == 2
+        assert status["publish_jobs"]["newer_local"] == 1
+        assert status["publish_results"]["newer_local"] == 1
+        assert status["draft_generated_count"] == 2
+        assert status["missing_draft_mp3_count"] == 1
+        assert status["missing_draft_mp3"][0]["expected_r2_key"] == "drafts/2026/03/missing.mp3"
+
+    def test_format_status_text(self):
+        rendered = _format_status_text({
+            "submissions": {
+                "local": 2,
+                "remote": 1,
+                "only_local": 1,
+                "only_remote": 0,
+                "newer_local": 1,
+                "newer_remote": 0,
+                "in_sync": 1,
+                "by_status": {"draft_generated": 1, "submitted": 1},
+            },
+            "publish_jobs": {
+                "local": 1,
+                "remote": 1,
+                "only_local": 0,
+                "only_remote": 0,
+                "newer_local": 0,
+                "newer_remote": 1,
+                "in_sync": 0,
+                "by_state": {"publish_running": 1},
+            },
+            "publish_results": {
+                "local": 1,
+                "remote": 0,
+                "only_local": 1,
+                "only_remote": 0,
+                "newer_local": 0,
+                "newer_remote": 0,
+                "in_sync": 0,
+            },
+            "draft_generated_count": 1,
+            "missing_draft_mp3_count": 1,
+            "missing_draft_mp3": [{
+                "key": "submissions/test.json",
+                "reason": "mp3 not found in podcast bucket",
+            }],
+        })
+
+        assert "Queue Health Status" in rendered
+        assert "local-newer" in rendered
+        assert "submissions/test.json" in rendered
 
 
 # ---------------------------------------------------------------------------

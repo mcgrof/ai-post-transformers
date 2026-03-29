@@ -43,6 +43,20 @@ class LocalPublishJobStore:
         _atomic_write_json(path, result)
         return str(path)
 
+    def load_result(self, job_id: str) -> dict | None:
+        path = result_path(job_id, root=self.root)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+
+    def list_results(self) -> list[dict]:
+        records = []
+        for path in sorted(results_dir(self.root).glob("*.json")):
+            data = json.loads(path.read_text())
+            data.setdefault("job_id", path.stem)
+            records.append(data)
+        return records
+
     def list_jobs(self) -> list[dict]:
         records = []
         for path in sorted(jobs_dir(self.root).glob("*.json")):
@@ -114,6 +128,30 @@ class R2PublishJobStore:
 
     def save_result(self, job_id: str, result: dict) -> str:
         return self._write_json(self._normalize_result_key(job_id), result)
+
+    def load_result(self, job_id: str) -> dict | None:
+        key = self._normalize_result_key(job_id)
+        try:
+            return self._read_json(key)
+        except Exception as exc:
+            if "NoSuchKey" in str(exc) or "404" in str(exc):
+                return None
+            raise
+
+    def list_results(self) -> list[dict]:
+        paginator = self.client.get_paginator("list_objects_v2")
+        records = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.results_prefix):
+            for obj in sorted(page.get("Contents", []), key=lambda item: item["Key"]):
+                key = obj["Key"]
+                data = self._read_json(key)
+                # Derive job_id from key if not embedded
+                stem = key[len(self.results_prefix):]
+                if stem.endswith(".json"):
+                    stem = stem[:-5]
+                data.setdefault("job_id", stem)
+                records.append(data)
+        return records
 
     def list_jobs(self) -> list[dict]:
         paginator = self.client.get_paginator("list_objects_v2")

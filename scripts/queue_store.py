@@ -555,6 +555,29 @@ class SQLiteQueueStore:
             conn.commit()
         return job_id
 
+    def load_result(self, job_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT data_json FROM publish_results WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    def list_results(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT job_id, data_json FROM publish_results "
+                "ORDER BY updated_at, job_id"
+            ).fetchall()
+        results = []
+        for job_id, data_json in rows:
+            data = json.loads(data_json)
+            data.setdefault("job_id", job_id)
+            results.append(data)
+        return results
+
     def list_jobs(self) -> list[dict]:
         from scripts.publish_jobs import validate_job
 
@@ -819,6 +842,20 @@ class InMemoryQueueStore:
     def save_result(self, job_id, result):
         self._publish_results[job_id] = deepcopy(result)
         return job_id
+
+    def load_result(self, job_id):
+        result = self._publish_results.get(job_id)
+        if result is None:
+            return None
+        return deepcopy(result)
+
+    def list_results(self):
+        results = []
+        for job_id in sorted(self._publish_results.keys()):
+            data = deepcopy(self._publish_results[job_id])
+            data.setdefault("job_id", job_id)
+            results.append(data)
+        return results
 
     def list_jobs(self):
         from scripts.publish_jobs import validate_job
