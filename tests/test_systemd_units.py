@@ -96,6 +96,8 @@ def test_service_uses_working_directory_and_flock(service_unit: str):
 
 def test_service_passes_queue_db(service_unit: str):
     assert "--queue-db" in service_unit
+    assert "QUEUE_DB_PATH=" in service_unit
+    assert ".local/state/ai-post-transformers/queue.db" in service_unit
 
 
 def test_timer_uses_on_unit_inactive(timer_unit: str):

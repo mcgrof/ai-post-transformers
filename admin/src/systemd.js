@@ -23,13 +23,13 @@ export function getAdminIdentity(request) {
  * worker (pick up pending submissions) and the publish worker
  * (claim and process approved publish jobs) in sequence.
  *
- * When QUEUE_DB is set in the environment file the worker operates in
- * bridged mode: R2 import -> SQLite work -> R2 export each cycle.
+ * The service defaults to a queue DB under ~/.local/state but allows an
+ * explicit QUEUE_DB override in the EnvironmentFile.
  */
 export function generateSystemdService(adminId) {
   // Shell variables ($ADMIN_NAME, $QUEUE_DB) are resolved at runtime
-  // by bash from the EnvironmentFile.  They must NOT use ${} syntax
-  // here because that is JS template interpolation.
+  // by bash from the EnvironmentFile. They must NOT use ${} syntax here
+  // because that is JS template interpolation.
   return `[Unit]
 Description=AI Post Transformers podcast worker (${adminId})
 After=network-online.target
@@ -39,7 +39,7 @@ Wants=network-online.target
 Type=oneshot
 EnvironmentFile=%h/.config/podcast-worker/env
 WorkingDirectory=%h/devel/ai-post-transformers
-ExecStart=/usr/bin/flock -n -E 0 %t/podcast-worker.lock /bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && exec .venv/bin/python scripts/run_podcast_worker.py --admin-id ${adminId} --admin-name "$ADMIN_NAME" --once --verify-remote --queue-db "$QUEUE_DB"'
+ExecStart=/usr/bin/flock -n -E 0 %t/podcast-worker.lock /bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && QUEUE_DB_PATH="$QUEUE_DB" && if [ -z "$QUEUE_DB_PATH" ]; then QUEUE_DB_PATH="$HOME/.local/state/ai-post-transformers/queue.db"; fi && mkdir -p "$(dirname "$QUEUE_DB_PATH")" && exec .venv/bin/python scripts/run_podcast_worker.py --admin-id ${adminId} --admin-name "$ADMIN_NAME" --once --verify-remote --queue-db "$QUEUE_DB_PATH"'
 Restart=no
 StandardOutput=journal
 StandardError=journal
@@ -77,9 +77,10 @@ AWS_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
-# SQLite queue database path — enables bridged mode (R2 sync + SQLite work).
-# Use an absolute path so the worker resolves it regardless of cwd.
-QUEUE_DB=%h/devel/ai-post-transformers/queue.db
+# Optional: override the SQLite queue database path used for bridged
+# mode. If unset, the service defaults to:
+#   $HOME/.local/state/ai-post-transformers/queue.db
+# QUEUE_DB=/home/your-user/.local/state/ai-post-transformers/queue.db
 
 # Optional admin display name
 # ADMIN_NAME=

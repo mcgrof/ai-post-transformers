@@ -155,6 +155,7 @@ test('env file references podcast-worker', () => {
 test('env file contains QUEUE_DB placeholder', () => {
   const env = generateEnvFile();
   assert.ok(env.includes('QUEUE_DB='));
+  assert.ok(env.includes('queue.db'));
 });
 
 
