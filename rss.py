@@ -1090,7 +1090,7 @@ footer a:hover {{ color: #ccc; }}
   </div>
 </div>
 <div class="search-wrap"><input type="text" id="search" placeholder="Search all episodes, including legacy podcasts..." autocomplete="off"></div>
-<div class="search-help">Searches the full catalog, including legacy episodes from the pre-R2 era.</div>
+<div class="search-help">Searches the full catalog, including legacy episodes from the early archive.</div>
 <div class="section-title" id="latest-title">Latest Episodes</div>
 <div class="grid" id="episodes">
 {cards_html}
