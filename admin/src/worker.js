@@ -2951,14 +2951,32 @@ async function getDrafts(env) {
         });
       }
 
+      // Fallback: when no manifest entry exists, try the companion
+      // sidecar JSON uploaded alongside the draft MP3.  This covers
+      // drafts generated via the submission path before the manifest
+      // update was wired in, and acts as resilience if the manifest
+      // write fails.
+      let sidecar = null;
+      if (!episode) {
+        try {
+          const sidecarKey = obj.key.replace(/\.mp3$/, '.json');
+          const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);
+          if (sidecarData) {
+            sidecar = await sidecarData.json();
+          }
+        } catch (_) {
+          // Sidecar missing or unparseable — not fatal
+        }
+      }
+
       const draft = {
         key: obj.key,
-        title: episode?.title || null,
+        title: episode?.title || sidecar?.title || null,
         date: episode?.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
         duration: episode?.duration || 'Unknown',
-        description: episode?.description || '',
+        description: episode?.description || sidecar?.description || '',
         audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
-        episodeId: episode?.id || null,
+        episodeId: episode?.id || sidecar?.episode_id || null,
         publish_job: summarizePublishJob(latestPublishJobByDraft.get(obj.key)),
         revision: episode?.revision || null,
         revision_state: episode?.revision_state || null,

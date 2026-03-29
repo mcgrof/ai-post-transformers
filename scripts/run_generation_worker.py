@@ -405,6 +405,73 @@ def _draft_stem_local_and_remote(draft_stem: str) -> tuple[Path, str]:
     return local_stem, remote_stem
 
 
+def _publish_draft_metadata(draft_stem: str) -> None:
+    """Push draft metadata to the admin manifest + enrich sidecar JSON.
+
+    Best-effort: failures are logged but do not block the generation
+    pipeline.  The admin UI can still fall back to sidecar JSON or
+    displayTitle() heuristics.
+    """
+    if not draft_stem:
+        return
+
+    local_stem, remote_stem = _draft_stem_local_and_remote(draft_stem)
+
+    try:
+        from db import get_connection, init_db
+        conn = get_connection()
+        init_db(conn)
+
+        # Find episode by matching audio_file to the draft stem
+        rows = conn.execute(
+            "SELECT * FROM podcasts WHERE audio_file LIKE ? "
+            "ORDER BY id DESC LIMIT 1",
+            (f"%{Path(draft_stem).name}%",),
+        ).fetchall()
+        if not rows:
+            print(
+                f"[gen-worker] No DB episode found for draft stem "
+                f"{draft_stem}; skipping manifest update"
+            )
+            conn.close()
+            return
+
+        ep = dict(rows[0])
+        conn.close()
+
+        from scripts.draft_manifest import (
+            build_manifest_entry,
+            upsert_manifest_draft,
+            enrich_sidecar_json,
+        )
+
+        entry = build_manifest_entry(
+            ep, draft_key=f"{remote_stem}.mp3", draft_stem=remote_stem,
+        )
+        upsert_manifest_draft(entry)
+        print(f"[gen-worker] Manifest updated for ep {ep['id']}: {ep.get('title', '?')}")
+
+        # Enrich sidecar JSON so admin fallback works too
+        sidecar = Path(f"{local_stem}.json")
+        source_urls = ep.get("source_urls")
+        if isinstance(source_urls, str):
+            try:
+                source_urls = json.loads(source_urls)
+            except (json.JSONDecodeError, TypeError):
+                source_urls = []
+
+        enrich_sidecar_json(
+            sidecar,
+            title=ep.get("title"),
+            description=ep.get("description"),
+            source_urls=source_urls,
+            episode_id=ep["id"],
+        )
+
+    except Exception as exc:
+        print(f"[gen-worker] Draft metadata publish failed (non-fatal): {exc}")
+
+
 def _upload_draft_artifacts(draft_stem: str) -> tuple[bool, dict]:
     """Upload freshly generated draft artifacts to the podcast bucket.
 
@@ -509,6 +576,7 @@ def _process_submission_store(sub, admin_id, *, store):
                 )
                 return False
             updates.update(upload_details)
+            _publish_draft_metadata(result)
         store.update_submission(key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True
@@ -577,6 +645,7 @@ def process_submission(sub, admin_id, *, bucket=None, client=None,
                 )
                 return False
             updates.update(upload_details)
+            _publish_draft_metadata(result)
         _update_submission(bucket, client, key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True

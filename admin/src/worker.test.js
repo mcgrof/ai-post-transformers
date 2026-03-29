@@ -2151,3 +2151,101 @@ test('Queue page filters editorial papers that match submitted submissions', asy
   assert.ok(html.includes('Untouched Paper'),
     'paper without submission should remain in editorial queue');
 });
+
+
+// ---------------------------------------------------------------------------
+// Sidecar JSON fallback for drafts without manifest entries
+// ---------------------------------------------------------------------------
+
+test('GET /api/drafts uses sidecar JSON title/description when manifest entry is missing', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-27-sparse-attention-ff01a2.mp3': 'audio',
+      'drafts/2026/03/2026-03-27-sparse-attention-ff01a2.json': JSON.stringify({
+        title: 'Sparse Attention Is All You Need',
+        description: 'This episode explores sparse attention mechanisms.',
+        source_urls: ['https://arxiv.org/pdf/2503.12345'],
+        episode_id: 111,
+        script: [],
+        sources: [],
+        topics: ['attention'],
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  const draft = body.drafts[0];
+  assert.equal(draft.title, 'Sparse Attention Is All You Need');
+  assert.equal(draft.description, 'This episode explores sparse attention mechanisms.');
+  assert.equal(draft.episodeId, 111);
+});
+
+
+test('GET /api/drafts prefers manifest over sidecar when both exist', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          id: 111,
+          title: 'Manifest Title Wins',
+          description: 'Manifest description.',
+          draft_key: 'drafts/2026/03/2026-03-27-sparse-attention-ff01a2.mp3',
+          filename: '2026-03-27-sparse-attention-ff01a2.mp3',
+          basename: '2026-03-27-sparse-attention-ff01a2',
+          date: '2026-03-27',
+        }],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-27-sparse-attention-ff01a2.mp3': 'audio',
+      'drafts/2026/03/2026-03-27-sparse-attention-ff01a2.json': JSON.stringify({
+        title: 'Sidecar Title Should Not Win',
+        description: 'Sidecar description.',
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  assert.equal(body.drafts[0].title, 'Manifest Title Wins');
+  assert.equal(body.drafts[0].description, 'Manifest description.');
+});
+
+
+test('GET /api/drafts gracefully handles missing sidecar JSON', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-27-orphan-abc123.mp3': 'audio',
+      // No sidecar JSON exists
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  // Title should fall back to displayTitle() humanization
+  assert.ok(body.drafts[0].title, 'draft should still have a title from displayTitle fallback');
+  assert.equal(body.drafts[0].description, '');
+});
