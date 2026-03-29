@@ -134,9 +134,15 @@ def get_publish_job_store(
     mode: str = "auto",
     root: Path | None = None,
     client=None,
+    queue_db: str | Path | None = None,
 ):
-    if mode not in {"auto", "local", "r2"}:
+    if mode not in {"auto", "local", "r2", "sqlite"}:
         raise ValueError(f"unknown publish job store mode: {mode}")
+    if mode == "sqlite" or (mode == "auto" and queue_db):
+        from scripts.queue_store import SQLiteQueueStore
+        if not queue_db:
+            raise ValueError("sqlite mode requires queue_db path")
+        return SQLiteQueueStore(queue_db)
     if mode == "local" or root is not None:
         return LocalPublishJobStore(root=root)
     if mode == "r2":

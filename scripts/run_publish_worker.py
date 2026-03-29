@@ -162,7 +162,7 @@ def main() -> int:
     parser.add_argument("--verify-remote", action="store_true")
     parser.add_argument(
         "--store",
-        choices=("auto", "local", "r2"),
+        choices=("auto", "local", "r2", "sqlite"),
         default="auto",
         help="publish job record backend",
     )
@@ -170,11 +170,16 @@ def main() -> int:
         "--local-root",
         help="local publish job root when using the filesystem fallback",
     )
+    parser.add_argument(
+        "--queue-db",
+        help="path to SQLite queue database (enables sqlite store mode)",
+    )
     args = parser.parse_args()
 
     store = get_publish_job_store(
         mode=args.store,
         root=Path(args.local_root) if args.local_root else None,
+        queue_db=args.queue_db,
     )
 
     if not any((args.claim_next, args.process_claimed, args.once, args.loop)):
