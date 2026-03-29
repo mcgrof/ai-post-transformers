@@ -390,6 +390,75 @@ def _verify_claim_token(bucket, client, key, expected_token):
     return fresh.get("claim_token") == expected_token
 
 
+def _draft_stem_local_and_remote(draft_stem: str) -> tuple[Path, str]:
+    stem_path = Path(draft_stem)
+    local_stem = stem_path if stem_path.is_absolute() else ROOT / stem_path
+
+    if stem_path.is_absolute():
+        try:
+            remote_stem = str(stem_path.relative_to(ROOT)).replace(os.sep, "/")
+        except ValueError:
+            remote_stem = f"drafts/{stem_path.name}"
+    else:
+        remote_stem = draft_stem.replace(os.sep, "/")
+
+    return local_stem, remote_stem
+
+
+def _upload_draft_artifacts(draft_stem: str) -> tuple[bool, dict]:
+    """Upload freshly generated draft artifacts to the podcast bucket.
+
+    Returns (ok, details). The MP3 is required for a draft to be
+    immediately reviewable/playable. Sibling assets are best-effort and
+    surface as warnings without failing the generation.
+    """
+    if not draft_stem:
+        return False, {"error": "generation completed without a draft stem"}
+
+    local_stem, remote_stem = _draft_stem_local_and_remote(draft_stem)
+    required_mp3 = Path(f"{local_stem}.mp3")
+    if not required_mp3.exists():
+        return False, {"error": f"draft MP3 missing after generation: {required_mp3}"}
+
+    from r2_upload import get_r2_client, upload_file
+
+    client = get_r2_client()
+    uploaded = {}
+    warnings = []
+
+    artifact_plan = [
+        ("mp3", ".mp3", True),
+        ("srt", ".srt", False),
+        ("cover", ".png", False),
+        ("transcript", ".txt", False),
+        ("metadata", ".json", False),
+    ]
+
+    for label, suffix, required in artifact_plan:
+        local_path = Path(f"{local_stem}{suffix}")
+        if not local_path.exists():
+            if required:
+                return False, {"error": f"required draft artifact missing: {local_path}"}
+            warnings.append(f"missing optional artifact: {local_path.name}")
+            continue
+
+        r2_key = f"{remote_stem}{suffix}"
+        try:
+            uploaded[label] = upload_file(client, str(local_path), r2_key)
+        except Exception as exc:
+            if required:
+                return False, {"error": f"failed to upload {r2_key}: {exc}"}
+            warnings.append(f"failed to upload {r2_key}: {exc}")
+
+    details = {
+        "draft_artifacts": uploaded,
+        "draft_uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if warnings:
+        details["draft_upload_warnings"] = warnings
+    return True, details
+
+
 # ---------------------------------------------------------------------------
 # QueueStore-based process_submission
 # ---------------------------------------------------------------------------
@@ -422,6 +491,24 @@ def _process_submission_store(sub, admin_id, *, store):
         updates = {"status": "draft_generated"}
         if result:
             updates["draft_stem"] = result
+            upload_ok, upload_details = _upload_draft_artifacts(result)
+            if not store.verify_claim_token(key, claim_token):
+                print(
+                    f"[gen-worker] Claim token mismatch after draft upload for "
+                    f"{key}; skipping status update"
+                )
+                return False
+            if not upload_ok:
+                store.update_submission(key, {
+                    "status": "generation_failed",
+                    "error": upload_details.get("error", "draft upload failed")[:500],
+                })
+                print(
+                    f"[gen-worker] Draft upload failed for {key}: "
+                    f"{upload_details.get('error', 'unknown error')}"
+                )
+                return False
+            updates.update(upload_details)
         store.update_submission(key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True
@@ -472,6 +559,24 @@ def process_submission(sub, admin_id, *, bucket=None, client=None,
         updates = {"status": "draft_generated"}
         if result:
             updates["draft_stem"] = result
+            upload_ok, upload_details = _upload_draft_artifacts(result)
+            if not _verify_claim_token(bucket, client, key, claim_token):
+                print(
+                    f"[gen-worker] Claim token mismatch after draft upload for "
+                    f"{key}; skipping status update"
+                )
+                return False
+            if not upload_ok:
+                _update_submission(bucket, client, key, {
+                    "status": "generation_failed",
+                    "error": upload_details.get("error", "draft upload failed")[:500],
+                })
+                print(
+                    f"[gen-worker] Draft upload failed for {key}: "
+                    f"{upload_details.get('error', 'unknown error')}"
+                )
+                return False
+            updates.update(upload_details)
         _update_submission(bucket, client, key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True

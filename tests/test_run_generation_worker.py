@@ -7,10 +7,11 @@ using an in-memory mock R2 backend.
 
 from __future__ import annotations
 
-import json
 import io
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -383,6 +384,9 @@ class TestRunOnce:
         with patch(
             "scripts.run_generation_worker._run_generation",
             return_value=(True, "drafts/2026/03/test-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {"mp3": "https://podcast/drafts/2026/03/test-draft.mp3"}}),
         ):
             count = run_once("admin-1", bucket=BUCKET, client=client)
 
@@ -426,6 +430,9 @@ class TestProcessSubmission:
         with patch(
             "scripts.run_generation_worker._run_generation",
             return_value=(True, "drafts/2026/03/good-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {"mp3": "https://podcast/drafts/2026/03/good-draft.mp3"}}),
         ):
             ok = process_submission(
                 sub, "admin-1", bucket=BUCKET, client=client,
@@ -435,6 +442,7 @@ class TestProcessSubmission:
         final = _read_submission(BUCKET, client, "submissions/test-sub.json")
         assert final["status"] == "draft_generated"
         assert final["draft_stem"] == "drafts/2026/03/good-draft"
+        assert final["draft_artifacts"]["mp3"].endswith("good-draft.mp3")
 
     def test_failure_path_writes_generation_failed(self):
         client = FakeR2()
@@ -471,6 +479,9 @@ class TestProcessSubmission:
         with patch(
             "scripts.run_generation_worker._run_generation",
             side_effect=clobber_token,
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {"mp3": "https://podcast/drafts/2026/03/draft.mp3"}}),
         ):
             ok = process_submission(
                 sub, "admin-1", bucket=BUCKET, client=client,
@@ -480,3 +491,56 @@ class TestProcessSubmission:
         final = _read_submission(BUCKET, client, "submissions/test-sub.json")
         assert final["claim_token"] == "interloper-token"
         assert final["status"] != "draft_generated"
+
+    def test_upload_failure_marks_generation_failed(self):
+        client = FakeR2()
+        _make_submission(client)
+        sub = _read_submission(BUCKET, client, "submissions/test-sub.json")
+
+        with patch(
+            "scripts.run_generation_worker._run_generation",
+            return_value=(True, "drafts/2026/03/good-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(False, {"error": "failed to upload draft MP3"}),
+        ):
+            ok = process_submission(
+                sub, "admin-1", bucket=BUCKET, client=client,
+            )
+
+        assert ok is False
+        final = _read_submission(BUCKET, client, "submissions/test-sub.json")
+        assert final["status"] == "generation_failed"
+        assert "failed to upload draft MP3" in final["error"]
+
+    def test_upload_helper_warns_on_missing_optional_artifacts(self, tmp_path, monkeypatch):
+        draft_dir = tmp_path / "drafts" / "2026" / "03"
+        draft_dir.mkdir(parents=True)
+        mp3 = draft_dir / "example.mp3"
+        mp3.write_bytes(b"mp3")
+
+        monkeypatch.setattr("scripts.run_generation_worker.ROOT", tmp_path)
+
+        uploads = []
+
+        def fake_upload(client, local_path, r2_key, content_type=None, bucket=None):
+            uploads.append((Path(local_path).name, r2_key))
+            return f"https://podcast.do-not-panic.com/{r2_key}"
+
+        monkeypatch.setattr(
+            "r2_upload.get_r2_client",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            "r2_upload.upload_file",
+            fake_upload,
+        )
+
+        from scripts.run_generation_worker import _upload_draft_artifacts
+
+        ok, details = _upload_draft_artifacts("drafts/2026/03/example")
+
+        assert ok is True
+        assert uploads == [("example.mp3", "drafts/2026/03/example.mp3")]
+        assert details["draft_artifacts"]["mp3"].endswith("drafts/2026/03/example.mp3")
+        assert any("missing optional artifact" in warning for warning in details["draft_upload_warnings"])
