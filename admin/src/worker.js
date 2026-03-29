@@ -1275,6 +1275,7 @@ function publishJobBadgeClass(state) {
     case 'publish_running':
       return 'badge-blue';
     case 'publish_failed':
+    case 'publish_rejected':
       return 'badge-danger';
     case 'publish_released':
       return 'badge-warning';
@@ -1291,6 +1292,7 @@ function publishJobStateLabel(job) {
     case 'publish_running': return 'Publishing';
     case 'publish_completed': return 'Published';
     case 'publish_failed': return 'Publish Failed';
+    case 'publish_rejected': return 'Rejected';
     case 'publish_released': return 'Ready to Reclaim';
     default: return job.state.replace(/_/g, ' ');
   }
@@ -3480,21 +3482,23 @@ async function reviewDraft(request, env) {
       return { success: true, action, publish_job: job };
     }
 
-    if (action === 'reject_episode') {
-      // Reject all active draft revisions for a logical episode.
-      // The episode_key is passed from the client side.
-      const episodeKey = body.episode_key;
-      if (!episodeKey) {
-        return { error: 'Missing episode_key for reject_episode' };
-      }
-      // Mark the rejection in the review log (already done above).
-      // The actual draft state cleanup is handled by the manifest
-      // update on the Python/generation side. Record intent here.
+    if (action === 'reject' || action === 'reject_episode') {
+      const rejected = await rejectDrafts(env, {
+        draftKey: key,
+        reason,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+        episodeKey: body.episode_key || null,
+      });
       return {
         success: true,
         action,
-        episode_key: episodeKey,
-        message: `Rejection recorded for all drafts of "${episodeKey}"`,
+        key,
+        episode_key: rejected.episode_key || null,
+        rejected_keys: rejected.rejected_keys,
+        message: rejected.episode_key
+          ? `Rejected all drafts for "${rejected.episode_key}"`
+          : 'Draft rejected',
       };
     }
 
@@ -3735,20 +3739,164 @@ function summarizePublishJob(job) {
   };
 }
 
-async function findManifestDraft(env, draftKey) {
+async function loadDraftManifest(env) {
   const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
   if (!manifestData) {
-    return null;
+    return { drafts: [], conferences: {} };
   }
   const manifest = await manifestData.json();
+  manifest.drafts = Array.isArray(manifest.drafts) ? manifest.drafts : [];
+  return manifest;
+}
+
+async function saveDraftManifest(env, manifest) {
+  await env.ADMIN_BUCKET.put('manifest.json', JSON.stringify(manifest));
+  return manifest;
+}
+
+function draftMatchesKey(draft, draftKey) {
+  if (!draftKey || !draft) return false;
   const filename = draftKey.split('/').pop();
   const basename = filename.replace(/\.mp3$/, '');
-  return (manifest.drafts || []).find((draft) => {
-    return draft.draft_key === draftKey
-      || draft.filename === filename
-      || draft.basename === basename
-      || basename === `ep${draft.id}`;
-  }) || null;
+  return draft.draft_key === draftKey
+    || draft.filename === filename
+    || draft.basename === basename
+    || basename === `ep${draft.id}`;
+}
+
+async function findManifestDraft(env, draftKey) {
+  const manifest = await loadDraftManifest(env);
+  return manifest.drafts.find((draft) => draftMatchesKey(draft, draftKey)) || null;
+}
+
+async function loadDraftSidecar(env, draftKey) {
+  if (!draftKey) return null;
+  const sidecarKey = draftKey.replace(/\.mp3$/, '.json');
+  const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);
+  if (!sidecarData) return null;
+  try {
+    return await sidecarData.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+async function rejectDrafts(env, {
+  draftKey,
+  reason,
+  adminId,
+  adminName,
+  episodeKey,
+}) {
+  if (!draftKey) {
+    throw new Error('Missing draft key');
+  }
+
+  const manifest = await loadDraftManifest(env);
+  const now = new Date().toISOString();
+  const seed = manifest.drafts.find((draft) => draftMatchesKey(draft, draftKey)) || null;
+  const effectiveEpisodeKey = episodeKey || seed?.episode_key || null;
+
+  let matchedDrafts = manifest.drafts.filter((draft) => {
+    if (effectiveEpisodeKey) {
+      return draft.episode_key === effectiveEpisodeKey;
+    }
+    return draftMatchesKey(draft, draftKey);
+  });
+
+  if (matchedDrafts.length === 0) {
+    const filename = draftKey.split('/').pop();
+    const basename = filename.replace(/\.mp3$/, '');
+    const sidecar = await loadDraftSidecar(env, draftKey);
+    const synthetic = {
+      draft_key: draftKey,
+      filename,
+      basename,
+      title: sidecar?.title || null,
+      description: sidecar?.description || '',
+      episode_key: episodeKey || sidecar?.episode_key || null,
+      id: sidecar?.episode_id || null,
+    };
+    manifest.drafts.push(synthetic);
+    matchedDrafts = [synthetic];
+  }
+
+  const rejectedKeys = [];
+  manifest.drafts = manifest.drafts.map((draft) => {
+    const matched = matchedDrafts.includes(draft);
+    if (!matched) {
+      return draft;
+    }
+    if (draft.draft_key) {
+      rejectedKeys.push(draft.draft_key);
+    }
+    return {
+      ...draft,
+      revision_state: 'rejected',
+      rejected_at: now,
+      rejected_reason: reason || '',
+      rejected_by_admin_id: adminId,
+      rejected_by_name: adminName,
+    };
+  });
+  await saveDraftManifest(env, manifest);
+
+  const publishJobs = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
+  for (const obj of publishJobs.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    const job = await current.json();
+    if (!rejectedKeys.includes(job.draft_key)) continue;
+    if (job.state === 'publish_completed') continue;
+    job.state = 'publish_rejected';
+    job.claimed_by_admin_id = null;
+    job.claimed_by_name = null;
+    job.claimed_at = null;
+    job.lease_expires_at = null;
+    job.last_heartbeat_at = null;
+    job.released_at = now;
+    job.release_reason = reason || 'Rejected in admin UI';
+    job.error = {
+      step: 'review',
+      message: reason || 'Draft rejected',
+    };
+    appendPublishJobHistory(job, 'rejected', {
+      admin_id: adminId,
+      admin_name: adminName,
+      reason: reason || '',
+    });
+    await savePublishJob(env, job);
+  }
+
+  const submissions = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+  for (const obj of submissions.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    const submission = await current.json();
+    const draftStem = submission.draft_stem;
+    if (!draftStem) continue;
+    const draftMp3 = `${draftStem}.mp3`;
+    if (!rejectedKeys.includes(draftMp3)) continue;
+    submission.status = 'rejected';
+    submission.rejection_reason = reason || '';
+    submission.rejected_by = adminId;
+    submission.rejected_by_name = adminName;
+    submission.updated_at = now;
+    submission.status_history = Array.isArray(submission.status_history)
+      ? submission.status_history : [];
+    submission.status_history.push({
+      status: 'rejected',
+      at: now,
+      by: adminId,
+      reason: reason || '',
+    });
+    await env.ADMIN_BUCKET.put(obj.key, JSON.stringify(submission));
+  }
+
+  return {
+    episode_key: effectiveEpisodeKey,
+    rejected_keys: rejectedKeys,
+  };
 }
 
 async function createOrUpdatePublishJob(env, { key, adminId, adminName }) {

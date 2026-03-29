@@ -387,6 +387,148 @@ test('POST /api/review approve is idempotent for already-approved drafts', async
 });
 
 
+test('POST /api/review reject marks draft revisions and linked state rejected', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 70,
+            title: 'Example Draft v1',
+            draft_key: 'drafts/2026/03/example-v1.mp3',
+            episode_key: 'paper://example',
+            revision: 1,
+          },
+          {
+            id: 71,
+            title: 'Example Draft v2',
+            draft_key: 'drafts/2026/03/example-v2.mp3',
+            episode_key: 'paper://example',
+            revision: 2,
+          },
+          {
+            id: 99,
+            title: 'Other Draft',
+            draft_key: 'drafts/2026/03/other.mp3',
+            episode_key: 'paper://other',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_29_120000.json': {
+        job_id: 'pub_2026_03_29_120000',
+        draft_key: 'drafts/2026/03/example-v2.mp3',
+        title: 'Example Draft v2',
+        state: 'approved_for_publish',
+        created_at: '2026-03-29T12:00:00Z',
+        updated_at: '2026-03-29T12:00:00Z',
+        progress: {
+          publish: 'pending',
+          viz: 'pending',
+          cover: 'pending',
+          site: 'pending',
+          verify: 'pending',
+        },
+        history: [],
+      },
+      'submissions/2026-03-29T12-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/1234.56789'],
+        timestamp: '2026-03-29T12:00:00.000Z',
+        updated_at: '2026-03-29T12:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/example-v2',
+        status_history: [
+          { status: 'submitted', at: '2026-03-29T12:00:00.000Z' },
+          { status: 'draft_generated', at: '2026-03-29T12:10:00.000Z' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/example-v2.mp3',
+        action: 'reject',
+        reason: 'Needs a rewrite',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.episode_key, 'paper://example');
+  assert.deepEqual(body.rejected_keys.sort(), [
+    'drafts/2026/03/example-v1.mp3',
+    'drafts/2026/03/example-v2.mp3',
+  ]);
+
+  const manifest = JSON.parse(env.ADMIN_BUCKET.objects.get('manifest.json'));
+  const rejectedDrafts = manifest.drafts.filter((draft) => draft.episode_key === 'paper://example');
+  assert.equal(rejectedDrafts.length, 2);
+  for (const draft of rejectedDrafts) {
+    assert.equal(draft.revision_state, 'rejected');
+    assert.equal(draft.rejected_reason, 'Needs a rewrite');
+  }
+  const otherDraft = manifest.drafts.find((draft) => draft.episode_key === 'paper://other');
+  assert.equal(otherDraft.revision_state, undefined);
+
+  const publishJob = JSON.parse(env.ADMIN_BUCKET.objects.get('publish-jobs/pub_2026_03_29_120000.json'));
+  assert.equal(publishJob.state, 'publish_rejected');
+  assert.equal(publishJob.release_reason, 'Needs a rewrite');
+  assert.equal(publishJob.error.step, 'review');
+
+  const submission = JSON.parse(env.ADMIN_BUCKET.objects.get('submissions/2026-03-29T12-00-00-000Z.json'));
+  assert.equal(submission.status, 'rejected');
+  assert.equal(submission.rejection_reason, 'Needs a rewrite');
+  assert.equal(submission.status_history.at(-1).status, 'rejected');
+});
+
+
+test('POST /api/review reject creates a manifest tombstone from sidecar-only drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+    },
+    podcast: {
+      'drafts/2026/03/sidecar-only.mp3': 'audio-data',
+      'drafts/2026/03/sidecar-only.json': JSON.stringify({
+        title: 'Sidecar Only Draft',
+        description: 'Recovered from sidecar metadata.',
+        episode_id: 123,
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/sidecar-only.mp3',
+        action: 'reject',
+        reason: 'Throw this away',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.success, true);
+  const manifest = JSON.parse(env.ADMIN_BUCKET.objects.get('manifest.json'));
+  assert.equal(manifest.drafts.length, 1);
+  assert.equal(manifest.drafts[0].draft_key, 'drafts/2026/03/sidecar-only.mp3');
+  assert.equal(manifest.drafts[0].title, 'Sidecar Only Draft');
+  assert.equal(manifest.drafts[0].revision_state, 'rejected');
+});
+
+
 test('GET /drafts server-rendered page reflects approved state in action buttons', async () => {
   const env = makeEnv({
     admin: {
