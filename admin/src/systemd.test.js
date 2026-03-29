@@ -90,6 +90,11 @@ test('service unit runs run_podcast_worker.py with --once', () => {
   assert.ok(unit.includes('--once'));
 });
 
+test('service unit passes --queue-db for bridged mode', () => {
+  const unit = generateSystemdService('u');
+  assert.ok(unit.includes('--queue-db'));
+});
+
 test('service unit runs combined worker not publish-only', () => {
   const unit = generateSystemdService('u');
   // Should reference the combined worker, not the publish-only one
@@ -145,6 +150,11 @@ test('env file contains R2/S3 placeholders', () => {
 test('env file references podcast-worker', () => {
   const env = generateEnvFile();
   assert.ok(env.includes('Podcast-worker'));
+});
+
+test('env file contains QUEUE_DB placeholder', () => {
+  const env = generateEnvFile();
+  assert.ok(env.includes('QUEUE_DB='));
 });
 
 

@@ -31,7 +31,8 @@ test-publish:
 		tests/test_publish_job_runner.py \
 		tests/test_run_publish_worker.py \
 		tests/test_publish_state_machine.py \
-		tests/test_queue_store.py -v
+		tests/test_queue_store.py \
+		tests/test_queue_bridge.py -v
 	node --test admin/src/worker.test.js
 	node --test admin/src/systemd.test.js
 	$(PYTHON) -m pytest tests/test_systemd_units.py -v
