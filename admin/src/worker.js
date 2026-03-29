@@ -1320,14 +1320,51 @@ function renderDraftActionButtons(draft) {
     + '<button class="btn btn-danger" onclick="openRejectModal(\'' + draft.key + '\')">✕ Reject</button>';
 }
 
-function draftsPageWithData(data) {
+function draftsPageWithData(data, subsData) {
   const drafts = data.drafts || [];
-  if (drafts.length === 0) {
+
+  // Merge draft_generated submissions that have audio available.
+  // These are submissions whose generation completed and produced a
+  // draft_stem but whose MP3 may not yet be in PODCAST_BUCKET (e.g.
+  // still on local disk).  Show them so the operator can review.
+  const draftGeneratedSubs = ((subsData && subsData.submissions) || [])
+    .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish');
+
+  // Build a set of draft keys already shown via the bucket listing
+  // so we don't duplicate entries.
+  const existingKeys = new Set(drafts.map(d => d.key));
+  const submissionCards = draftGeneratedSubs
+    .filter(s => {
+      // If the submission's draft_stem matches an existing bucket draft,
+      // skip it — the bucket version has richer metadata.
+      if (!s.draft_stem) return true;
+      const stemBase = s.draft_stem.split('/').pop();
+      return !drafts.some(d => d.key && d.key.includes(stemBase));
+    })
+    .map(s => ({
+      key: s.key || s.draft_stem,
+      title: displayTitle(s),
+      date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
+      duration: 'Unknown',
+      description: '',
+      audioUrl: s.draft_stem
+        ? `${PODCAST_DOMAIN}/${s.draft_stem}.mp3`
+        : null,
+      episodeId: null,
+      publish_job: null,
+      revision: null,
+      _from_submission: true,
+      _submission_status: s.status,
+    }));
+
+  const allDrafts = [...drafts, ...submissionCards];
+
+  if (allDrafts.length === 0) {
     return `<div class="page-header"><h1>Draft Review</h1><p>Review and approve pending episodes</p></div>
     <div class="empty-state"><div class="empty-state-icon">🎧</div><h3>No pending drafts</h3><p>All caught up!</p></div>`;
   }
 
-  const cards = drafts.map(d => {
+  const cards = allDrafts.map(d => {
     const desc = d.description || '';
     const previewHtml = formatDraftDescription(desc, true);
     const fullHtml = formatDraftDescription(desc, false);
@@ -1363,7 +1400,7 @@ function draftsPageWithData(data) {
     </div>
   `}).join('');
 
-  return `<div class="page-header"><h1>Draft Review</h1><p>${drafts.length} episodes pending review</p></div>${cards}`;
+  return `<div class="page-header"><h1>Draft Review</h1><p>${allDrafts.length} episodes pending review</p></div>${cards}`;
 }
 
 function draftsPage() {
@@ -1537,7 +1574,7 @@ function queuePageWithData(data, subsData) {
   const draftReadySubs = submissions.filter(s =>
     s.status === 'draft_generated'
   );
-  const generationPipelineCount = pendingSubs.length + generatingSubs.length + failedSubs.length + draftReadySubs.length;
+  const generationPipelineCount = pendingSubs.length + generatingSubs.length + failedSubs.length;
 
   let html = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1585,17 +1622,18 @@ function queuePageWithData(data, subsData) {
     html += '</div>';
   }
 
-  // --- Draft ready (generated but not yet reviewed) ---
+  // --- Draft ready (generated but not yet reviewed) — show compact
+  //     banner pointing to the Drafts tab instead of duplicating rows.
   if (draftReadySubs.length > 0) {
     html += `<div class="card" style="margin-top:1.5rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <h2 style="margin:0">✅ Draft Ready <span style="color:var(--text-secondary);font-size:0.875rem;font-weight:400">(${draftReadySubs.length})</span></h2>
-          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">Generation complete — head to <a href="/drafts" style="color:var(--accent)">Drafts</a> to review and approve</p>
+          <p style="color:var(--text-secondary);font-size:0.813rem;margin:2px 0 0">${draftReadySubs.length} draft${draftReadySubs.length > 1 ? 's' : ''} ready for review</p>
         </div>
-      </div>`;
-    draftReadySubs.forEach(sub => { html += renderSubmissionRow(sub); });
-    html += '</div>';
+        <a href="/drafts" class="btn btn-primary" style="white-space:nowrap">🎧 Review Drafts</a>
+      </div>
+    </div>`;
   }
 
   // --- Failed generation ---
@@ -1922,8 +1960,21 @@ function conferenceFAST26Page() {
   return conferenceDetailPage('fast26');
 }
 
+// Statuses that belong on the Submit tab (pre-draft generation pipeline).
+// Once a submission reaches draft_generated or beyond, it moves to the
+// Drafts tab for review/publish tracking.
+const SUBMIT_TAB_STATUSES = [
+  'submitted', 'pending',
+  'generation_claimed', 'generation_running',
+  'generation_failed',
+];
+
 function submitPage(subsData) {
-  const submissions = (subsData && subsData.submissions) || [];
+  const allSubmissions = (subsData && subsData.submissions) || [];
+  // Only show pre-draft pipeline submissions on the Submit tab.
+  const submissions = allSubmissions.filter(s =>
+    SUBMIT_TAB_STATUSES.includes(s.status)
+  );
 
   let recentHtml = '';
   if (submissions.length === 0) {
@@ -2696,7 +2747,8 @@ export default {
           break;
         case '/drafts':
           const draftsData = await getDrafts(env);
-          html = baseHTML('Drafts', draftsPageWithData(draftsData), 'drafts');
+          const draftsSubs = await getSubmissions(env);
+          html = baseHTML('Drafts', draftsPageWithData(draftsData, draftsSubs), 'drafts');
           break;
         case '/queue':
           const queueData = await getQueue(env);

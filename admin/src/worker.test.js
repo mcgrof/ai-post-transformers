@@ -990,7 +990,7 @@ test('Queue page filters published papers from editorial sections', async () => 
 });
 
 
-test('Queue page shows Draft Ready section for draft_generated submissions', async () => {
+test('Queue page shows Draft Ready banner for draft_generated submissions', async () => {
   const env = makeEnv({
     admin: {
       'queue/latest.json': { bridge: [] },
@@ -1011,8 +1011,10 @@ test('Queue page shows Draft Ready section for draft_generated submissions', asy
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.ok(html.includes('Draft Ready'), 'page includes Draft Ready section');
-  assert.ok(html.includes('2401.77777'), 'draft ready submission URL shown');
+  assert.ok(html.includes('Draft Ready'), 'page includes Draft Ready banner');
+  assert.ok(html.includes('Review Drafts'), 'banner links to Drafts tab');
+  // Draft-generated items are no longer counted in the pipeline
+  assert.ok(html.includes('0 in generation pipeline'), 'draft_generated not in pipeline count');
 });
 
 
@@ -1106,6 +1108,68 @@ test('GET /submit shows claimed_by for in-progress submissions', async () => {
   assert.equal(response.status, 200);
   assert.ok(html.includes('worker-alice'), 'claimed_by shown on submit page');
   assert.ok(html.includes('Assigned to'), 'assignment label shown');
+});
+
+
+test('GET /submit filters out draft_generated submissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.11111'],
+        timestamp: '2026-03-27T09:00:00.000Z',
+        status: 'submitted',
+      },
+      'submissions/sub2.json': {
+        urls: ['https://arxiv.org/pdf/2401.22222'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-27-ready-abc123',
+      },
+      'submissions/sub3.json': {
+        urls: ['https://arxiv.org/pdf/2401.33333'],
+        timestamp: '2026-03-27T11:00:00.000Z',
+        status: 'approved_for_publish',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('2401.11111'), 'submitted item still shown');
+  assert.ok(!html.includes('2401.22222'), 'draft_generated filtered out');
+  assert.ok(!html.includes('2401.33333'), 'approved_for_publish filtered out');
+});
+
+
+test('GET /drafts shows draft_generated submissions for review', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/sub1.json': {
+        urls: ['https://arxiv.org/pdf/2401.55555'],
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-27-ready-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // Draft-generated submissions should appear on the Drafts page
+  assert.ok(html.includes('Draft Review'), 'drafts page renders');
+  assert.ok(html.includes('pending review'), 'shows pending review count');
 });
 
 
@@ -1704,8 +1768,9 @@ test('Queue page handles all submission statuses simultaneously', async () => {
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  // Pipeline count should include submitted + generating + draft_ready + failed = 4
-  assert.ok(html.includes('4 in generation pipeline'), 'pipeline count is 4');
+  // Pipeline count: submitted + generating + failed = 3
+  // (draft_generated moves to Drafts tab, not counted in pipeline)
+  assert.ok(html.includes('3 in generation pipeline'), 'pipeline count is 3');
   // Sections present
   assert.ok(html.includes('Pending Generation'), 'pending section present');
   assert.ok(html.includes('Generating'), 'generating section present');
