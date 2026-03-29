@@ -3873,10 +3873,22 @@ async function rejectDrafts(env, {
     const current = await env.ADMIN_BUCKET.get(obj.key);
     if (!current) continue;
     const submission = await current.json();
+
+    // Match by draft_stem → draft MP3 in rejectedKeys
     const draftStem = submission.draft_stem;
-    if (!draftStem) continue;
-    const draftMp3 = `${draftStem}.mp3`;
-    if (!rejectedKeys.includes(draftMp3)) continue;
+    let matched = false;
+    if (draftStem) {
+      const draftMp3 = `${draftStem}.mp3`;
+      matched = rejectedKeys.includes(draftMp3);
+    }
+    // Fallback: match by submission key when the draftKey passed to
+    // reject was the submission key itself (happens when draft_stem
+    // is missing and the UI uses the submission key as the card key).
+    if (!matched && draftKey.startsWith('submissions/')) {
+      matched = obj.key === draftKey;
+    }
+    if (!matched) continue;
+
     submission.status = 'rejected';
     submission.rejection_reason = reason || '';
     submission.rejected_by = adminId;

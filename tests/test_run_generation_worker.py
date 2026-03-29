@@ -492,6 +492,27 @@ class TestProcessSubmission:
         assert final["claim_token"] == "interloper-token"
         assert final["status"] != "draft_generated"
 
+    def test_no_draft_stem_marks_generation_failed(self):
+        """When gen-podcast.py succeeds but stdout contains no draft
+        path, the submission must be marked generation_failed rather
+        than draft_generated with a missing draft_stem."""
+        client = FakeR2()
+        _make_submission(client)
+        sub = _read_submission(BUCKET, client, "submissions/test-sub.json")
+
+        with patch(
+            "scripts.run_generation_worker._run_generation",
+            return_value=(True, None),
+        ):
+            ok = process_submission(
+                sub, "admin-1", bucket=BUCKET, client=client,
+            )
+
+        assert ok is False
+        final = _read_submission(BUCKET, client, "submissions/test-sub.json")
+        assert final["status"] == "generation_failed"
+        assert "no draft stem" in final["error"].lower()
+
     def test_upload_failure_marks_generation_failed(self):
         client = FakeR2()
         _make_submission(client)

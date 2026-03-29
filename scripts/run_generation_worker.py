@@ -555,28 +555,33 @@ def _process_submission_store(sub, admin_id, *, store):
         return False
 
     if success:
-        updates = {"status": "draft_generated"}
-        if result:
-            updates["draft_stem"] = result
-            upload_ok, upload_details = _upload_draft_artifacts(result)
-            if not store.verify_claim_token(key, claim_token):
-                print(
-                    f"[gen-worker] Claim token mismatch after draft upload for "
-                    f"{key}; skipping status update"
-                )
-                return False
-            if not upload_ok:
-                store.update_submission(key, {
-                    "status": "generation_failed",
-                    "error": upload_details.get("error", "draft upload failed")[:500],
-                })
-                print(
-                    f"[gen-worker] Draft upload failed for {key}: "
-                    f"{upload_details.get('error', 'unknown error')}"
-                )
-                return False
-            updates.update(upload_details)
-            _publish_draft_metadata(result)
+        if not result:
+            store.update_submission(key, {
+                "status": "generation_failed",
+                "error": "generation finished but produced no draft stem",
+            })
+            print(f"[gen-worker] No draft stem in output for {key}")
+            return False
+        updates = {"status": "draft_generated", "draft_stem": result}
+        upload_ok, upload_details = _upload_draft_artifacts(result)
+        if not store.verify_claim_token(key, claim_token):
+            print(
+                f"[gen-worker] Claim token mismatch after draft upload for "
+                f"{key}; skipping status update"
+            )
+            return False
+        if not upload_ok:
+            store.update_submission(key, {
+                "status": "generation_failed",
+                "error": upload_details.get("error", "draft upload failed")[:500],
+            })
+            print(
+                f"[gen-worker] Draft upload failed for {key}: "
+                f"{upload_details.get('error', 'unknown error')}"
+            )
+            return False
+        updates.update(upload_details)
+        _publish_draft_metadata(result)
         store.update_submission(key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True
@@ -624,28 +629,33 @@ def process_submission(sub, admin_id, *, bucket=None, client=None,
         return False
 
     if success:
-        updates = {"status": "draft_generated"}
-        if result:
-            updates["draft_stem"] = result
-            upload_ok, upload_details = _upload_draft_artifacts(result)
-            if not _verify_claim_token(bucket, client, key, claim_token):
-                print(
-                    f"[gen-worker] Claim token mismatch after draft upload for "
-                    f"{key}; skipping status update"
-                )
-                return False
-            if not upload_ok:
-                _update_submission(bucket, client, key, {
-                    "status": "generation_failed",
-                    "error": upload_details.get("error", "draft upload failed")[:500],
-                })
-                print(
-                    f"[gen-worker] Draft upload failed for {key}: "
-                    f"{upload_details.get('error', 'unknown error')}"
-                )
-                return False
-            updates.update(upload_details)
-            _publish_draft_metadata(result)
+        if not result:
+            _update_submission(bucket, client, key, {
+                "status": "generation_failed",
+                "error": "generation finished but produced no draft stem",
+            })
+            print(f"[gen-worker] No draft stem in output for {key}")
+            return False
+        updates = {"status": "draft_generated", "draft_stem": result}
+        upload_ok, upload_details = _upload_draft_artifacts(result)
+        if not _verify_claim_token(bucket, client, key, claim_token):
+            print(
+                f"[gen-worker] Claim token mismatch after draft upload for "
+                f"{key}; skipping status update"
+            )
+            return False
+        if not upload_ok:
+            _update_submission(bucket, client, key, {
+                "status": "generation_failed",
+                "error": upload_details.get("error", "draft upload failed")[:500],
+            })
+            print(
+                f"[gen-worker] Draft upload failed for {key}: "
+                f"{upload_details.get('error', 'unknown error')}"
+            )
+            return False
+        updates.update(upload_details)
+        _publish_draft_metadata(result)
         _update_submission(bucket, client, key, updates)
         print(f"[gen-worker] Draft generated for {key}")
         return True

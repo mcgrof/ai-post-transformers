@@ -529,6 +529,46 @@ test('POST /api/review reject creates a manifest tombstone from sidecar-only dra
 });
 
 
+test('POST /api/review reject updates submission without draft_stem via key match', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+      'submissions/2026-03-29T18-38-55-995Z.json': {
+        urls: ['https://arxiv.org/pdf/2503.99999'],
+        timestamp: '2026-03-29T18:38:55.995Z',
+        status: 'draft_generated',
+        status_history: [{ status: 'draft_generated', at: '2026-03-29T19:00:00.000Z' }],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'submissions/2026-03-29T18-38-55-995Z.json',
+        action: 'reject',
+        reason: 'Missing draft stem',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.success, true);
+
+  const submission = JSON.parse(
+    env.ADMIN_BUCKET.objects.get('submissions/2026-03-29T18-38-55-995Z.json'),
+  );
+  assert.equal(submission.status, 'rejected');
+  assert.equal(submission.rejection_reason, 'Missing draft stem');
+  assert.equal(submission.status_history.at(-1).status, 'rejected');
+});
+
+
 test('GET /drafts server-rendered page reflects approved state in action buttons', async () => {
   const env = makeEnv({
     admin: {
