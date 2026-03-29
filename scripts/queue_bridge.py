@@ -21,9 +21,14 @@ import argparse
 import io
 import json
 import os
+import sys
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from r2_upload import get_r2_client
 from scripts.publish_job_store import R2PublishJobStore, get_publish_job_store
