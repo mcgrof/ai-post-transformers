@@ -2462,3 +2462,40 @@ test('GET /api/drafts gracefully handles missing sidecar JSON', async () => {
   assert.ok(body.drafts[0].title, 'draft should still have a title from displayTitle fallback');
   assert.equal(body.drafts[0].description, '');
 });
+
+test('GET /drafts falls back to sidecar description when manifest entry is incomplete', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3',
+            description: '',
+          },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3': 'audio-data',
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.json': JSON.stringify({
+        title: 'Agentic AI and the Next Intelligence Explosion',
+        description: 'Recovered description from the draft sidecar JSON.',
+        source_urls: ['https://arxiv.org/abs/2602.15902'],
+        episode_id: 113,
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Recovered description from the draft sidecar JSON.'));
+  assert.ok(html.includes('https://arxiv.org/abs/2602.15902'));
+});
