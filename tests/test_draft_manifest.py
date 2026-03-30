@@ -330,6 +330,35 @@ class TestBackfillManifest:
         ep1 = next(d for d in manifest["drafts"] if d["id"] == 1)
         assert ep1["description"] == "Alpha episode description."
 
+    def test_backfill_updates_existing_with_stale_draft_key(self, db_with_drafts):
+        """Backfill should repair stale manifest paths, not only blank descriptions."""
+        existing_entry = {
+            "id": 1,
+            "title": "Draft Episode Alpha",
+            "date": "2026-03-28",
+            "draft_key": "public/2026/03/2026-03-28-alpha-abc123.mp3",
+            "draft_stem": "public/2026/03/2026-03-28-alpha-abc123",
+            "filename": "2026-03-28-alpha-abc123.mp3",
+            "basename": "2026-03-28-alpha-abc123",
+            "description": "Alpha episode description.",
+        }
+        client = FakeR2({"manifest.json": {"drafts": [existing_entry], "conferences": {}}})
+
+        actions = backfill_manifest(
+            db_path=db_with_drafts,
+            client=client,
+            admin_bucket="podcast-admin",
+        )
+
+        updated = [a for _, _, a in actions if a == "updated"]
+        assert len(updated) == 1
+
+        manifest = json.loads(client.objects["manifest.json"])
+        ep1 = next(d for d in manifest["drafts"] if d["id"] == 1)
+        assert ep1["draft_key"] == "drafts/2026/03/2026-03-28-alpha-abc123.mp3"
+        assert ep1["draft_stem"] == "drafts/2026/03/2026-03-28-alpha-abc123"
+
+
     def test_backfill_enriches_sidecar(self, db_with_drafts, tmp_path):
         client = FakeR2({"manifest.json": {"drafts": [], "conferences": {}}})
 

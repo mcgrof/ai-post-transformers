@@ -46,13 +46,20 @@ def build_manifest_entry(row, *, draft_key=None, draft_stem=None):
     if not draft_stem:
         stem_path = Path(audio_file)
         draft_stem = str(stem_path.with_suffix(""))
-        # Normalise to relative path from project root
+        # Normalise to relative path from project root when possible.
         try:
             draft_stem = str(
                 Path(draft_stem).relative_to(ROOT)
             ).replace(os.sep, "/")
         except ValueError:
-            pass
+            # Test and rescue flows may hand us an absolute path outside
+            # the repo root.  If it still contains a drafts/ segment,
+            # normalize to that relative draft path so the manifest does
+            # not leak machine-local tmp prefixes.
+            parts = Path(draft_stem).parts
+            if "drafts" in parts:
+                idx = parts.index("drafts")
+                draft_stem = "/".join(parts[idx:])
 
     if not draft_key:
         draft_key = f"{draft_stem}.mp3"
@@ -232,19 +239,31 @@ def backfill_manifest(db_path=None, *, dry_run=False, client=None,
         entry = build_manifest_entry(ep)
 
         if ep_id in existing_ids:
-            # Update the existing entry when the DB now has a
-            # description that the manifest entry is missing.  This
-            # heals entries created before the description was
-            # available in the DB.
+            # Update existing entries when the canonical draft metadata
+            # changed underneath them.  Real failures have come from
+            # manifest rows that technically existed but still carried
+            # stale state such as an empty description or the wrong
+            # draft_key/path, which then broke draft-card rendering.
             db_desc = ep.get("description") or ""
             existing = next(
                 (d for d in manifest.get("drafts", [])
                  if d.get("id") == ep_id), None
             )
-            if existing and not existing.get("description") and db_desc:
+            description_missing = (
+                existing and not (existing.get("description") or "").strip()
+                and bool(db_desc)
+            )
+            path_fields = ("draft_key", "draft_stem", "filename", "basename")
+            stale_path_metadata = existing and any(
+                existing.get(field) and existing.get(field) != entry.get(field)
+                for field in path_fields
+                if entry.get(field)
+            )
+            needs_update = bool(description_missing or stale_path_metadata)
+            if needs_update:
                 if dry_run:
                     print(
-                        f"[backfill] Would update description for "
+                        f"[backfill] Would update stale manifest entry for "
                         f"ep {ep_id}: {title}"
                     )
                     actions.append((ep_id, title, "would_update"))

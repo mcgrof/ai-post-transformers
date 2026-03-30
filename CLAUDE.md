@@ -489,3 +489,32 @@ entrypoint symlinks back to this document:
 
 Both must always be symlinks, never independent files. If an agent
 framework adds a new instruction filename, symlink it here too.
+
+## Drafts UI / Draft Metadata Guardrails
+
+When debugging or changing the admin Drafts page, treat it as **two render paths** that must both work:
+
+1. **Rich draft card path** — bucket draft object + manifest metadata + optional sidecar JSON.
+2. **Submission-card fallback path** — a `draft_generated` submission rendered directly from submission state when the richer draft object is missing, filtered out, or mismatched.
+
+Practical rules:
+- Never assume a draft description bug lives only in `manifest.json`. Check the full chain:
+  - `papers.db`
+  - draft sidecar JSON (`drafts/YYYY/MM/*.json`)
+  - `podcast-admin/manifest.json`
+  - server-rendered `/drafts` HTML path
+  - `/api/drafts` JSON path
+- A manifest entry can be **present but stale/incomplete**. Empty `description`, wrong `draft_key` (for example `public/...` vs `drafts/...`), absolute filesystem paths, or missing source metadata must be treated as repairable stale state, not "good enough".
+- `scripts/draft_manifest.py` backfill logic must update stale existing entries, not only create missing ones.
+- The server-rendered `/drafts` page must never hardcode blank descriptions for `draft_generated` submission cards when submission metadata already contains a usable summary.
+- Before claiming a fix is live, verify the deployed admin actually moved:
+  - bump the visible admin release tag if needed
+  - deploy the worker
+  - if necessary purge cache / add cache-busting so stale HTML does not masquerade as a failed fix
+
+Minimum regression coverage for Drafts work:
+- manifest entry exists but is missing/blank description -> sidecar fallback still renders description
+- `draft_generated` submission-card fallback still renders metadata summary as the draft description
+- stale or mismatched manifest draft key does not blank the bucket draft card -> sidecar-backed metadata still renders
+- `draft_manifest.py` backfill updates an existing stale entry (not just missing entries)
+- server-rendered `/drafts` includes the reject modal and real reject flow wiring

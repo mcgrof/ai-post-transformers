@@ -2545,3 +2545,54 @@ test('GET /api/drafts falls back to sidecar description when manifest has empty 
   assert.equal(body.drafts[0].title, 'Agentic AI and the Next Intelligence Explosion');
   assert.equal(body.drafts[0].description, 'Sidecar description fills the gap.');
 });
+
+
+test('GET /drafts still renders bucket draft metadata when manifest draft key is stale', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            draft_key: 'public/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3',
+            description: '',
+          },
+        ],
+      },
+      'submissions/agentic.json': {
+        urls: ['https://arxiv.org/abs/2603.20639'],
+        metadata: {
+          'https://arxiv.org/abs/2603.20639': {
+            enrichment_status: 'done',
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            summary: 'Recovered submission summary for the Agentic AI draft card.',
+          },
+        },
+        timestamp: '2026-03-28T20:02:42.230Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561',
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3': 'audio-data',
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.json': JSON.stringify({
+        title: 'Agentic AI and the Next Intelligence Explosion',
+        description: 'Recovered sidecar description.',
+        source_urls: ['https://arxiv.org/abs/2603.20639'],
+        episode_id: 113,
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Recovered sidecar description.'));
+  assert.ok(html.includes('Agentic AI and the Next Intelligence Explosion'));
+});
