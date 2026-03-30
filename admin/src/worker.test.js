@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import worker, { displayTitle, humanizeSlug, OPAQUE_ID_RE } from './worker.js';
+import worker, {
+  displayTitle, humanizeSlug, OPAQUE_ID_RE,
+  hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
+  updatePrivateDraft, deletePrivateDraft,
+} from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
 
 
@@ -41,11 +45,16 @@ class MockBucket {
     this.putSync(key, value);
   }
 
-  async list({ prefix = '' } = {}) {
+  async delete(key) {
+    this.objects.delete(key);
+  }
+
+  async list({ prefix = '', limit } = {}) {
+    let keys = [...this.objects.keys()]
+      .filter((key) => key.startsWith(prefix));
+    if (typeof limit === 'number') keys = keys.slice(0, limit);
     return {
-      objects: [...this.objects.keys()]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => ({ key })),
+      objects: keys.map((key) => ({ key })),
     };
   }
 }
@@ -2595,4 +2604,639 @@ test('GET /drafts still renders bucket draft metadata when manifest draft key is
   assert.equal(response.status, 200);
   assert.ok(html.includes('Recovered sidecar description.'));
   assert.ok(html.includes('Agentic AI and the Next Intelligence Explosion'));
+});
+
+
+// ============================================================================
+// Private Drafts — owner-scoped, never public
+// ============================================================================
+
+test('hasPrivateDrafts returns false when admin has none', async () => {
+  const env = makeEnv();
+  assert.equal(await hasPrivateDrafts(env, 'alice'), false);
+});
+
+test('hasPrivateDrafts returns true when admin has drafts', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, 'alice'), true);
+});
+
+test('hasPrivateDrafts returns false for different admin', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, 'bob'), false);
+});
+
+test('createPrivateDraft stores owner-scoped draft', async () => {
+  const env = makeEnv();
+  const result = await createPrivateDraft(env, 'alice', 'alice@example.com', {
+    title: 'Test note',
+    content: 'Some private content',
+  });
+  assert.ok(result.success);
+  assert.equal(result.draft.owner_id, 'alice');
+  assert.equal(result.draft.title, 'Test note');
+
+  // Verify stored in admin bucket under correct prefix
+  const stored = await env.ADMIN_BUCKET.get(`private-drafts/alice/${result.draft.id}.json`);
+  assert.ok(stored);
+  const data = await stored.json();
+  assert.equal(data.owner_id, 'alice');
+});
+
+test('listPrivateDrafts returns only own drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice note', updated_at: '2026-01-01T00:00:00Z' },
+      'private-drafts/bob/pd_2.json': { id: 'pd_2', owner_id: 'bob', title: 'Bob note', updated_at: '2026-01-02T00:00:00Z' },
+    },
+  });
+  const aliceDrafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(aliceDrafts.length, 1);
+  assert.equal(aliceDrafts[0].title, 'Alice note');
+
+  const bobDrafts = await listPrivateDrafts(env, 'bob');
+  assert.equal(bobDrafts.length, 1);
+  assert.equal(bobDrafts[0].title, 'Bob note');
+});
+
+test('updatePrivateDraft rejects wrong owner', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice note' } },
+  });
+  const result = await updatePrivateDraft(env, 'bob', { id: 'pd_1' });
+  assert.ok(result.error);
+  assert.match(result.error, /not found/i);
+});
+
+test('updatePrivateDraft updates own draft', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Old', content: 'old' } },
+  });
+  const result = await updatePrivateDraft(env, 'alice', { id: 'pd_1', title: 'New', content: 'new' });
+  assert.ok(result.success);
+  assert.equal(result.draft.title, 'New');
+  assert.equal(result.draft.content, 'new');
+});
+
+test('deletePrivateDraft removes own draft', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  const result = await deletePrivateDraft(env, 'alice', { id: 'pd_1' });
+  assert.ok(result.success);
+
+  const remaining = await listPrivateDrafts(env, 'alice');
+  assert.equal(remaining.length, 0);
+});
+
+test('deletePrivateDraft rejects wrong owner', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  const result = await deletePrivateDraft(env, 'bob', { id: 'pd_1' });
+  assert.ok(result.error);
+});
+
+test('GET /api/private-drafts returns only current admin drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice secret', updated_at: '2026-01-01T00:00:00Z' },
+      'private-drafts/bob/pd_2.json': { id: 'pd_2', owner_id: 'bob', title: 'Bob secret', updated_at: '2026-01-02T00:00:00Z' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  assert.equal(data.drafts.length, 1);
+  assert.equal(data.drafts[0].title, 'Alice secret');
+});
+
+test('POST /api/private-drafts create stores draft for current admin only', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-drafts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-access-authenticated-user-email': 'alice@example.com',
+      },
+      body: JSON.stringify({ action: 'create', title: 'My secret note', content: 'Private content' }),
+    }),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  assert.ok(data.success);
+  assert.equal(data.draft.owner_id, 'alice');
+
+  // Bob cannot see it
+  const bobList = await listPrivateDrafts(env, 'bob');
+  assert.equal(bobList.length, 0);
+});
+
+test('private drafts never appear in getDrafts or manifest', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Private note' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  // getDrafts must not include private drafts
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  const titles = (data.drafts || []).map(d => d.title);
+  assert.ok(!titles.includes('Private note'), 'Private draft must not appear in /api/drafts');
+});
+
+test('private drafts never appear in delegation export', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Secret' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/delegation'),
+    env,
+    {},
+  );
+  const text = await response.text();
+  assert.ok(!text.includes('Secret'), 'Private draft must not leak into delegation');
+});
+
+test('/private-drafts page shows Private Drafts tab when admin has drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note', content: 'Content', updated_at: '2026-03-30T12:00:00Z' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Private Drafts'), 'Page should render Private Drafts heading');
+  assert.ok(html.includes('My note'), 'Page should show the draft title');
+  assert.ok(html.includes('never published'), 'Page should state drafts are never published');
+  // Nav should contain the Private Drafts link
+  assert.ok(html.includes('href="/private-drafts"'), 'Nav should include Private Drafts link');
+});
+
+test('nav hides Private Drafts tab when admin has no private drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('href="/private-drafts"'), 'Nav must not show Private Drafts tab when admin has none');
+});
+
+test('nav shows Private Drafts tab only for owning admin', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Secret' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  // Alice sees the tab
+  const aliceRes = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const aliceHtml = await aliceRes.text();
+  assert.ok(aliceHtml.includes('href="/private-drafts"'), 'Alice should see Private Drafts tab');
+
+  // Bob does not see the tab
+  const bobRes = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'bob@example.com' },
+    }),
+    env,
+    {},
+  );
+  const bobHtml = await bobRes.text();
+  assert.ok(!bobHtml.includes('href="/private-drafts"'), 'Bob must not see Private Drafts tab');
+});
+
+test('private drafts persist until explicitly deleted', async () => {
+  const env = makeEnv();
+
+  // Create a draft
+  await createPrivateDraft(env, 'alice', 'alice@example.com', { title: 'Persistent', content: 'stays' });
+  let drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 1);
+
+  // Create another — both persist
+  await createPrivateDraft(env, 'alice', 'alice@example.com', { title: 'Also persistent', content: 'stays too' });
+  drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 2);
+
+  // Delete one — the other persists
+  await deletePrivateDraft(env, 'alice', { id: drafts[0].id });
+  drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 1);
+});
+
+
+
+// =========================================================================
+// Regression: stale published-draft resurfacing (GH fix-stale-published-drafts)
+// =========================================================================
+
+test('POST /api/review approve advances linked submission to approved_for_publish', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-28T20-02-42-230Z.json': {
+        urls: ['https://arxiv.org/abs/2603.20639'],
+        timestamp: '2026-03-28T20:02:42.230Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // The linked submission must have advanced to approved_for_publish.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-28T20-02-42-230Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'approved_for_publish',
+    'submission must advance to approved_for_publish on draft approval');
+  assert.ok(
+    sub.status_history.some((h) => h.status === 'approved_for_publish'),
+    'status_history must record the transition',
+  );
+});
+
+
+test('GET /drafts hides submission card when publish job is publish_completed', async () => {
+  // Scenario: publish job completed but submission was never advanced
+  // (pre-fix state).  The Drafts page must not show the stale
+  // submission as a draft card.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_29_180606.json': {
+        job_id: 'pub_2026_03_29_180606',
+        draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+        title: 'Agentic AI and the Next Intelligence Explosion',
+        state: 'publish_completed',
+        created_at: '2026-03-29T18:06:06Z',
+        updated_at: '2026-03-29T19:00:00Z',
+        progress: {
+          publish: 'done', viz: 'done', cover: 'done',
+          site: 'done', verify: 'done',
+        },
+      },
+      'submissions/2026-03-28T20-02-42-230Z.json': {
+        urls: ['https://arxiv.org/abs/2603.20639'],
+        metadata: {
+          'https://arxiv.org/abs/2603.20639': {
+            enrichment_status: 'done',
+            title: 'Agentic AI and the Next Intelligence Explosion',
+          },
+        },
+        timestamp: '2026-03-28T20:02:42.230Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // The bucket draft itself should be filtered out by getDrafts()
+  // (publish_completed).  The submission-card fallback must also be
+  // suppressed.
+  assert.ok(
+    !html.includes('Agentic AI and the Next Intelligence Explosion'),
+    'published episode must not reappear as a draft card via submission fallback',
+  );
+  // The page should show "no pending drafts" or an empty list.
+  assert.ok(
+    html.includes('No pending drafts') || html.includes('All caught up'),
+    'drafts page should be empty when only draft is already published',
+  );
+});
+
+
+test('GET /api/drafts filters completed drafts from submission-card fallback path', async () => {
+  // Same scenario but via the JSON API.  The API path (getDrafts)
+  // already filters publish_completed bucket drafts.  This test
+  // verifies that no stale submission card leaks through.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_29_180606.json': {
+        job_id: 'pub_2026_03_29_180606',
+        draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+        title: 'Agentic AI',
+        state: 'publish_completed',
+        created_at: '2026-03-29T18:06:06Z',
+        updated_at: '2026-03-29T19:00:00Z',
+        progress: {
+          publish: 'done', viz: 'done', cover: 'done',
+          site: 'done', verify: 'done',
+        },
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.drafts.length, 0,
+    'API must not return drafts with completed publish jobs');
+});
+
+
+// =========================================================================
+// Additional coverage: private drafts isolation & edge cases
+// =========================================================================
+
+test('hasPrivateDrafts returns false for null adminId', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, null), false);
+  assert.equal(await hasPrivateDrafts(env, undefined), false);
+});
+
+test('listPrivateDrafts returns empty for null adminId', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note', updated_at: '2026-01-01T00:00:00Z' } },
+  });
+  const drafts = await listPrivateDrafts(env, null);
+  assert.equal(drafts.length, 0);
+});
+
+test('private drafts do not appear on the main /drafts page HTML', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'PRIVATE_SENTINEL_TITLE', content: 'secret' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('PRIVATE_SENTINEL_TITLE'),
+    'Private draft title must never appear on the main Drafts page');
+});
+
+test('private drafts do not appear in /api/queue', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'QUEUE_LEAK_SENTINEL' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/queue'),
+    env,
+    {},
+  );
+  const text = await response.text();
+  assert.ok(!text.includes('QUEUE_LEAK_SENTINEL'),
+    'Private draft must not leak into /api/queue');
+});
+
+test('/private-drafts page for bob shows none of alice drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': {
+        id: 'pd_1', owner_id: 'alice', title: 'Alice Only Note',
+        content: 'Alice private content', updated_at: '2026-01-01T00:00:00Z',
+      },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'bob@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('Alice Only Note'),
+    'Bob must not see Alice\'s private draft on /private-drafts page');
+  assert.ok(html.includes('No private drafts'),
+    'Bob should see empty state on /private-drafts');
+});
+
+test('updatePrivateDraft with missing id returns error', async () => {
+  const env = makeEnv();
+  const result = await updatePrivateDraft(env, 'alice', {});
+  assert.ok(result.error);
+  assert.match(result.error, /missing/i);
+});
+
+test('deletePrivateDraft with missing id returns error', async () => {
+  const env = makeEnv();
+  const result = await deletePrivateDraft(env, 'alice', {});
+  assert.ok(result.error);
+  assert.match(result.error, /missing/i);
+});
+
+
+// =========================================================================
+// Additional coverage: stale published drafts — lifecycle edge cases
+// =========================================================================
+
+test('advanceLinkedSubmissions does not regress already-published submission', async () => {
+  // A submission already at 'published' must not be regressed to
+  // 'approved_for_publish' by a second approval action.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 114,
+            title: 'Already Published Paper',
+            draft_key: 'drafts/2026/03/2026-03-30-already-published-abc123.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-30T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/2603.99999'],
+        timestamp: '2026-03-30T10:00:00.000Z',
+        status: 'published',
+        draft_stem: 'drafts/2026/03/2026-03-30-already-published-abc123',
+        status_history: [
+          { status: 'submitted', at: '2026-03-30T10:00:00.000Z' },
+          { status: 'draft_generated', at: '2026-03-30T11:00:00.000Z' },
+          { status: 'approved_for_publish', at: '2026-03-30T12:00:00.000Z' },
+          { status: 'published', at: '2026-03-30T13:00:00.000Z' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-already-published-abc123.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // Verify the submission was NOT regressed from published.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-30T10-00-00-000Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'published',
+    'already-published submission must not be regressed to approved_for_publish');
+});
+
+test('submission without draft_stem is not affected by advanceLinkedSubmissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 115,
+            title: 'Some Draft',
+            draft_key: 'drafts/2026/03/2026-03-30-some-draft-def456.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-30T11-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/2603.11111'],
+        timestamp: '2026-03-30T11:00:00.000Z',
+        status: 'submitted',
+        // No draft_stem — this submission is unrelated to the draft
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-some-draft-def456.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // The unrelated submission must remain at 'submitted'.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-30T11-00-00-000Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'submitted',
+    'submission without draft_stem must not be modified');
 });

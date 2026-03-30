@@ -978,7 +978,7 @@ footer {
 // ============================================================================
 // HTML TEMPLATES
 // ============================================================================
-function baseHTML(title, content, activePage) {
+function baseHTML(title, content, activePage, navContext = {}) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1014,6 +1014,7 @@ function baseHTML(title, content, activePage) {
           <a href="/submit"${activePage === 'submit' ? ' class="active"' : ''}>Submit</a>
           <a href="/issues"${activePage === 'issues' ? ' class="active"' : ''}>Issues</a>
           <a href="/automation"${activePage === 'automation' ? ' class="active"' : ''}>Automation</a>
+          ${navContext.hasPrivateDrafts ? `<a href="/private-drafts"${activePage === 'private-drafts' ? ' class="active"' : ''}>Private Drafts</a>` : ''}
         </nav>
       </div>
     </div>
@@ -1372,8 +1373,27 @@ function draftsPageWithData(data, subsData) {
   // These are submissions whose generation completed and produced a
   // draft_stem but whose MP3 may not yet be in PODCAST_BUCKET (e.g.
   // still on local disk).  Show them so the operator can review.
+  //
+  // Exclude submissions with status 'published' — they are done.
   const draftGeneratedSubs = ((subsData && subsData.submissions) || [])
     .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish');
+
+  // Build a lookup of completed publish jobs from the bucket drafts
+  // (data.all_drafts includes both active and filtered-out drafts
+  // with their publish_job summaries).  This lets us suppress
+  // submission cards whose episode is already published even when the
+  // submission status was never advanced to 'published'.
+  const completedDraftStems = new Set();
+  for (const d of (data.all_drafts || data.drafts || [])) {
+    if (d.publish_job && d.publish_job.state === 'publish_completed' && d.key) {
+      // Store both the full key and the stem basename so matching
+      // works regardless of whether the submission carries the full
+      // path or just the filename.
+      completedDraftStems.add(d.key);
+      const stem = d.key.replace(/\.mp3$/, '').split('/').pop();
+      if (stem) completedDraftStems.add(stem);
+    }
+  }
 
   // Build a set of draft keys already shown via the bucket listing
   // so we don't duplicate entries.
@@ -1384,6 +1404,10 @@ function draftsPageWithData(data, subsData) {
       // skip it — the bucket version has richer metadata.
       if (!s.draft_stem) return true;
       const stemBase = s.draft_stem.split('/').pop();
+      // Suppress submissions whose draft has a completed publish job.
+      if (completedDraftStems.has(`${s.draft_stem}.mp3`) || completedDraftStems.has(stemBase)) {
+        return false;
+      }
       return !drafts.some(d => d.key && d.key.includes(stemBase));
     })
     .map(s => ({
@@ -2732,12 +2756,234 @@ async function loadIssues() {
     container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Failed to load issues</h3><p>' + err.message + '</p></div>';
   }
 }
+
+// Private Drafts
+function openNewPrivateDraft() {
+  document.getElementById('pd-edit-id').value = '';
+  document.getElementById('pd-title').value = '';
+  document.getElementById('pd-content').value = '';
+  document.getElementById('pd-modal-title').textContent = 'New Private Draft';
+  document.getElementById('pd-modal').style.display = 'flex';
+}
+
+function openEditPrivateDraft(id, btn) {
+  var card = btn.closest('.card');
+  var fullEl = card.querySelector('.pd-full-content[data-id="' + id + '"]');
+  var titleEl = card.querySelector('h3');
+  document.getElementById('pd-edit-id').value = id;
+  document.getElementById('pd-title').value = titleEl ? titleEl.textContent : '';
+  document.getElementById('pd-content').value = fullEl ? fullEl.textContent : '';
+  document.getElementById('pd-modal-title').textContent = 'Edit Private Draft';
+  document.getElementById('pd-modal').style.display = 'flex';
+}
+
+function closePdModal() {
+  document.getElementById('pd-modal').style.display = 'none';
+}
+
+async function savePrivateDraft() {
+  var id = document.getElementById('pd-edit-id').value;
+  var title = document.getElementById('pd-title').value.trim();
+  var content = document.getElementById('pd-content').value;
+  if (!title) { showToast('Title is required', 'error'); return; }
+  try {
+    var body = id
+      ? { action: 'update', id: id, title: title, content: content }
+      : { action: 'create', title: title, content: content };
+    var res = await adminApiFetch('/api/private-drafts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var data = await res.json();
+    if (data.success) {
+      showToast(id ? 'Draft updated' : 'Draft created');
+      closePdModal();
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to save', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+async function deletePrivateDraftUI(id) {
+  if (!confirm('Delete this private draft? This cannot be undone.')) return;
+  try {
+    var res = await adminApiFetch('/api/private-drafts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id: id }),
+    });
+    var data = await res.json();
+    if (data.success) {
+      showToast('Draft deleted');
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to delete', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Error: ' + err.message, 'error');
+  }
+}
 `;
+
+// ============================================================================
+// PRIVATE DRAFTS — owner-scoped personal notes, NEVER public
+// ============================================================================
+
+// Private drafts are stored in ADMIN_BUCKET under
+//   private-drafts/{admin_id}/{draft_id}.json
+// They are NEVER exposed via getDrafts(), manifest, RSS feed,
+// delegation export, generation context, or any cross-admin path.
+
+async function hasPrivateDrafts(env, adminId) {
+  if (!adminId) return false;
+  const list = await env.ADMIN_BUCKET.list({
+    prefix: `private-drafts/${adminId}/`,
+    limit: 1,
+  });
+  return list.objects.length > 0;
+}
+
+async function listPrivateDrafts(env, adminId) {
+  if (!adminId) return [];
+  const list = await env.ADMIN_BUCKET.list({
+    prefix: `private-drafts/${adminId}/`,
+  });
+  const drafts = [];
+  for (const obj of list.objects) {
+    try {
+      const data = await env.ADMIN_BUCKET.get(obj.key);
+      if (data) {
+        const draft = await data.json();
+        drafts.push(draft);
+      }
+    } catch (_) {
+      // Skip corrupt entries
+    }
+  }
+  drafts.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  return drafts;
+}
+
+async function createPrivateDraft(env, adminId, adminEmail, body) {
+  const id = `pd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+  const draft = {
+    id,
+    owner_id: adminId,
+    owner_email: adminEmail,
+    title: body.title || 'Untitled',
+    content: body.content || '',
+    created_at: now,
+    updated_at: now,
+  };
+  const key = `private-drafts/${adminId}/${id}.json`;
+  await env.ADMIN_BUCKET.put(key, JSON.stringify(draft));
+  return { success: true, draft };
+}
+
+async function updatePrivateDraft(env, adminId, body) {
+  const draftId = body.id;
+  if (!draftId) return { error: 'Missing draft id' };
+  const key = `private-drafts/${adminId}/${draftId}.json`;
+  const existing = await env.ADMIN_BUCKET.get(key);
+  if (!existing) return { error: 'Draft not found' };
+  const draft = await existing.json();
+  if (draft.owner_id !== adminId) return { error: 'Access denied' };
+  if (body.title !== undefined) draft.title = body.title;
+  if (body.content !== undefined) draft.content = body.content;
+  draft.updated_at = new Date().toISOString();
+  await env.ADMIN_BUCKET.put(key, JSON.stringify(draft));
+  return { success: true, draft };
+}
+
+async function deletePrivateDraft(env, adminId, body) {
+  const draftId = body.id;
+  if (!draftId) return { error: 'Missing draft id' };
+  const key = `private-drafts/${adminId}/${draftId}.json`;
+  const existing = await env.ADMIN_BUCKET.get(key);
+  if (!existing) return { error: 'Draft not found' };
+  const draft = await existing.json();
+  if (draft.owner_id !== adminId) return { error: 'Access denied' };
+  await env.ADMIN_BUCKET.delete(key);
+  return { success: true };
+}
+
+function privateDraftsPage(drafts, adminId) {
+  if (drafts.length === 0) {
+    return `<div class="page-header"><h1>Private Drafts</h1><p>Your personal notes — visible only to you, never published</p></div>
+    <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="openNewPrivateDraft()">New Draft</button></div>
+    <div class="empty-state"><div class="empty-state-icon">📝</div><h3>No private drafts</h3><p>Create a private draft to get started.</p></div>
+    ${privateDraftsModal()}`;
+  }
+  const cards = drafts.map(d => `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3 style="margin:0 0 4px">${escapeHtml(d.title)}</h3>
+          <div style="color:var(--text-secondary);font-size:0.75rem">
+            Updated ${d.updated_at ? d.updated_at.substring(0, 16).replace('T', ' ') : 'Unknown'}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px" onclick="openEditPrivateDraft('${escapeHtml(d.id)}', this)">Edit</button>
+          <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;color:var(--danger)" onclick="deletePrivateDraftUI('${escapeHtml(d.id)}')">Delete</button>
+        </div>
+      </div>
+      <div style="color:var(--text-secondary);font-size:0.875rem;margin-top:0.5rem;white-space:pre-wrap;line-height:1.55">${escapeHtml(d.content || '').substring(0, 500)}${(d.content || '').length > 500 ? '...' : ''}</div>
+      <div class="pd-full-content" style="display:none" data-id="${escapeHtml(d.id)}">${escapeHtml(d.content || '')}</div>
+    </div>
+  `).join('');
+
+  return `<div class="page-header"><h1>Private Drafts</h1><p>${drafts.length} personal note${drafts.length !== 1 ? 's' : ''} — visible only to you, never published</p></div>
+  <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="openNewPrivateDraft()">New Draft</button></div>
+  ${cards}
+  ${privateDraftsModal()}`;
+}
+
+function privateDraftsModal() {
+  return `
+  <div id="pd-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;justify-content:center;align-items:center">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:1.5rem;width:90%;max-width:600px;max-height:80vh;overflow-y:auto">
+      <h3 id="pd-modal-title" style="margin:0 0 1rem">New Private Draft</h3>
+      <input type="hidden" id="pd-edit-id" value="">
+      <div style="margin-bottom:1rem">
+        <label style="display:block;font-size:0.813rem;color:var(--text-secondary);margin-bottom:4px">Title</label>
+        <input id="pd-title" type="text" style="width:100%;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:0.875rem" placeholder="Draft title">
+      </div>
+      <div style="margin-bottom:1rem">
+        <label style="display:block;font-size:0.813rem;color:var(--text-secondary);margin-bottom:4px">Content</label>
+        <textarea id="pd-content" rows="12" style="width:100%;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:0.875rem;resize:vertical" placeholder="Your notes..."></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closePdModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="savePrivateDraft()">Save</button>
+      </div>
+    </div>
+  </div>`;
+}
 
 // ============================================================================
 // WORKER HANDLER
 // ============================================================================
-export { displayTitle, humanizeSlug, OPAQUE_ID_RE };
+export {
+  displayTitle, humanizeSlug, OPAQUE_ID_RE,
+  hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
+  updatePrivateDraft, deletePrivateDraft,
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -2766,6 +3012,9 @@ export default {
 
       // Page Routes
       let html;
+      const adminIdentity = getAdminIdentity(request);
+      const adminHasPrivateDrafts = await hasPrivateDrafts(env, adminIdentity.id);
+      const navCtx = { hasPrivateDrafts: adminHasPrivateDrafts };
 
       // Handle dynamic conference routes
       const confMatch = path.match(/^\/conference\/([a-z0-9]+)$/);
@@ -2773,48 +3022,52 @@ export default {
       switch (path) {
         case '/':
           const stats = await getDashboardStats(env);
-          html = baseHTML('Dashboard', dashboardPage(stats), 'dashboard');
+          html = baseHTML('Dashboard', dashboardPage(stats), 'dashboard', navCtx);
           break;
         case '/drafts':
           const draftsData = await getDrafts(env);
           const draftsSubs = await getSubmissions(env);
-          html = baseHTML('Drafts', draftsPageWithData(draftsData, draftsSubs), 'drafts');
+          html = baseHTML('Drafts', draftsPageWithData(draftsData, draftsSubs), 'drafts', navCtx);
           break;
         case '/queue':
           const queueData = await getQueue(env);
           const queueSubs = await getSubmissions(env);
-          html = baseHTML('Queue', queuePageWithData(queueData, queueSubs), 'queue');
+          html = baseHTML('Queue', queuePageWithData(queueData, queueSubs), 'queue', navCtx);
           break;
         case '/conferences':
-          html = baseHTML('Conferences', conferencesPage(), 'conferences');
+          html = baseHTML('Conferences', conferencesPage(), 'conferences', navCtx);
           break;
         case '/submit':
           const submitSubs = await getSubmissions(env);
-          html = baseHTML('Submit', submitPage(submitSubs), 'submit');
+          html = baseHTML('Submit', submitPage(submitSubs), 'submit', navCtx);
           break;
         case '/issues':
           const issuesData = await getIssues();
-          html = baseHTML('Issues', issuesPageWithData(issuesData), 'issues');
+          html = baseHTML('Issues', issuesPageWithData(issuesData), 'issues', navCtx);
           break;
         case '/automation':
-          const identity = getAdminIdentity(request);
           const systemdData = {
-            adminEmail: identity.email,
-            adminId: identity.id,
-            service: generateSystemdService(identity.id),
+            adminEmail: adminIdentity.email,
+            adminId: adminIdentity.id,
+            service: generateSystemdService(adminIdentity.id),
             timer: generateSystemdTimer(),
             envFile: generateEnvFile(),
             installCommands: generateInstallCommands(),
           };
-          html = baseHTML('Automation', automationPage(systemdData), 'automation');
+          html = baseHTML('Automation', automationPage(systemdData), 'automation', navCtx);
           break;
+        case '/private-drafts': {
+          const pdList = await listPrivateDrafts(env, adminIdentity.id);
+          html = baseHTML('Private Drafts', privateDraftsPage(pdList, adminIdentity.id), 'private-drafts', { hasPrivateDrafts: pdList.length > 0 || true });
+          break;
+        }
         default:
           if (confMatch) {
             const confId = confMatch[1];
             const conf = CONFERENCES[confId];
-            html = baseHTML(conf ? conf.name : 'Conference', conferenceDetailPage(confId), 'conferences');
+            html = baseHTML(conf ? conf.name : 'Conference', conferenceDetailPage(confId), 'conferences', navCtx);
           } else {
-            html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '');
+            html = baseHTML('Not Found', '<div class="empty-state"><div class="empty-state-icon">404</div><h3>Page not found</h3><p><a href="/">Return to dashboard</a></p></div>', '', navCtx);
           }
       }
 
@@ -2888,6 +3141,20 @@ async function handleAPI(path, request, env, ctx) {
         env_file: generateEnvFile(),
         install_commands: generateInstallCommands(),
       };
+    }
+
+    case '/api/private-drafts': {
+      const pdIdentity = getAdminIdentity(request);
+      if (request.method === 'POST') {
+        const body = await request.json();
+        const action = body.action || 'create';
+        if (action === 'create') return await createPrivateDraft(env, pdIdentity.id, pdIdentity.email, body);
+        if (action === 'update') return await updatePrivateDraft(env, pdIdentity.id, body);
+        if (action === 'delete') return await deletePrivateDraft(env, pdIdentity.id, body);
+        return { error: 'Unknown action' };
+      }
+      const pdList = await listPrivateDrafts(env, pdIdentity.id);
+      return { drafts: pdList };
     }
 
     default:
@@ -3469,6 +3736,12 @@ async function reviewDraft(request, env) {
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
+      // Advance linked submissions so they leave draft_generated and
+      // stop resurfacing as draft cards on the Drafts page.
+      await advanceLinkedSubmissions(env, key, 'approved_for_publish', {
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
       return {
         success: true,
         action,
@@ -3937,6 +4210,55 @@ async function rejectDrafts(env, {
     episode_key: effectiveEpisodeKey,
     rejected_keys: rejectedKeys,
   };
+}
+
+// Advance linked submissions whose draft_stem matches the given draft key
+// to the specified target status.  This keeps submission records in sync
+// with the publish lifecycle so stale submissions don't resurface as
+// draft cards on the Drafts page.
+async function advanceLinkedSubmissions(env, draftKey, targetStatus, { adminId, adminName } = {}) {
+  const submissions = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+  const now = new Date().toISOString();
+  const advanced = [];
+
+  for (const obj of submissions.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    let submission;
+    try {
+      submission = await current.json();
+    } catch (_) {
+      continue;
+    }
+
+    // Match by draft_stem → draft MP3 key
+    const draftStem = submission.draft_stem;
+    if (!draftStem) continue;
+    const draftMp3 = `${draftStem}.mp3`;
+    if (draftMp3 !== draftKey) continue;
+
+    // Only advance forward — don't regress already-published submissions.
+    const STATUS_ORDER = [
+      'submitted', 'generation_claimed', 'generation_running',
+      'draft_generated', 'approved_for_publish', 'published',
+    ];
+    const currentIdx = STATUS_ORDER.indexOf(submission.status);
+    const targetIdx = STATUS_ORDER.indexOf(targetStatus);
+    if (currentIdx >= targetIdx) continue;
+
+    submission.status = targetStatus;
+    submission.updated_at = now;
+    submission.status_history = Array.isArray(submission.status_history)
+      ? submission.status_history : [];
+    submission.status_history.push({
+      status: targetStatus,
+      at: now,
+      ...(adminId ? { by: adminId } : {}),
+    });
+    await env.ADMIN_BUCKET.put(obj.key, JSON.stringify(submission));
+    advanced.push(obj.key);
+  }
+  return advanced;
 }
 
 async function createOrUpdatePublishJob(env, { key, adminId, adminName }) {

@@ -512,9 +512,71 @@ Practical rules:
   - deploy the worker
   - if necessary purge cache / add cache-busting so stale HTML does not masquerade as a failed fix
 
+**Submission ↔ publish-job state consistency:**
+- When a draft is approved (`reviewDraft(approve)`), the linked
+  submission must advance to `approved_for_publish`. Leaving it at
+  `draft_generated` causes the submission-card fallback to resurface
+  the episode as a draft after it is published.
+- When a publish job reaches `publish_completed`, the linked
+  submission must advance to `published`. The publish runner does
+  this via `_advance_linked_submissions()` in
+  `publish_job_runner.py`. The worker's `draftsPageWithData()`
+  also cross-references publish jobs as a belt-and-suspenders
+  filter, suppressing submission cards whose draft has a completed
+  publish job even if the submission status was never advanced.
+- Any new approval or completion path must update both the publish
+  job AND the linked submission atomically.
+
 Minimum regression coverage for Drafts work:
 - manifest entry exists but is missing/blank description -> sidecar fallback still renders description
 - `draft_generated` submission-card fallback still renders metadata summary as the draft description
 - stale or mismatched manifest draft key does not blank the bucket draft card -> sidecar-backed metadata still renders
 - `draft_manifest.py` backfill updates an existing stale entry (not just missing entries)
 - server-rendered `/drafts` includes the reject modal and real reject flow wiring
+
+## Private Drafts — Invariant Rules
+
+Private drafts are per-admin personal notes stored in
+`ADMIN_BUCKET/private-drafts/{admin_id}/`. They are strictly
+owner-scoped and must NEVER be public.
+
+**Hard invariants — do NOT violate these under any circumstance:**
+
+1. Private drafts are NEVER exposed via `getDrafts()`, manifest,
+   RSS feed, delegation export, generation context, episode
+   scripts, or any other cross-admin or public path.
+
+2. Private drafts are NEVER used as source material for podcast
+   generation, prior-episode lookup, callback context, or any
+   LLM prompt.
+
+3. All private draft API and page routes MUST enforce owner
+   scoping via Cloudflare Access identity (`admin_id` derived
+   from `cf-access-authenticated-user-email`). One admin's
+   private drafts are invisible to all other admins.
+
+4. Private drafts persist until explicitly deleted by the owner.
+   No automated cleanup, expiration, or archival.
+
+5. The `/private-drafts` nav tab is shown ONLY when the current
+   admin has at least one private draft. Other admins must not
+   see the tab.
+
+6. Storage prefix `private-drafts/{admin_id}/` must remain
+   disjoint from all other ADMIN_BUCKET prefixes (`submissions/`,
+   `publish-jobs/`, `manifest.json`, `queue/`, `delegation/`,
+   `reviews/`). No code path should list or read
+   `private-drafts/` except the private draft CRUD functions.
+
+Minimum regression coverage for private drafts:
+- `hasPrivateDrafts` returns false for admin with no drafts
+- `hasPrivateDrafts` returns true only for the owning admin
+- `listPrivateDrafts` returns only the requesting admin's drafts
+- `updatePrivateDraft` / `deletePrivateDraft` reject wrong owner
+- `GET /api/private-drafts` returns only current admin's drafts
+- Private drafts never appear in `/api/drafts` or `/api/delegation`
+- Nav tab shown only for admin with private drafts
+- Nav tab hidden for other admins
+- Drafts persist until explicitly deleted
+- approving a draft advances the linked submission to `approved_for_publish`
+- a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`
