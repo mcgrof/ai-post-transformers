@@ -2738,7 +2738,7 @@ export default {
       if (path.startsWith('/api/')) {
         const apiResponse = await handleAPI(path, request, env, ctx);
         return new Response(JSON.stringify(apiResponse), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0', ...corsHeaders }
         });
       }
 
@@ -2797,14 +2797,14 @@ export default {
       }
 
       return new Response(html, {
-        headers: { 'Content-Type': 'text/html' }
+        headers: { 'Content-Type': 'text/html', 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
       });
 
     } catch (error) {
       console.error('Worker error:', error);
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
       });
     }
   }
