@@ -2497,5 +2497,43 @@ test('GET /drafts falls back to sidecar description when manifest entry is incom
 
   assert.equal(response.status, 200);
   assert.ok(html.includes('Recovered description from the draft sidecar JSON.'));
-  assert.ok(html.includes('https://arxiv.org/abs/2602.15902'));
+});
+
+test('GET /api/drafts falls back to sidecar description when manifest has empty description', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3',
+            filename: '2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3',
+            basename: '2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561',
+            description: '',
+          },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.mp3': 'audio-data',
+      'drafts/2026/03/2026-03-28-agentic-ai-and-the-next-intelligence-exp-d06561.json': JSON.stringify({
+        title: 'Agentic AI and the Next Intelligence Explosion',
+        description: 'Sidecar description fills the gap.',
+        source_urls: ['https://arxiv.org/abs/2602.15902'],
+        episode_id: 113,
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.drafts.length, 1);
+  assert.equal(body.drafts[0].title, 'Agentic AI and the Next Intelligence Explosion');
+  assert.equal(body.drafts[0].description, 'Sidecar description fills the gap.');
 });

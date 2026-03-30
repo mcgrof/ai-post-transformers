@@ -2959,13 +2959,13 @@ async function getDrafts(env) {
         });
       }
 
-      // Fallback: when no manifest entry exists, try the companion
-      // sidecar JSON uploaded alongside the draft MP3.  This covers
-      // drafts generated via the submission path before the manifest
-      // update was wired in, and acts as resilience if the manifest
-      // write fails.
+      // Fallback: try the companion sidecar JSON uploaded alongside
+      // the draft MP3.  This covers drafts generated via the
+      // submission path before the manifest update was wired in, and
+      // also heals manifest entries that were written with an empty
+      // description (e.g. backfill ran before the DB row had one).
       let sidecar = null;
-      if (!episode) {
+      if (!episode || !episode.description) {
         try {
           const sidecarKey = obj.key.replace(/\.mp3$/, '.json');
           const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);

@@ -232,7 +232,35 @@ def backfill_manifest(db_path=None, *, dry_run=False, client=None,
         entry = build_manifest_entry(ep)
 
         if ep_id in existing_ids:
-            actions.append((ep_id, title, "already_in_manifest"))
+            # Update the existing entry when the DB now has a
+            # description that the manifest entry is missing.  This
+            # heals entries created before the description was
+            # available in the DB.
+            db_desc = ep.get("description") or ""
+            existing = next(
+                (d for d in manifest.get("drafts", [])
+                 if d.get("id") == ep_id), None
+            )
+            if existing and not existing.get("description") and db_desc:
+                if dry_run:
+                    print(
+                        f"[backfill] Would update description for "
+                        f"ep {ep_id}: {title}"
+                    )
+                    actions.append((ep_id, title, "would_update"))
+                else:
+                    upsert_manifest_draft(
+                        entry, client=client,
+                        admin_bucket=admin_bucket,
+                    )
+                    print(
+                        f"[backfill] Updated ep {ep_id}: {title}"
+                    )
+                    actions.append((ep_id, title, "updated"))
+            else:
+                actions.append(
+                    (ep_id, title, "already_in_manifest")
+                )
             continue
 
         # Enrich local sidecar JSON
