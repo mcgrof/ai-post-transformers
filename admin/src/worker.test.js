@@ -1360,11 +1360,18 @@ test('GET /submit filters out draft_generated submissions', async () => {
 });
 
 
-test('GET /drafts shows draft_generated submissions for review', async () => {
+test('GET /drafts shows draft_generated submissions for review with summary description', async () => {
   const env = makeEnv({
     admin: {
       'submissions/sub1.json': {
-        urls: ['https://arxiv.org/pdf/2401.55555'],
+        urls: ['https://arxiv.org/abs/2401.55555'],
+        metadata: {
+          'https://arxiv.org/abs/2401.55555': {
+            enrichment_status: 'done',
+            title: 'Interesting Paper',
+            summary: 'Recovered summary for draft-generated submission cards.',
+          },
+        },
         timestamp: '2026-03-27T10:00:00.000Z',
         status: 'draft_generated',
         draft_stem: 'drafts/2026/03/2026-03-27-ready-abc123',
@@ -1380,9 +1387,10 @@ test('GET /drafts shows draft_generated submissions for review', async () => {
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  // Draft-generated submissions should appear on the Drafts page
   assert.ok(html.includes('Draft Review'), 'drafts page renders');
   assert.ok(html.includes('pending review'), 'shows pending review count');
+  assert.ok(html.includes('Recovered summary for draft-generated submission cards.'), 'uses submission metadata summary for description');
+  assert.ok(html.includes('Interesting Paper'), 'includes source title in rendered sources');
 });
 
 

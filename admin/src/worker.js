@@ -1312,6 +1312,28 @@ function renderPublishJobSummary(job) {
   return parts.join('');
 }
 
+
+function buildSubmissionDraftDescription(sub) {
+  const meta = sub.metadata || {};
+  const urls = sub.urls || [];
+  let summary = '';
+  const sources = [];
+  for (const u of urls) {
+    const m = meta[u];
+    if (!summary && m && m.enrichment_status === 'done' && m.summary) {
+      summary = String(m.summary).trim();
+    }
+    if (m && m.enrichment_status === 'done' && m.title) {
+      sources.push(`${sources.length + 1}. ${m.title}
+   ${u}`);
+    } else {
+      sources.push(`${sources.length + 1}. ${u}`);
+    }
+  }
+  if (sources.length === 0) return summary;
+  return summary ? `${summary}\n\nSources:\n${sources.join('\n')}` : `Sources:\n${sources.join('\n')}`;
+}
+
 function renderDraftActionButtons(draft) {
   const job = draft.publish_job || null;
   const state = job && job.state ? job.state : null;
@@ -1369,7 +1391,7 @@ function draftsPageWithData(data, subsData) {
       title: displayTitle(s),
       date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
       duration: 'Unknown',
-      description: '',
+      description: buildSubmissionDraftDescription(s),
       audioUrl: s.draft_stem
         ? `${PODCAST_DOMAIN}/${s.draft_stem}.mp3`
         : null,
