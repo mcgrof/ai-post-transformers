@@ -1015,6 +1015,7 @@ function baseHTML(title, content, activePage, navContext = {}) {
           <a href="/issues"${activePage === 'issues' ? ' class="active"' : ''}>Issues</a>
           <a href="/automation"${activePage === 'automation' ? ' class="active"' : ''}>Automation</a>
           ${navContext.hasPrivateDrafts ? `<a href="/private-drafts"${activePage === 'private-drafts' ? ' class="active"' : ''}>Private Drafts</a>` : ''}
+          <a href="/private-podcasts"${activePage === 'private-podcasts' ? ' class="active"' : ''}>Private Podcasts</a>
         </nav>
       </div>
     </div>
@@ -2977,12 +2978,81 @@ function privateDraftsModal() {
 }
 
 // ============================================================================
+// Private Podcasts — owner-scoped published episodes
+// ============================================================================
+async function listPrivatePodcasts(env, ownerId) {
+  const prefix = `private/${ownerId}/episodes/`;
+  const listed = await env.PODCAST_BUCKET.list({ prefix });
+  const episodes = [];
+  for (const obj of listed.objects) {
+    if (!obj.key.endsWith('.mp3')) continue;
+    const stem = obj.key.replace(/\.mp3$/, '');
+    const jsonKey = stem + '.json';
+    let meta = { key: obj.key, title: obj.key, date: '', description: '' };
+    const metaObj = await env.PODCAST_BUCKET.get(jsonKey);
+    if (metaObj) {
+      try {
+        const parsed = await metaObj.json();
+        meta.title = parsed.title || meta.title;
+        meta.date = parsed.publish_date || parsed.date || '';
+        meta.description = parsed.description || '';
+      } catch (e) { /* ignore parse errors */ }
+    }
+    meta.audio_url = `${PODCAST_DOMAIN}/${obj.key}`;
+    episodes.push(meta);
+  }
+  return { episodes };
+}
+
+async function deletePrivatePodcast(env, ownerId, body) {
+  const key = body.key;
+  if (!key) return { error: 'Missing key' };
+  const expectedPrefix = `private/${ownerId}/episodes/`;
+  if (!key.startsWith(expectedPrefix)) {
+    return { error: 'Forbidden: not your private podcast', status: 403 };
+  }
+  await env.PODCAST_BUCKET.delete(key);
+  // Also delete companion files
+  const stem = key.replace(/\.mp3$/, '');
+  for (const ext of ['.json', '.txt', '.srt', '.png']) {
+    await env.PODCAST_BUCKET.delete(stem + ext);
+  }
+  return { success: true, deleted: key };
+}
+
+function privatePodcastsPage(episodes) {
+  if (episodes.length === 0) {
+    return `<div class="page-header"><h1>Private Podcasts</h1><p>Your privately saved episodes — visible only to you</p></div>
+    <div class="empty-state"><div class="empty-state-icon">🔒</div><h3>No private podcasts</h3><p>Save a draft as private to create one.</p></div>`;
+  }
+  const cards = episodes.map(ep => `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3 style="margin:0 0 4px">${escapeHtml(ep.title)}</h3>
+          <div style="color:var(--text-secondary);font-size:0.75rem">${escapeHtml(ep.date || '')}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px" onclick="playPrivatePodcast('${escapeHtml(ep.audio_url || '')}')">Play</button>
+          <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;color:var(--danger)" onclick="deletePrivatePodcastUI('${escapeHtml(ep.key)}')">Delete</button>
+        </div>
+      </div>
+      <div style="color:var(--text-secondary);font-size:0.875rem;margin-top:0.5rem">${escapeHtml((ep.description || '').substring(0, 300))}${(ep.description || '').length > 300 ? '...' : ''}</div>
+    </div>
+  `).join('');
+
+  return `<div class="page-header"><h1>Private Podcasts</h1><p>${episodes.length} private episode${episodes.length !== 1 ? 's' : ''} — visible only to you</p></div>
+  ${cards}`;
+}
+
+// ============================================================================
 // WORKER HANDLER
 // ============================================================================
 export {
   displayTitle, humanizeSlug, OPAQUE_ID_RE,
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
+  listPrivatePodcasts, deletePrivatePodcast,
 };
 
 export default {
@@ -3059,6 +3129,11 @@ export default {
         case '/private-drafts': {
           const pdList = await listPrivateDrafts(env, adminIdentity.id);
           html = baseHTML('Private Drafts', privateDraftsPage(pdList, adminIdentity.id), 'private-drafts', { hasPrivateDrafts: pdList.length > 0 || true });
+          break;
+        }
+        case '/private-podcasts': {
+          const ppData = await listPrivatePodcasts(env, adminIdentity.id);
+          html = baseHTML('Private Podcasts', privatePodcastsPage(ppData.episodes || []), 'private-podcasts', navCtx);
           break;
         }
         default:
@@ -3155,6 +3230,15 @@ async function handleAPI(path, request, env, ctx) {
       }
       const pdList = await listPrivateDrafts(env, pdIdentity.id);
       return { drafts: pdList };
+    }
+
+    case '/api/private-podcasts': {
+      const ppIdentity = getAdminIdentity(request);
+      if (request.method === 'DELETE') {
+        const body = await request.json();
+        return await deletePrivatePodcast(env, ppIdentity.id, body);
+      }
+      return await listPrivatePodcasts(env, ppIdentity.id);
     }
 
     default:
@@ -3781,6 +3865,32 @@ async function reviewDraft(request, env) {
     if (action === 'refresh_job_status') {
       const job = await loadPublishJobById(env, jobId);
       return { success: true, action, publish_job: job };
+    }
+
+    if (action === 'save_private') {
+      if (!key) {
+        return { error: 'Missing draft key' };
+      }
+      const job = await createOrUpdatePublishJob(env, {
+        key,
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
+      // Tag the publish job as private with owner info
+      job.visibility = 'private';
+      job.owner = body.owner || effectiveAdminId;
+      await savePublishJob(env, job);
+      // Advance linked submissions to private_saved
+      await advanceLinkedSubmissions(env, key, 'private_saved', {
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
+      return {
+        success: true,
+        action,
+        key,
+        publish_job: job,
+      };
     }
 
     if (action === 'reject' || action === 'reject_episode') {
