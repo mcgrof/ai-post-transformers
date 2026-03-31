@@ -6,6 +6,7 @@ import worker, {
   displayTitle, humanizeSlug, OPAQUE_ID_RE,
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
+  listPrivatePodcasts, deletePrivatePodcast,
 } from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
 
@@ -3239,4 +3240,199 @@ test('submission without draft_stem is not affected by advanceLinkedSubmissions'
   const sub = JSON.parse(subRaw);
   assert.equal(sub.status, 'submitted',
     'submission without draft_stem must not be modified');
+});
+
+
+// ============================================================================
+// Private Podcasts tests
+// ============================================================================
+
+test('POST /api/review save_private creates private publish job', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          id: 200,
+          title: 'Private Episode',
+          draft_key: 'drafts/2026/03/2026-03-30-private-ep-abc123.mp3',
+        }],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-30-private-ep-abc123.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-private-ep-abc123.mp3',
+        action: 'save_private',
+        adminId: 'owner-1',
+        adminName: 'Owner One',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.action, 'save_private');
+  assert.ok(body.publish_job);
+  assert.equal(body.publish_job.visibility, 'private');
+  assert.equal(body.publish_job.owner, 'owner-1');
+});
+
+test('GET /api/private-podcasts returns only owner-scoped episodes', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/owner-1/episodes/ep1.mp3': 'audio-1',
+      'private/owner-1/episodes/ep1.json': JSON.stringify({
+        title: 'Owner 1 Episode',
+        publish_date: '2026-03-30',
+        description: 'Private ep for owner 1',
+      }),
+      'private/owner-2/episodes/ep2.mp3': 'audio-2',
+      'private/owner-2/episodes/ep2.json': JSON.stringify({
+        title: 'Owner 2 Episode',
+        publish_date: '2026-03-30',
+        description: 'Private ep for owner 2',
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'owner-1@test.com' },
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.episodes);
+  assert.equal(body.episodes.length, 1);
+  assert.equal(body.episodes[0].title, 'Owner 1 Episode');
+});
+
+test('GET /api/private-podcasts returns empty for owner with no private episodes', async () => {
+  const env = makeEnv({ podcast: {} });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'nobody@test.com' },
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.episodes);
+  assert.equal(body.episodes.length, 0);
+});
+
+test('DELETE /api/private-podcasts verifies ownership before delete', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/owner-1/episodes/ep1.mp3': 'audio',
+    },
+  });
+
+  // owner-2 tries to delete owner-1's episode
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-access-authenticated-user-email': 'owner-2@test.com',
+      },
+      body: JSON.stringify({ key: 'private/owner-1/episodes/ep1.mp3' }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /Forbidden/i);
+  // Verify the file is still there
+  const obj = await env.PODCAST_BUCKET.get('private/owner-1/episodes/ep1.mp3');
+  assert.ok(obj);
+});
+
+test('GET /api/drafts excludes private-saved episodes', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+      'submissions/sub1.json': JSON.stringify({
+        urls: ['https://arxiv.org/abs/2603.99999'],
+        timestamp: '2026-03-30T10:00:00.000Z',
+        status: 'private_saved',
+        draft_stem: 'drafts/2026/03/private-draft',
+        summary: 'A private episode',
+      }),
+    },
+    podcast: {},
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  // private_saved submissions should not appear as draft cards
+  const draftCards = (body.drafts || []).filter(
+    d => d.title && d.title.includes('private'),
+  );
+  assert.equal(draftCards.length, 0);
+});
+
+test('Private episodes never appear in RSS feed data', async () => {
+  // The RSS feed is generated server-side in rss.py, not in the worker.
+  // At the API level, we verify private-saved submissions don't show in
+  // /api/drafts which is the entry point for publishing to RSS.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+    },
+    podcast: {
+      'private/owner-1/episodes/secret.mp3': 'audio',
+    },
+  });
+
+  // Verify /api/drafts does not include private R2 objects
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  const found = (body.drafts || []).some(d =>
+    (d.key || '').includes('private/'),
+  );
+  assert.equal(found, false, 'private R2 objects must not appear in drafts');
+});
+
+test('Private Podcasts page renders for authenticated admin', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/admin-1/episodes/ep1.mp3': 'audio',
+      'private/admin-1/episodes/ep1.json': JSON.stringify({
+        title: 'My Private Episode',
+        publish_date: '2026-03-30',
+        description: 'Private content',
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'admin-1@test.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.match(html, /Private Podcasts/);
+  assert.match(html, /My Private Episode/);
 });
