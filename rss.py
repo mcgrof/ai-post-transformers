@@ -1133,8 +1133,8 @@ function escapeHtml(value) {{
 function normalizeSearchText(value) {{
   return String(value || '')
     .toLowerCase()
-    .replace(/[^a-z0-9.\s-]+/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[^a-z0-9.\\s-]+/g, ' ')
+    .replace(/\\s+/g, ' ')
     .trim();
 }}
 
@@ -1205,7 +1205,7 @@ searchInput.addEventListener('input', function() {{
     return;
   }}
 
-  const terms = q.split(/\s+/).filter(Boolean);
+  const terms = q.split(/\\s+/).filter(Boolean);
   const matches = searchIndex
     .map(item => ({{ item, score: scoreEpisode(item, terms) }}))
     .filter(entry => entry.score >= 0)
