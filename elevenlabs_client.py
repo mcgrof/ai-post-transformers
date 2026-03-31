@@ -449,8 +449,10 @@ def _local_adversarial_search(text, analysis, config, backend):
         published_at = ep.get("published_at", "") or ""
 
         # Only allow previously published public episodes as callback/source material.
-        # Drafts, local-only episodes, and unpublished/internal artifacts must never
-        # be eligible here.
+        # Drafts, local-only episodes, private episodes, and unpublished/internal
+        # artifacts must never be eligible here.
+        if ep.get("visibility", "public") == "private":
+            continue
         if not published_at:
             continue
         if "/public/" not in audio:
