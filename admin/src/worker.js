@@ -1342,8 +1342,23 @@ function renderDraftActionButtons(draft) {
   const locked = ['approved_for_publish', 'publish_claimed', 'publish_running', 'publish_completed'].includes(state);
   const approveLabel = locked ? '✓ Approved' : '✓ Approve';
   const approveAttrs = locked ? ' disabled style="opacity:0.65;cursor:not-allowed"' : '';
-  return '<button class="btn btn-success" onclick="approveDraft(\'' + draft.key + '\')"' + approveAttrs + '>' + approveLabel + '</button>'
+  let buttons = '<button class="btn btn-success" onclick="approveDraft(\'' + draft.key + '\')"' + approveAttrs + '>' + approveLabel + '</button>'
     + '<button class="btn btn-danger" onclick="openRejectModal(\'' + draft.key + '\')">✕ Reject</button>';
+
+  // Edit button — metadata loaded from draftMetadata JS object, not inline
+  buttons += '<button class="btn btn-secondary" onclick="openEditModal(\'' + escapeHtml(draft.key) + '\')" style="font-size:0.75rem">✏️ Edit</button>';
+
+  // Regenerate new version button
+  if (draft.episode_key) {
+    buttons += '<button class="btn btn-secondary" onclick="openRegenerateModal(\'' + escapeHtml(draft.key) + '\', \'' + escapeHtml(draft.episode_key) + '\')" style="font-size:0.75rem">🔄 New Version</button>';
+  }
+
+  // Version history button
+  if (draft.episode_key) {
+    buttons += '<button class="btn btn-secondary" onclick="showVersionHistory(\'' + escapeHtml(draft.episode_key) + '\')" style="font-size:0.75rem">📋 Versions</button>';
+  }
+
+  return buttons;
 }
 
 function renderRejectModal() {
@@ -1361,6 +1376,60 @@ function renderRejectModal() {
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
           <button class="btn btn-danger" onclick="confirmReject()">Reject Draft</button>
+        </div>
+      </div>
+    </div>
+    <div id="edit-modal" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Edit Draft</h3>
+          <button class="modal-close" onclick="closeEditModal()">&times;</button>
+        </div>
+        <div class="form-group">
+          <label for="edit-title">Title</label>
+          <input type="text" id="edit-title" style="width:100%;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary)" />
+        </div>
+        <div class="form-group">
+          <label for="edit-description">Description</label>
+          <textarea id="edit-description" rows="6" style="width:100%;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary)"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+          <button class="btn btn-success" onclick="confirmEditDraft()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+    <div id="regenerate-modal" class="modal-overlay" style="display: none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Generate New Version</h3>
+          <button class="modal-close" onclick="closeRegenerateModal()">&times;</button>
+        </div>
+        <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:0.75rem">
+          Create a new revision of this episode. The new version will use the same source papers
+          and can incorporate context from newly published public episodes.
+        </p>
+        <div class="form-group">
+          <label for="regenerate-focus">Focus / guidance for the new version (optional)</label>
+          <textarea id="regenerate-focus" rows="4" placeholder="What should change or improve in this version? E.g.: 'Incorporate the newly published follow-up paper on X' or 'Emphasize the practical applications more'" style="width:100%;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary)"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeRegenerateModal()">Cancel</button>
+          <button class="btn btn-success" onclick="confirmRegenerate()">Create New Version</button>
+        </div>
+      </div>
+    </div>
+    <div id="versions-modal" class="modal-overlay" style="display: none;">
+      <div class="modal" style="max-width:700px">
+        <div class="modal-header">
+          <h3 class="modal-title">Version History</h3>
+          <button class="modal-close" onclick="closeVersionsModal()">&times;</button>
+        </div>
+        <div id="versions-container" style="max-height:60vh;overflow-y:auto">
+          <div class="loading"><div class="spinner"></div> Loading versions...</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeVersionsModal()">Close</button>
         </div>
       </div>
     </div>
@@ -2498,6 +2567,158 @@ async function confirmReject() {
   }
 }
 
+// --- Edit Draft ---
+let editingDraftKey = null;
+
+async function openEditModal(key) {
+  editingDraftKey = key;
+  document.getElementById('edit-title').value = '';
+  document.getElementById('edit-description').value = '';
+  document.getElementById('edit-modal').style.display = 'flex';
+  // Load current metadata from API to avoid embedding raw text in HTML
+  try {
+    const res = await adminApiFetch('/api/drafts');
+    const data = await res.json();
+    const all = [...(data.drafts || []), ...(data.all_drafts || [])];
+    const match = all.find(function(d) { return d.key === key; });
+    if (match) {
+      document.getElementById('edit-title').value = match.title || '';
+      document.getElementById('edit-description').value = match.description || '';
+    }
+  } catch (_) {
+    // Pre-fill failed — user can still type values manually
+  }
+}
+
+function closeEditModal() {
+  editingDraftKey = null;
+  document.getElementById('edit-modal').style.display = 'none';
+}
+
+async function confirmEditDraft() {
+  const title = document.getElementById('edit-title').value.trim();
+  const description = document.getElementById('edit-description').value.trim();
+  if (!title && !description) {
+    showToast('Please provide a title or description', 'error');
+    return;
+  }
+  try {
+    const payload = { key: editingDraftKey, action: 'edit_draft' };
+    if (title) payload.title = title;
+    if (description) payload.description = description;
+    const res = await adminApiFetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Draft updated');
+      closeEditModal();
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to update draft', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Failed to update draft: ' + err.message, 'error');
+  }
+}
+
+// --- Regenerate New Version ---
+let regeneratingDraftKey = null;
+let regeneratingEpisodeKey = null;
+
+function openRegenerateModal(key, episodeKey) {
+  regeneratingDraftKey = key;
+  regeneratingEpisodeKey = episodeKey;
+  document.getElementById('regenerate-focus').value = '';
+  document.getElementById('regenerate-modal').style.display = 'flex';
+}
+
+function closeRegenerateModal() {
+  regeneratingDraftKey = null;
+  regeneratingEpisodeKey = null;
+  document.getElementById('regenerate-modal').style.display = 'none';
+}
+
+async function confirmRegenerate() {
+  try {
+    const focusText = document.getElementById('regenerate-focus').value.trim();
+    const res = await adminApiFetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: regeneratingDraftKey,
+        action: 'regenerate_version',
+        focus_text: focusText,
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('New version submitted for generation (v' + data.new_revision + ')');
+      closeRegenerateModal();
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to create new version', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Failed to create new version: ' + err.message, 'error');
+  }
+}
+
+// --- Version History ---
+function showVersionHistory(episodeKey) {
+  document.getElementById('versions-modal').style.display = 'flex';
+  document.getElementById('versions-container').innerHTML = '<div class="loading"><div class="spinner"></div> Loading versions...</div>';
+  loadVersionHistory(episodeKey);
+}
+
+function closeVersionsModal() {
+  document.getElementById('versions-modal').style.display = 'none';
+}
+
+async function loadVersionHistory(episodeKey) {
+  try {
+    const res = await adminApiFetch('/api/revisions?episode_key=' + encodeURIComponent(episodeKey));
+    const data = await res.json();
+    const container = document.getElementById('versions-container');
+    if (!data.revisions || data.revisions.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-secondary);padding:1rem">No version history found.</p>';
+      return;
+    }
+    container.innerHTML = data.revisions.map(function(rev) {
+      const stateLabel = rev.revision_state || 'active';
+      const stateBadge = stateLabel === 'published' ? 'badge-success'
+        : stateLabel === 'rejected' ? 'badge-danger'
+        : stateLabel === 'superseded' ? 'badge-warning'
+        : 'badge-blue';
+      const vis = rev.visibility === 'private' ? ' <span style="color:var(--purple);font-size:0.7rem">🔒 Private</span>' : '';
+      return '<div class="card" style="margin-bottom:0.75rem;padding:0.75rem">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<div><strong>v' + (rev.revision || '?') + '</strong> — ' + (rev.title || 'Untitled') + vis + '</div>'
+        + '<span class="badge ' + stateBadge + '">' + stateLabel + '</span>'
+        + '</div>'
+        + '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.25rem">'
+        + '📅 ' + (rev.date || 'Unknown') + ' · ⏱️ ' + (rev.duration || 'Unknown')
+        + '</div>'
+        + (rev.audioUrl ? '<audio controls preload="none" style="width:100%;height:32px;margin-top:0.5rem"><source src="' + rev.audioUrl + '" type="audio/mpeg"></audio>' : '')
+        + '</div>';
+    }).join('');
+  } catch (err) {
+    document.getElementById('versions-container').innerHTML = '<p style="color:var(--danger);padding:1rem">Failed to load versions: ' + err.message + '</p>';
+  }
+}
+
 // Queue
 async function loadQueue() {
   // Skip if server-rendered content already present
@@ -3241,6 +3462,13 @@ async function handleAPI(path, request, env, ctx) {
       return await listPrivatePodcasts(env, ppIdentity.id);
     }
 
+    case '/api/revisions': {
+      const url = new URL(request.url);
+      const episodeKey = url.searchParams.get('episode_key');
+      if (!episodeKey) return { error: 'Missing episode_key parameter' };
+      return await getRevisions(env, episodeKey);
+    }
+
     default:
       return { error: 'Not found' };
   }
@@ -3362,6 +3590,7 @@ async function getDrafts(env) {
         revision: episode?.revision || null,
         revision_state: episode?.revision_state || null,
         episode_key: episode?.episode_key || null,
+        source_urls: episode?.source_urls || sidecar?.source_urls || [],
       };
       // Resolve display title through the fallback chain so opaque
       // identifiers like "ep102" never surface as the primary label.
@@ -3384,6 +3613,78 @@ async function getDrafts(env) {
     return { drafts: activeDrafts, all_drafts: drafts };
   } catch (error) {
     return { error: error.message, drafts: [] };
+  }
+}
+
+async function getRevisions(env, episodeKey) {
+  try {
+    const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+    let manifest = { drafts: [], conferences: {} };
+    if (manifestData) manifest = await manifestData.json();
+
+    const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    const publishJobs = await listPublishJobs(env);
+    const latestPublishJobByDraft = new Map();
+    for (const job of publishJobs) {
+      if (!job?.draft_key) continue;
+      const current = latestPublishJobByDraft.get(job.draft_key);
+      if (!current || (job.created_at || '') > (current.created_at || '')) {
+        latestPublishJobByDraft.set(job.draft_key, job);
+      }
+    }
+
+    const revisions = [];
+    for (const obj of list.objects) {
+      if (!obj.key.endsWith('.mp3')) continue;
+      const filename = obj.key.split('/').pop();
+      const baseName = filename.replace('.mp3', '');
+
+      let episode = null;
+      if (manifest.drafts) {
+        episode = manifest.drafts.find(ep => {
+          if (ep.draft_key === obj.key) return true;
+          if (ep.filename === filename) return true;
+          if (ep.basename === baseName) return true;
+          if (baseName === `ep${ep.id}`) return true;
+          return false;
+        });
+      }
+
+      if (!episode || episode.episode_key !== episodeKey) continue;
+
+      let sidecar = null;
+      if (!episode.description) {
+        try {
+          const sidecarKey = obj.key.replace(/\.mp3$/, '.json');
+          const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);
+          if (sidecarData) sidecar = await sidecarData.json();
+        } catch (_) {}
+      }
+
+      const job = latestPublishJobByDraft.get(obj.key);
+      const draft = {
+        key: obj.key,
+        title: episode?.title || sidecar?.title || null,
+        date: episode?.date || obj.uploaded?.toISOString().split('T')[0] || 'Unknown',
+        duration: episode?.duration || 'Unknown',
+        description: episode?.description || sidecar?.description || '',
+        audioUrl: `${PODCAST_DOMAIN}/${obj.key}`,
+        episodeId: episode?.id || sidecar?.episode_id || null,
+        publish_job: summarizePublishJob(job),
+        revision: episode?.revision || null,
+        revision_state: episode?.revision_state || null,
+        episode_key: episode?.episode_key || null,
+        source_urls: episode?.source_urls || sidecar?.source_urls || [],
+        visibility: (job && job.visibility === 'private') ? 'private' : 'public',
+      };
+      draft.title = displayTitle(draft);
+      revisions.push(draft);
+    }
+
+    revisions.sort((a, b) => (a.revision || 0) - (b.revision || 0));
+    return { revisions, episode_key: episodeKey };
+  } catch (error) {
+    return { error: error.message, revisions: [] };
   }
 }
 
@@ -3910,6 +4211,142 @@ async function reviewDraft(request, env) {
         message: rejected.episode_key
           ? `Rejected all drafts for "${rejected.episode_key}"`
           : 'Draft rejected',
+      };
+    }
+
+    if (action === 'regenerate_version') {
+      if (!key) {
+        return { error: 'Missing draft key for regeneration' };
+      }
+      // Load the original draft's metadata to carry URLs forward
+      const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+      let manifest = { drafts: [], conferences: {} };
+      if (manifestData) manifest = await manifestData.json();
+
+      const filename = key.split('/').pop();
+      const baseName = filename.replace('.mp3', '');
+      let episode = (manifest.drafts || []).find(ep => {
+        if (ep.draft_key === key) return true;
+        if (ep.filename === filename) return true;
+        if (ep.basename === baseName) return true;
+        return false;
+      });
+
+      // Fallback to sidecar JSON
+      if (!episode) {
+        try {
+          const sidecarKey = key.replace(/\.mp3$/, '.json');
+          const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);
+          if (sidecarData) episode = await sidecarData.json();
+        } catch (_) {}
+      }
+
+      const sourceUrls = episode?.source_urls || [];
+      if (sourceUrls.length === 0) {
+        return { error: 'No source URLs found for this draft — cannot regenerate' };
+      }
+
+      const episodeKey = episode?.episode_key || null;
+      const episodeTitle = episode?.title || '';
+      const focusText = body.focus_text || '';
+      const currentRevision = episode?.revision || 1;
+
+      // Build regeneration instructions
+      let instructions = `Regenerate as revision ${currentRevision + 1} of: ${episodeTitle}`;
+      if (focusText) {
+        instructions += `\n\nOperator focus: ${focusText}`;
+      }
+      instructions += '\n\nContext rule: only reference publicly published episodes, never private drafts or unreleased content.';
+
+      // Create a new submission
+      const now = new Date();
+      const subKey = `submissions/${now.toISOString().replace(/[:.]/g, '-')}Z.json`;
+      const submission = {
+        urls: sourceUrls,
+        instructions,
+        timestamp: now.toISOString(),
+        updated_at: now.toISOString(),
+        status: 'submitted',
+        status_history: [{ status: 'submitted', at: now.toISOString() }],
+        metadata: {},
+        parent_episode_key: episodeKey,
+        parent_draft_key: key,
+        parent_revision: currentRevision,
+      };
+
+      // Initialize metadata with pending enrichment for each URL
+      for (const url of sourceUrls) {
+        submission.metadata[url] = { enrichment_status: 'pending' };
+      }
+
+      await env.ADMIN_BUCKET.put(subKey, JSON.stringify(submission));
+
+      return {
+        success: true,
+        action,
+        key,
+        submission_key: subKey,
+        episode_key: episodeKey,
+        new_revision: currentRevision + 1,
+        message: `Created regeneration submission for revision ${currentRevision + 1}`,
+      };
+    }
+
+    if (action === 'edit_draft') {
+      if (!key) {
+        return { error: 'Missing draft key' };
+      }
+      const newTitle = body.title;
+      const newDescription = body.description;
+      if (newTitle === undefined && newDescription === undefined) {
+        return { error: 'Nothing to edit — provide title and/or description' };
+      }
+
+      // Update manifest entry
+      const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+      let manifest = { drafts: [], conferences: {} };
+      if (manifestData) manifest = await manifestData.json();
+
+      const filename = key.split('/').pop();
+      const baseName = filename.replace('.mp3', '');
+      let found = false;
+      for (const ep of (manifest.drafts || [])) {
+        if (ep.draft_key === key || ep.filename === filename || ep.basename === baseName) {
+          if (newTitle !== undefined) ep.title = newTitle;
+          if (newDescription !== undefined) ep.description = newDescription;
+          ep.edited_at = new Date().toISOString();
+          ep.edited_by = effectiveAdminName;
+          found = true;
+          break;
+        }
+      }
+
+      if (found) {
+        await env.ADMIN_BUCKET.put('manifest.json', JSON.stringify(manifest));
+      }
+
+      // Also update sidecar JSON if it exists
+      try {
+        const sidecarKey = key.replace(/\.mp3$/, '.json');
+        const sidecarData = await env.PODCAST_BUCKET.get(sidecarKey);
+        if (sidecarData) {
+          const sidecar = await sidecarData.json();
+          if (newTitle !== undefined) sidecar.title = newTitle;
+          if (newDescription !== undefined) sidecar.description = newDescription;
+          sidecar.edited_at = new Date().toISOString();
+          sidecar.edited_by = effectiveAdminName;
+          await env.PODCAST_BUCKET.put(sidecarKey, JSON.stringify(sidecar));
+        }
+      } catch (_) {
+        // Sidecar update is best-effort
+      }
+
+      return {
+        success: true,
+        action,
+        key,
+        manifest_updated: found,
+        message: 'Draft metadata updated',
       };
     }
 
