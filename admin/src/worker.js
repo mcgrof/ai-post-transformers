@@ -1372,8 +1372,27 @@ function draftsPageWithData(data, subsData) {
   // These are submissions whose generation completed and produced a
   // draft_stem but whose MP3 may not yet be in PODCAST_BUCKET (e.g.
   // still on local disk).  Show them so the operator can review.
+  //
+  // Exclude submissions with status 'published' — they are done.
   const draftGeneratedSubs = ((subsData && subsData.submissions) || [])
     .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish');
+
+  // Build a lookup of completed publish jobs from the bucket drafts
+  // (data.all_drafts includes both active and filtered-out drafts
+  // with their publish_job summaries).  This lets us suppress
+  // submission cards whose episode is already published even when the
+  // submission status was never advanced to 'published'.
+  const completedDraftStems = new Set();
+  for (const d of (data.all_drafts || data.drafts || [])) {
+    if (d.publish_job && d.publish_job.state === 'publish_completed' && d.key) {
+      // Store both the full key and the stem basename so matching
+      // works regardless of whether the submission carries the full
+      // path or just the filename.
+      completedDraftStems.add(d.key);
+      const stem = d.key.replace(/\.mp3$/, '').split('/').pop();
+      if (stem) completedDraftStems.add(stem);
+    }
+  }
 
   // Build a set of draft keys already shown via the bucket listing
   // so we don't duplicate entries.
@@ -1384,6 +1403,10 @@ function draftsPageWithData(data, subsData) {
       // skip it — the bucket version has richer metadata.
       if (!s.draft_stem) return true;
       const stemBase = s.draft_stem.split('/').pop();
+      // Suppress submissions whose draft has a completed publish job.
+      if (completedDraftStems.has(`${s.draft_stem}.mp3`) || completedDraftStems.has(stemBase)) {
+        return false;
+      }
       return !drafts.some(d => d.key && d.key.includes(stemBase));
     })
     .map(s => ({
@@ -3469,6 +3492,12 @@ async function reviewDraft(request, env) {
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
+      // Advance linked submissions so they leave draft_generated and
+      // stop resurfacing as draft cards on the Drafts page.
+      await advanceLinkedSubmissions(env, key, 'approved_for_publish', {
+        adminId: effectiveAdminId,
+        adminName: effectiveAdminName,
+      });
       return {
         success: true,
         action,
@@ -3937,6 +3966,55 @@ async function rejectDrafts(env, {
     episode_key: effectiveEpisodeKey,
     rejected_keys: rejectedKeys,
   };
+}
+
+// Advance linked submissions whose draft_stem matches the given draft key
+// to the specified target status.  This keeps submission records in sync
+// with the publish lifecycle so stale submissions don't resurface as
+// draft cards on the Drafts page.
+async function advanceLinkedSubmissions(env, draftKey, targetStatus, { adminId, adminName } = {}) {
+  const submissions = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+  const now = new Date().toISOString();
+  const advanced = [];
+
+  for (const obj of submissions.objects) {
+    const current = await env.ADMIN_BUCKET.get(obj.key);
+    if (!current) continue;
+    let submission;
+    try {
+      submission = await current.json();
+    } catch (_) {
+      continue;
+    }
+
+    // Match by draft_stem → draft MP3 key
+    const draftStem = submission.draft_stem;
+    if (!draftStem) continue;
+    const draftMp3 = `${draftStem}.mp3`;
+    if (draftMp3 !== draftKey) continue;
+
+    // Only advance forward — don't regress already-published submissions.
+    const STATUS_ORDER = [
+      'submitted', 'generation_claimed', 'generation_running',
+      'draft_generated', 'approved_for_publish', 'published',
+    ];
+    const currentIdx = STATUS_ORDER.indexOf(submission.status);
+    const targetIdx = STATUS_ORDER.indexOf(targetStatus);
+    if (currentIdx >= targetIdx) continue;
+
+    submission.status = targetStatus;
+    submission.updated_at = now;
+    submission.status_history = Array.isArray(submission.status_history)
+      ? submission.status_history : [];
+    submission.status_history.push({
+      status: targetStatus,
+      at: now,
+      ...(adminId ? { by: adminId } : {}),
+    });
+    await env.ADMIN_BUCKET.put(obj.key, JSON.stringify(submission));
+    advanced.push(obj.key);
+  }
+  return advanced;
 }
 
 async function createOrUpdatePublishJob(env, { key, adminId, adminName }) {

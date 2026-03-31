@@ -512,9 +512,26 @@ Practical rules:
   - deploy the worker
   - if necessary purge cache / add cache-busting so stale HTML does not masquerade as a failed fix
 
+**Submission ↔ publish-job state consistency:**
+- When a draft is approved (`reviewDraft(approve)`), the linked
+  submission must advance to `approved_for_publish`. Leaving it at
+  `draft_generated` causes the submission-card fallback to resurface
+  the episode as a draft after it is published.
+- When a publish job reaches `publish_completed`, the linked
+  submission must advance to `published`. The publish runner does
+  this via `_advance_linked_submissions()` in
+  `publish_job_runner.py`. The worker's `draftsPageWithData()`
+  also cross-references publish jobs as a belt-and-suspenders
+  filter, suppressing submission cards whose draft has a completed
+  publish job even if the submission status was never advanced.
+- Any new approval or completion path must update both the publish
+  job AND the linked submission atomically.
+
 Minimum regression coverage for Drafts work:
 - manifest entry exists but is missing/blank description -> sidecar fallback still renders description
 - `draft_generated` submission-card fallback still renders metadata summary as the draft description
 - stale or mismatched manifest draft key does not blank the bucket draft card -> sidecar-backed metadata still renders
 - `draft_manifest.py` backfill updates an existing stale entry (not just missing entries)
 - server-rendered `/drafts` includes the reject modal and real reject flow wiring
+- approving a draft advances the linked submission to `approved_for_publish`
+- a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`

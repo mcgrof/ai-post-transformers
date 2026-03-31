@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -426,6 +427,7 @@ def process_job(
         complete_job(job)
         save_job(job, store=store)
         save_result(job, verification=verification, store=store)
+        _advance_linked_submissions(job, store)
         return job
     except subprocess.CalledProcessError as exc:
         fail_job(job, step=_current_running_step(job), error=str(exc))
@@ -437,6 +439,58 @@ def process_job(
         save_job(job, store=store)
         save_result(job, store=store)
         raise
+
+
+def _advance_linked_submissions(job: dict, store) -> list[str]:
+    """Advance R2 submissions matching this job's draft to 'published'.
+
+    When the publish runner completes a job, the linked submission
+    record in the admin bucket must be advanced to 'published' so it
+    stops resurfacing as a draft card on the Drafts page.
+    """
+    if not hasattr(store, "client") or not hasattr(store, "bucket"):
+        return []
+    draft_key = job.get("draft_key", "")
+    draft_stem = draft_key.replace(".mp3", "").replace(".txt", "")
+    if not draft_stem:
+        return []
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    advanced = []
+    try:
+        paginator = store.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(
+            Bucket=store.bucket, Prefix="submissions/"
+        ):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                raw = store.client.get_object(
+                    Bucket=store.bucket, Key=key
+                )
+                body = raw["Body"].read()
+                if isinstance(body, bytes):
+                    body = body.decode("utf-8")
+                sub = json.loads(body)
+                sub_stem = sub.get("draft_stem", "")
+                if not sub_stem or sub_stem != draft_stem:
+                    continue
+                if sub.get("status") == "published":
+                    continue
+                sub["status"] = "published"
+                sub["updated_at"] = now
+                history = sub.get("status_history") or []
+                history.append({"status": "published", "at": now})
+                sub["status_history"] = history
+                store.client.put_object(
+                    Bucket=store.bucket,
+                    Key=key,
+                    Body=json.dumps(sub, indent=2) + "\n",
+                    ContentType="application/json",
+                )
+                advanced.append(key)
+    except Exception as exc:
+        print(f"warning: failed to advance submissions: {exc}")
+    return advanced
 
 
 def _current_running_step(job: dict) -> str:

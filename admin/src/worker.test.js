@@ -2596,3 +2596,174 @@ test('GET /drafts still renders bucket draft metadata when manifest draft key is
   assert.ok(html.includes('Recovered sidecar description.'));
   assert.ok(html.includes('Agentic AI and the Next Intelligence Explosion'));
 });
+
+
+// =========================================================================
+// Regression: stale published-draft resurfacing (GH fix-stale-published-drafts)
+// =========================================================================
+
+test('POST /api/review approve advances linked submission to approved_for_publish', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-28T20-02-42-230Z.json': {
+        urls: ['https://arxiv.org/abs/2603.20639'],
+        timestamp: '2026-03-28T20:02:42.230Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // The linked submission must have advanced to approved_for_publish.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-28T20-02-42-230Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'approved_for_publish',
+    'submission must advance to approved_for_publish on draft approval');
+  assert.ok(
+    sub.status_history.some((h) => h.status === 'approved_for_publish'),
+    'status_history must record the transition',
+  );
+});
+
+
+test('GET /drafts hides submission card when publish job is publish_completed', async () => {
+  // Scenario: publish job completed but submission was never advanced
+  // (pre-fix state).  The Drafts page must not show the stale
+  // submission as a draft card.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI and the Next Intelligence Explosion',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_29_180606.json': {
+        job_id: 'pub_2026_03_29_180606',
+        draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+        title: 'Agentic AI and the Next Intelligence Explosion',
+        state: 'publish_completed',
+        created_at: '2026-03-29T18:06:06Z',
+        updated_at: '2026-03-29T19:00:00Z',
+        progress: {
+          publish: 'done', viz: 'done', cover: 'done',
+          site: 'done', verify: 'done',
+        },
+      },
+      'submissions/2026-03-28T20-02-42-230Z.json': {
+        urls: ['https://arxiv.org/abs/2603.20639'],
+        metadata: {
+          'https://arxiv.org/abs/2603.20639': {
+            enrichment_status: 'done',
+            title: 'Agentic AI and the Next Intelligence Explosion',
+          },
+        },
+        timestamp: '2026-03-28T20:02:42.230Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  // The bucket draft itself should be filtered out by getDrafts()
+  // (publish_completed).  The submission-card fallback must also be
+  // suppressed.
+  assert.ok(
+    !html.includes('Agentic AI and the Next Intelligence Explosion'),
+    'published episode must not reappear as a draft card via submission fallback',
+  );
+  // The page should show "no pending drafts" or an empty list.
+  assert.ok(
+    html.includes('No pending drafts') || html.includes('All caught up'),
+    'drafts page should be empty when only draft is already published',
+  );
+});
+
+
+test('GET /api/drafts filters completed drafts from submission-card fallback path', async () => {
+  // Same scenario but via the JSON API.  The API path (getDrafts)
+  // already filters publish_completed bucket drafts.  This test
+  // verifies that no stale submission card leaks through.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 113,
+            title: 'Agentic AI',
+            draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+          },
+        ],
+      },
+      'publish-jobs/pub_2026_03_29_180606.json': {
+        job_id: 'pub_2026_03_29_180606',
+        draft_key: 'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3',
+        draft_stem: 'drafts/2026/03/2026-03-28-agentic-ai-d06561',
+        title: 'Agentic AI',
+        state: 'publish_completed',
+        created_at: '2026-03-29T18:06:06Z',
+        updated_at: '2026-03-29T19:00:00Z',
+        progress: {
+          publish: 'done', viz: 'done', cover: 'done',
+          site: 'done', verify: 'done',
+        },
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3': 'audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.drafts.length, 0,
+    'API must not return drafts with completed publish jobs');
+});
