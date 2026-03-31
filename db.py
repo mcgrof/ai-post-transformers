@@ -140,6 +140,18 @@ def init_db(conn):
         )
     except sqlite3.OperationalError:
         pass
+    # Migration: add visibility column for private podcast support
+    try:
+        conn.execute(
+            "ALTER TABLE podcasts ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'"
+        )
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migration: add owner column for private podcast ownership
+    try:
+        conn.execute("ALTER TABLE podcasts ADD COLUMN owner TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
 
 
@@ -201,12 +213,14 @@ def get_today_papers(conn, date_str=None):
 
 def insert_podcast(conn, title, publish_date, elevenlabs_project_id=None,
                    audio_file=None, spotify_url=None, source_urls=None,
-                   description=None, image_file=None):
+                   description=None, image_file=None,
+                   visibility='public', owner=None):
     cursor = conn.execute("""
         INSERT INTO podcasts (title, publish_date, spotify_url,
                               elevenlabs_project_id, audio_file, source_urls,
-                              description, image_file, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              description, image_file, visibility, owner,
+                              created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         title,
         publish_date,
@@ -216,6 +230,8 @@ def insert_podcast(conn, title, publish_date, elevenlabs_project_id=None,
         source_urls,
         description,
         image_file,
+        visibility,
+        owner,
         datetime.now(timezone.utc).isoformat(),
     ))
     conn.commit()
@@ -225,7 +241,8 @@ def insert_podcast(conn, title, publish_date, elevenlabs_project_id=None,
 def update_podcast(conn, podcast_id, **kwargs):
     valid_fields = {"title", "publish_date", "spotify_url", "elevenlabs_project_id",
                      "audio_file", "description", "image_file", "published_at",
-                     "episode_key", "revision", "revision_state"}
+                     "episode_key", "revision", "revision_state",
+                     "visibility", "owner"}
     updates = {k: v for k, v in kwargs.items() if k in valid_fields}
     if not updates:
         return
@@ -410,12 +427,35 @@ def get_fun_facts_stats(conn):
     return {"unused": unused, "used": used, "total": unused + used}
 
 
-def list_podcasts(conn):
+def list_podcasts(conn, include_private=False):
+    if include_private:
+        rows = conn.execute("""
+            SELECT p.*, GROUP_CONCAT(pp.arxiv_id) as paper_ids
+            FROM podcasts p
+            LEFT JOIN podcast_papers pp ON p.id = pp.podcast_id
+            GROUP BY p.id
+            ORDER BY p.publish_date DESC, p.created_at DESC
+        """).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT p.*, GROUP_CONCAT(pp.arxiv_id) as paper_ids
+            FROM podcasts p
+            LEFT JOIN podcast_papers pp ON p.id = pp.podcast_id
+            WHERE p.visibility != 'private'
+            GROUP BY p.id
+            ORDER BY p.publish_date DESC, p.created_at DESC
+        """).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_private_podcasts(conn, owner):
+    """Return all private podcasts belonging to a specific owner."""
     rows = conn.execute("""
         SELECT p.*, GROUP_CONCAT(pp.arxiv_id) as paper_ids
         FROM podcasts p
         LEFT JOIN podcast_papers pp ON p.id = pp.podcast_id
+        WHERE p.visibility = 'private' AND p.owner = ?
         GROUP BY p.id
         ORDER BY p.publish_date DESC, p.created_at DESC
-    """).fetchall()
+    """, (owner,)).fetchall()
     return [dict(row) for row in rows]

@@ -535,3 +535,145 @@ Minimum regression coverage for Drafts work:
 - server-rendered `/drafts` includes the reject modal and real reject flow wiring
 - approving a draft advances the linked submission to `approved_for_publish`
 - a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`
+
+## Episode Versioning / Revision Iteration
+
+Draft revisions are grouped by `episode_key` (normalized title).
+Each regeneration of the same topic becomes a new numbered revision
+(v1, v2, v3...). The `draft_revisions.py` module handles detection,
+assignment, and state transitions.
+
+**Invariants:**
+
+1. The `regenerate_version` action in `/api/review` creates a new
+   submission with `parent_episode_key`, `parent_draft_key`, and
+   `parent_revision` fields linking it to the original episode.
+   Source URLs are carried forward from the parent draft.
+
+2. Regeneration instructions must include the rule: "only reference
+   publicly published episodes, never private drafts or unreleased
+   content." This prevents private material from leaking into
+   regenerated public episodes.
+
+3. The `/api/revisions` endpoint returns ALL revisions for an
+   episode_key, including superseded, rejected, and published ones.
+   This is intentional — operators need full version history.
+
+4. The `edit_draft` action updates both manifest.json and sidecar
+   JSON. If either storage is missing, the update is best-effort
+   for that target. Edits record `edited_at` and `edited_by`.
+
+5. Draft card action buttons (Edit, New Version, Versions) must
+   never embed raw description text in inline HTML attributes.
+   The Edit modal loads metadata from the API to avoid HTML
+   escaping issues with malformed content.
+
+Minimum regression coverage for versioning:
+- `/api/revisions` returns all revisions including superseded/rejected
+- `/api/revisions` returns empty for unknown episode_key
+- `/api/revisions` requires episode_key parameter
+- `regenerate_version` creates submission with parent linkage
+- `regenerate_version` fails without source URLs
+- `regenerate_version` falls back to sidecar for metadata
+- `regenerate_version` includes public-only context rule
+- `edit_draft` updates manifest title and description
+- `edit_draft` also updates sidecar JSON
+- `edit_draft` rejects empty edits and missing key
+- `edit_draft` handles partial updates (title only)
+- `edit_draft` does not modify other manifest entries
+- Draft cards show Edit/New Version/Versions buttons appropriately
+
+## Secure Live Verification
+
+`scripts/verify_deploy.py` provides a secure way to verify the
+live admin worker deployment state without weakening auth or
+committing secrets to git.
+
+**Setup:** Requires three environment variables:
+- `ADMIN_URL` — base URL of the admin dashboard
+- `CF_ACCESS_CLIENT_ID` — Cloudflare Access service token ID
+- `CF_ACCESS_CLIENT_SECRET` — Cloudflare Access service token secret
+
+These must NEVER be committed to git. Store them in a local `.env`
+file (already in `.gitignore`) or export in shell profile.
+
+The script checks `/api/version`, `/api/drafts`, and
+`/api/submissions` through CF Access authentication. It is
+read-only and does not modify any state.
+
+## Private Drafts — Invariant Rules
+
+Private drafts are per-admin personal notes stored in
+`ADMIN_BUCKET/private-drafts/{admin_id}/`. They are strictly
+owner-scoped and must NEVER be public.
+
+**Hard invariants — do NOT violate these under any circumstance:**
+
+1. Private drafts are NEVER exposed via `getDrafts()`, manifest,
+   RSS feed, delegation export, generation context, episode
+   scripts, or any other cross-admin or public path.
+
+2. Private drafts are NEVER used as source material for podcast
+   generation, prior-episode lookup, callback context, or any
+   LLM prompt.
+
+3. All private draft API and page routes MUST enforce owner
+   scoping via Cloudflare Access identity (`admin_id` derived
+   from `cf-access-authenticated-user-email`). One admin's
+   private drafts are invisible to all other admins.
+
+4. Private drafts persist until explicitly deleted by the owner.
+   No automated cleanup, expiration, or archival.
+
+5. The `/private-drafts` nav tab is shown ONLY when the current
+   admin has at least one private draft. Other admins must not
+   see the tab.
+
+6. Storage prefix `private-drafts/{admin_id}/` must remain
+   disjoint from all other ADMIN_BUCKET prefixes (`submissions/`,
+   `publish-jobs/`, `manifest.json`, `queue/`, `delegation/`,
+   `reviews/`). No code path should list or read
+   `private-drafts/` except the private draft CRUD functions.
+
+Minimum regression coverage for private drafts:
+- `hasPrivateDrafts` returns false for admin with no drafts
+- `hasPrivateDrafts` returns true only for the owning admin
+- `listPrivateDrafts` returns only the requesting admin's drafts
+- `updatePrivateDraft` / `deletePrivateDraft` reject wrong owner
+- `GET /api/private-drafts` returns only current admin's drafts
+- Private drafts never appear in `/api/drafts` or `/api/delegation`
+- Nav tab shown only for admin with private drafts
+- Nav tab hidden for other admins
+- Drafts persist until explicitly deleted
+- approving a draft advances the linked submission to `approved_for_publish`
+- a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`
+
+## Private Podcasts
+
+Private podcasts are owner-scoped episodes visible only to the
+admin who created them. They are NEVER public.
+
+**CRITICAL — PRIVATE PODCAST PROTECTION RULES:**
+
+1. Private episodes (visibility='private') must NEVER appear in:
+   - The public RSS feed (feed.xml)
+   - Public episode listings or URLs
+   - The /api/drafts, /api/queue, or /api/delegation endpoints
+   - Prior-episode context used for generating new episodes
+   - Any search or recommendation surface
+
+2. Private episode storage uses `private/{owner}/episodes/` R2
+   prefix. Do NOT store private content under the public
+   `episodes/` prefix.
+
+3. Private podcast API endpoints MUST be owner-scoped. An admin
+   can only see/manage their own private podcasts.
+
+4. There is currently no promotion from private to public. This
+   is intentional for MVP safety. A private podcast must be
+   re-generated and published normally to become public.
+
+5. Private episodes use the same episode_key/revision lineage
+   system. A private episode may share an episode_key with a
+   public episode (e.g., private v1, public v2). The revision
+   chain tracks both.

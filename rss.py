@@ -468,9 +468,12 @@ def generate_feed(config):
     conn.close()
 
     # Filter out draft episodes (audio still in drafts/, not yet published)
+    # and private episodes (visibility='private') which must never appear
+    # in the public RSS feed.
     published_episodes = [
         ep for ep in local_episodes
         if "/drafts/" not in (ep.get("audio_file") or "")
+        and ep.get("visibility", "public") != "private"
     ]
 
     # Build set of titles from published episodes that should replace Anchor versions

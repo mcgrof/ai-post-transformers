@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import worker, { displayTitle, humanizeSlug, OPAQUE_ID_RE } from './worker.js';
+import worker, {
+  displayTitle, humanizeSlug, OPAQUE_ID_RE,
+  hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
+  updatePrivateDraft, deletePrivateDraft,
+  listPrivatePodcasts, deletePrivatePodcast,
+} from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
 
 
@@ -41,11 +46,16 @@ class MockBucket {
     this.putSync(key, value);
   }
 
-  async list({ prefix = '' } = {}) {
+  async delete(key) {
+    this.objects.delete(key);
+  }
+
+  async list({ prefix = '', limit } = {}) {
+    let keys = [...this.objects.keys()]
+      .filter((key) => key.startsWith(prefix));
+    if (typeof limit === 'number') keys = keys.slice(0, limit);
     return {
-      objects: [...this.objects.keys()]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => ({ key })),
+      objects: keys.map((key) => ({ key })),
     };
   }
 }
@@ -2598,6 +2608,269 @@ test('GET /drafts still renders bucket draft metadata when manifest draft key is
 });
 
 
+// ============================================================================
+// Private Drafts — owner-scoped, never public
+// ============================================================================
+
+test('hasPrivateDrafts returns false when admin has none', async () => {
+  const env = makeEnv();
+  assert.equal(await hasPrivateDrafts(env, 'alice'), false);
+});
+
+test('hasPrivateDrafts returns true when admin has drafts', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, 'alice'), true);
+});
+
+test('hasPrivateDrafts returns false for different admin', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, 'bob'), false);
+});
+
+test('createPrivateDraft stores owner-scoped draft', async () => {
+  const env = makeEnv();
+  const result = await createPrivateDraft(env, 'alice', 'alice@example.com', {
+    title: 'Test note',
+    content: 'Some private content',
+  });
+  assert.ok(result.success);
+  assert.equal(result.draft.owner_id, 'alice');
+  assert.equal(result.draft.title, 'Test note');
+
+  // Verify stored in admin bucket under correct prefix
+  const stored = await env.ADMIN_BUCKET.get(`private-drafts/alice/${result.draft.id}.json`);
+  assert.ok(stored);
+  const data = await stored.json();
+  assert.equal(data.owner_id, 'alice');
+});
+
+test('listPrivateDrafts returns only own drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice note', updated_at: '2026-01-01T00:00:00Z' },
+      'private-drafts/bob/pd_2.json': { id: 'pd_2', owner_id: 'bob', title: 'Bob note', updated_at: '2026-01-02T00:00:00Z' },
+    },
+  });
+  const aliceDrafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(aliceDrafts.length, 1);
+  assert.equal(aliceDrafts[0].title, 'Alice note');
+
+  const bobDrafts = await listPrivateDrafts(env, 'bob');
+  assert.equal(bobDrafts.length, 1);
+  assert.equal(bobDrafts[0].title, 'Bob note');
+});
+
+test('updatePrivateDraft rejects wrong owner', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice note' } },
+  });
+  const result = await updatePrivateDraft(env, 'bob', { id: 'pd_1' });
+  assert.ok(result.error);
+  assert.match(result.error, /not found/i);
+});
+
+test('updatePrivateDraft updates own draft', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Old', content: 'old' } },
+  });
+  const result = await updatePrivateDraft(env, 'alice', { id: 'pd_1', title: 'New', content: 'new' });
+  assert.ok(result.success);
+  assert.equal(result.draft.title, 'New');
+  assert.equal(result.draft.content, 'new');
+});
+
+test('deletePrivateDraft removes own draft', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  const result = await deletePrivateDraft(env, 'alice', { id: 'pd_1' });
+  assert.ok(result.success);
+
+  const remaining = await listPrivateDrafts(env, 'alice');
+  assert.equal(remaining.length, 0);
+});
+
+test('deletePrivateDraft rejects wrong owner', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  const result = await deletePrivateDraft(env, 'bob', { id: 'pd_1' });
+  assert.ok(result.error);
+});
+
+test('GET /api/private-drafts returns only current admin drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Alice secret', updated_at: '2026-01-01T00:00:00Z' },
+      'private-drafts/bob/pd_2.json': { id: 'pd_2', owner_id: 'bob', title: 'Bob secret', updated_at: '2026-01-02T00:00:00Z' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  assert.equal(data.drafts.length, 1);
+  assert.equal(data.drafts[0].title, 'Alice secret');
+});
+
+test('POST /api/private-drafts create stores draft for current admin only', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-drafts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-access-authenticated-user-email': 'alice@example.com',
+      },
+      body: JSON.stringify({ action: 'create', title: 'My secret note', content: 'Private content' }),
+    }),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  assert.ok(data.success);
+  assert.equal(data.draft.owner_id, 'alice');
+
+  // Bob cannot see it
+  const bobList = await listPrivateDrafts(env, 'bob');
+  assert.equal(bobList.length, 0);
+});
+
+test('private drafts never appear in getDrafts or manifest', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Private note' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  // getDrafts must not include private drafts
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const data = JSON.parse(await response.text());
+  const titles = (data.drafts || []).map(d => d.title);
+  assert.ok(!titles.includes('Private note'), 'Private draft must not appear in /api/drafts');
+});
+
+test('private drafts never appear in delegation export', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Secret' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/delegation'),
+    env,
+    {},
+  );
+  const text = await response.text();
+  assert.ok(!text.includes('Secret'), 'Private draft must not leak into delegation');
+});
+
+test('/private-drafts page shows Private Drafts tab when admin has drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'My note', content: 'Content', updated_at: '2026-03-30T12:00:00Z' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(html.includes('Private Drafts'), 'Page should render Private Drafts heading');
+  assert.ok(html.includes('My note'), 'Page should show the draft title');
+  assert.ok(html.includes('never published'), 'Page should state drafts are never published');
+  // Nav should contain the Private Drafts link
+  assert.ok(html.includes('href="/private-drafts"'), 'Nav should include Private Drafts link');
+});
+
+test('nav hides Private Drafts tab when admin has no private drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('href="/private-drafts"'), 'Nav must not show Private Drafts tab when admin has none');
+});
+
+test('nav shows Private Drafts tab only for owning admin', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Secret' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  // Alice sees the tab
+  const aliceRes = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const aliceHtml = await aliceRes.text();
+  assert.ok(aliceHtml.includes('href="/private-drafts"'), 'Alice should see Private Drafts tab');
+
+  // Bob does not see the tab
+  const bobRes = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'bob@example.com' },
+    }),
+    env,
+    {},
+  );
+  const bobHtml = await bobRes.text();
+  assert.ok(!bobHtml.includes('href="/private-drafts"'), 'Bob must not see Private Drafts tab');
+});
+
+test('private drafts persist until explicitly deleted', async () => {
+  const env = makeEnv();
+
+  // Create a draft
+  await createPrivateDraft(env, 'alice', 'alice@example.com', { title: 'Persistent', content: 'stays' });
+  let drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 1);
+
+  // Create another — both persist
+  await createPrivateDraft(env, 'alice', 'alice@example.com', { title: 'Also persistent', content: 'stays too' });
+  drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 2);
+
+  // Delete one — the other persists
+  await deletePrivateDraft(env, 'alice', { id: drafts[0].id });
+  drafts = await listPrivateDrafts(env, 'alice');
+  assert.equal(drafts.length, 1);
+});
+
+
+
 // =========================================================================
 // Regression: stale published-draft resurfacing (GH fix-stale-published-drafts)
 // =========================================================================
@@ -2766,4 +3039,933 @@ test('GET /api/drafts filters completed drafts from submission-card fallback pat
 
   assert.equal(body.drafts.length, 0,
     'API must not return drafts with completed publish jobs');
+});
+
+
+// =========================================================================
+// Additional coverage: private drafts isolation & edge cases
+// =========================================================================
+
+test('hasPrivateDrafts returns false for null adminId', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note' } },
+  });
+  assert.equal(await hasPrivateDrafts(env, null), false);
+  assert.equal(await hasPrivateDrafts(env, undefined), false);
+});
+
+test('listPrivateDrafts returns empty for null adminId', async () => {
+  const env = makeEnv({
+    admin: { 'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'Note', updated_at: '2026-01-01T00:00:00Z' } },
+  });
+  const drafts = await listPrivateDrafts(env, null);
+  assert.equal(drafts.length, 0);
+});
+
+test('private drafts do not appear on the main /drafts page HTML', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'PRIVATE_SENTINEL_TITLE', content: 'secret' },
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'alice@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('PRIVATE_SENTINEL_TITLE'),
+    'Private draft title must never appear on the main Drafts page');
+});
+
+test('private drafts do not appear in /api/queue', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': { id: 'pd_1', owner_id: 'alice', title: 'QUEUE_LEAK_SENTINEL' },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/queue'),
+    env,
+    {},
+  );
+  const text = await response.text();
+  assert.ok(!text.includes('QUEUE_LEAK_SENTINEL'),
+    'Private draft must not leak into /api/queue');
+});
+
+test('/private-drafts page for bob shows none of alice drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'private-drafts/alice/pd_1.json': {
+        id: 'pd_1', owner_id: 'alice', title: 'Alice Only Note',
+        content: 'Alice private content', updated_at: '2026-01-01T00:00:00Z',
+      },
+    },
+  });
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-drafts', {
+      headers: { 'cf-access-authenticated-user-email': 'bob@example.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.ok(!html.includes('Alice Only Note'),
+    'Bob must not see Alice\'s private draft on /private-drafts page');
+  assert.ok(html.includes('No private drafts'),
+    'Bob should see empty state on /private-drafts');
+});
+
+test('updatePrivateDraft with missing id returns error', async () => {
+  const env = makeEnv();
+  const result = await updatePrivateDraft(env, 'alice', {});
+  assert.ok(result.error);
+  assert.match(result.error, /missing/i);
+});
+
+test('deletePrivateDraft with missing id returns error', async () => {
+  const env = makeEnv();
+  const result = await deletePrivateDraft(env, 'alice', {});
+  assert.ok(result.error);
+  assert.match(result.error, /missing/i);
+});
+
+
+// =========================================================================
+// Additional coverage: stale published drafts — lifecycle edge cases
+// =========================================================================
+
+test('advanceLinkedSubmissions does not regress already-published submission', async () => {
+  // A submission already at 'published' must not be regressed to
+  // 'approved_for_publish' by a second approval action.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 114,
+            title: 'Already Published Paper',
+            draft_key: 'drafts/2026/03/2026-03-30-already-published-abc123.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-30T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/2603.99999'],
+        timestamp: '2026-03-30T10:00:00.000Z',
+        status: 'published',
+        draft_stem: 'drafts/2026/03/2026-03-30-already-published-abc123',
+        status_history: [
+          { status: 'submitted', at: '2026-03-30T10:00:00.000Z' },
+          { status: 'draft_generated', at: '2026-03-30T11:00:00.000Z' },
+          { status: 'approved_for_publish', at: '2026-03-30T12:00:00.000Z' },
+          { status: 'published', at: '2026-03-30T13:00:00.000Z' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-already-published-abc123.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // Verify the submission was NOT regressed from published.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-30T10-00-00-000Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'published',
+    'already-published submission must not be regressed to approved_for_publish');
+});
+
+test('submission without draft_stem is not affected by advanceLinkedSubmissions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 115,
+            title: 'Some Draft',
+            draft_key: 'drafts/2026/03/2026-03-30-some-draft-def456.mp3',
+          },
+        ],
+      },
+      'submissions/2026-03-30T11-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/2603.11111'],
+        timestamp: '2026-03-30T11:00:00.000Z',
+        status: 'submitted',
+        // No draft_stem — this submission is unrelated to the draft
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-some-draft-def456.mp3',
+        action: 'approve',
+        adminId: 'admin-1',
+        adminName: 'mcgrof',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // The unrelated submission must remain at 'submitted'.
+  const subRaw = env.ADMIN_BUCKET.objects.get(
+    'submissions/2026-03-30T11-00-00-000Z.json',
+  );
+  const sub = JSON.parse(subRaw);
+  assert.equal(sub.status, 'submitted',
+    'submission without draft_stem must not be modified');
+});
+
+
+// ============================================================================
+// Private Podcasts tests
+// ============================================================================
+
+test('POST /api/review save_private creates private publish job', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          id: 200,
+          title: 'Private Episode',
+          draft_key: 'drafts/2026/03/2026-03-30-private-ep-abc123.mp3',
+        }],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/2026-03-30-private-ep-abc123.mp3': 'audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/2026-03-30-private-ep-abc123.mp3',
+        action: 'save_private',
+        adminId: 'owner-1',
+        adminName: 'Owner One',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.action, 'save_private');
+  assert.ok(body.publish_job);
+  assert.equal(body.publish_job.visibility, 'private');
+  assert.equal(body.publish_job.owner, 'owner-1');
+});
+
+test('GET /api/private-podcasts returns only owner-scoped episodes', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/owner-1/episodes/ep1.mp3': 'audio-1',
+      'private/owner-1/episodes/ep1.json': JSON.stringify({
+        title: 'Owner 1 Episode',
+        publish_date: '2026-03-30',
+        description: 'Private ep for owner 1',
+      }),
+      'private/owner-2/episodes/ep2.mp3': 'audio-2',
+      'private/owner-2/episodes/ep2.json': JSON.stringify({
+        title: 'Owner 2 Episode',
+        publish_date: '2026-03-30',
+        description: 'Private ep for owner 2',
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'owner-1@test.com' },
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.episodes);
+  assert.equal(body.episodes.length, 1);
+  assert.equal(body.episodes[0].title, 'Owner 1 Episode');
+});
+
+test('GET /api/private-podcasts returns empty for owner with no private episodes', async () => {
+  const env = makeEnv({ podcast: {} });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'nobody@test.com' },
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.episodes);
+  assert.equal(body.episodes.length, 0);
+});
+
+test('DELETE /api/private-podcasts verifies ownership before delete', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/owner-1/episodes/ep1.mp3': 'audio',
+    },
+  });
+
+  // owner-2 tries to delete owner-1's episode
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-podcasts', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-access-authenticated-user-email': 'owner-2@test.com',
+      },
+      body: JSON.stringify({ key: 'private/owner-1/episodes/ep1.mp3' }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /Forbidden/i);
+  // Verify the file is still there
+  const obj = await env.PODCAST_BUCKET.get('private/owner-1/episodes/ep1.mp3');
+  assert.ok(obj);
+});
+
+test('GET /api/drafts excludes private-saved episodes', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+      'submissions/sub1.json': JSON.stringify({
+        urls: ['https://arxiv.org/abs/2603.99999'],
+        timestamp: '2026-03-30T10:00:00.000Z',
+        status: 'private_saved',
+        draft_stem: 'drafts/2026/03/private-draft',
+        summary: 'A private episode',
+      }),
+    },
+    podcast: {},
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  // private_saved submissions should not appear as draft cards
+  const draftCards = (body.drafts || []).filter(
+    d => d.title && d.title.includes('private'),
+  );
+  assert.equal(draftCards.length, 0);
+});
+
+test('Private episodes never appear in RSS feed data', async () => {
+  // The RSS feed is generated server-side in rss.py, not in the worker.
+  // At the API level, we verify private-saved submissions don't show in
+  // /api/drafts which is the entry point for publishing to RSS.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [] },
+    },
+    podcast: {
+      'private/owner-1/episodes/secret.mp3': 'audio',
+    },
+  });
+
+  // Verify /api/drafts does not include private R2 objects
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/drafts'),
+    env,
+    {},
+  );
+  const body = await response.json();
+  const found = (body.drafts || []).some(d =>
+    (d.key || '').includes('private/'),
+  );
+  assert.equal(found, false, 'private R2 objects must not appear in drafts');
+});
+
+test('Private Podcasts page renders for authenticated admin', async () => {
+  const env = makeEnv({
+    podcast: {
+      'private/admin-1/episodes/ep1.mp3': 'audio',
+      'private/admin-1/episodes/ep1.json': JSON.stringify({
+        title: 'My Private Episode',
+        publish_date: '2026-03-30',
+        description: 'Private content',
+      }),
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/private-podcasts', {
+      headers: { 'cf-access-authenticated-user-email': 'admin-1@test.com' },
+    }),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.match(html, /Private Podcasts/);
+  assert.match(html, /My Private Episode/);
+});
+
+
+// ── Version iteration, edit, and regenerate tests ──
+
+test('GET /api/revisions returns all revisions for episode_key including superseded', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 10, title: 'KV Caches Deep Dive', draft_key: 'drafts/2026/03/kv-caches-v1-abc123.mp3', episode_key: 'kv caches deep dive', revision: 1, revision_state: 'superseded', source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+          { id: 11, title: 'KV Caches Deep Dive', draft_key: 'drafts/2026/03/kv-caches-v2-def456.mp3', episode_key: 'kv caches deep dive', revision: 2, revision_state: null, source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/kv-caches-v1-abc123.mp3': 'audio-v1',
+      'drafts/2026/03/kv-caches-v2-def456.mp3': 'audio-v2',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=kv+caches+deep+dive');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.episode_key, 'kv caches deep dive');
+  assert.equal(body.revisions.length, 2);
+  assert.equal(body.revisions[0].revision, 1);
+  assert.equal(body.revisions[0].revision_state, 'superseded');
+  assert.equal(body.revisions[1].revision, 2);
+  assert.ok(!body.revisions[1].revision_state);
+});
+
+test('GET /api/revisions returns empty for unknown episode_key', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=nonexistent');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 0);
+});
+
+test('GET /api/revisions requires episode_key parameter', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/revisions');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /episode_key/i);
+});
+
+test('GET /api/revisions shows visibility from publish job', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 20, title: 'Private Episode', draft_key: 'drafts/2026/03/private-ep-abc123.mp3', episode_key: 'private episode', revision: 1 },
+        ],
+        conferences: {},
+      },
+      'publish-jobs/pub_2026_03_30_120000.json': {
+        job_id: 'pub_2026_03_30_120000',
+        draft_key: 'drafts/2026/03/private-ep-abc123.mp3',
+        state: 'approved_for_publish',
+        visibility: 'private',
+        owner: 'admin-1',
+        created_at: '2026-03-30T12:00:00Z',
+      },
+    },
+    podcast: {
+      'drafts/2026/03/private-ep-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=private+episode');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 1);
+  assert.equal(body.revisions[0].visibility, 'private');
+});
+
+test('POST /api/review regenerate_version creates new submission with parent linkage', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 15, title: 'Attention Mechanisms', draft_key: 'drafts/2026/03/attention-abc123.mp3', episode_key: 'attention mechanisms', revision: 1, source_urls: ['https://arxiv.org/pdf/2401.00001', 'https://arxiv.org/pdf/2401.00002'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/attention-abc123.mp3',
+      action: 'regenerate_version',
+      focus_text: 'Emphasize practical applications more',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.action, 'regenerate_version');
+  assert.equal(body.new_revision, 2);
+  assert.equal(body.episode_key, 'attention mechanisms');
+  assert.ok(body.submission_key);
+
+  // Verify the submission was persisted
+  const subData = await env.ADMIN_BUCKET.get(body.submission_key);
+  const sub = await subData.json();
+  assert.equal(sub.status, 'submitted');
+  assert.equal(sub.parent_episode_key, 'attention mechanisms');
+  assert.equal(sub.parent_draft_key, 'drafts/2026/03/attention-abc123.mp3');
+  assert.equal(sub.parent_revision, 1);
+  assert.deepEqual(sub.urls, ['https://arxiv.org/pdf/2401.00001', 'https://arxiv.org/pdf/2401.00002']);
+  assert.ok(sub.instructions.includes('Emphasize practical applications'));
+  assert.ok(sub.instructions.includes('publicly published episodes'));
+});
+
+test('POST /api/review regenerate_version fails without source URLs', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 16, title: 'Empty Sources', draft_key: 'drafts/2026/03/empty-src-abc123.mp3', episode_key: 'empty sources', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/empty-src-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /source URLs/i);
+});
+
+test('POST /api/review regenerate_version falls back to sidecar for metadata', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {
+      'drafts/2026/03/sidecar-only-abc123.json': {
+        title: 'Sidecar Episode',
+        episode_key: 'sidecar episode',
+        revision: 1,
+        source_urls: ['https://arxiv.org/pdf/2401.99999'],
+      },
+    },
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/sidecar-only-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.new_revision, 2);
+});
+
+test('POST /api/review regenerate_version requires draft key', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'regenerate_version' }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+});
+
+test('POST /api/review edit_draft updates manifest title and description', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 17, title: 'Old Title', description: 'Old desc', draft_key: 'drafts/2026/03/edit-test-abc123.mp3', episode_key: 'old title', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/edit-test-abc123.mp3',
+      action: 'edit_draft',
+      title: 'New Title',
+      description: 'New description with more detail',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.manifest_updated, true);
+
+  // Verify manifest was updated
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'New Title');
+  assert.equal(manifest.drafts[0].description, 'New description with more detail');
+  assert.ok(manifest.drafts[0].edited_at);
+});
+
+test('POST /api/review edit_draft also updates sidecar JSON', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 18, title: 'Sidecar Edit', draft_key: 'drafts/2026/03/sidecar-edit-abc123.mp3', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/sidecar-edit-abc123.json': {
+        title: 'Sidecar Edit',
+        description: 'Original sidecar desc',
+      },
+    },
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/sidecar-edit-abc123.mp3',
+      action: 'edit_draft',
+      title: 'Updated Sidecar Title',
+      description: 'Updated sidecar description',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // Verify sidecar was updated
+  const sidecarData = await env.PODCAST_BUCKET.get('drafts/2026/03/sidecar-edit-abc123.json');
+  const sidecar = await sidecarData.json();
+  assert.equal(sidecar.title, 'Updated Sidecar Title');
+  assert.equal(sidecar.description, 'Updated sidecar description');
+  assert.ok(sidecar.edited_at);
+});
+
+test('POST /api/review edit_draft rejects when nothing to edit', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/noop-abc123.mp3',
+      action: 'edit_draft',
+    }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /nothing to edit/i);
+});
+
+test('POST /api/review edit_draft requires key', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'edit_draft', title: 'Test' }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+});
+
+test('POST /api/review edit_draft handles partial updates (title only)', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 19, title: 'Original', description: 'Keep this', draft_key: 'drafts/2026/03/partial-abc123.mp3', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/partial-abc123.mp3',
+      action: 'edit_draft',
+      title: 'New Title Only',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'New Title Only');
+  assert.equal(manifest.drafts[0].description, 'Keep this');
+});
+
+test('GET /api/drafts includes source_urls from manifest', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 25, title: 'Source Test', draft_key: 'drafts/2026/03/src-test-abc123.mp3', source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/src-test-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/drafts');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.drafts.length >= 1);
+  const draft = body.drafts.find(d => d.key === 'drafts/2026/03/src-test-abc123.mp3');
+  assert.ok(draft);
+  assert.deepEqual(draft.source_urls, ['https://arxiv.org/pdf/2401.00001']);
+});
+
+test('GET /drafts draft card shows Edit and New Version buttons when episode_key exists', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 30, title: 'Versioned Draft', draft_key: 'drafts/2026/03/versioned-abc123.mp3', episode_key: 'versioned draft', revision: 2 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/versioned-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('Edit'));
+  assert.ok(html.includes('New Version'));
+  assert.ok(html.includes('Versions'));
+  assert.ok(html.includes('(v2)'));
+});
+
+test('GET /drafts draft card shows Edit button even without episode_key', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 31, title: 'No Episode Key Draft', draft_key: 'drafts/2026/03/no-ek-abc123.mp3' },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/no-ek-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('Edit'));
+  // No episode_key, so the draft card action buttons should not contain
+  // the openRegenerateModal onclick for this specific draft. The modal
+  // shell and function definition still exist on the page, but the
+  // button to trigger regeneration for this draft should not.
+  assert.ok(!html.includes("openRegenerateModal('drafts/2026/03/no-ek-abc123.mp3'"));
+});
+
+test('GET /drafts renders edit, regenerate, and versions modals', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 32, title: 'Modal Test', draft_key: 'drafts/2026/03/modal-abc123.mp3' },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/modal-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('id="edit-modal"'));
+  assert.ok(html.includes('id="regenerate-modal"'));
+  assert.ok(html.includes('id="versions-modal"'));
+  assert.ok(html.includes('id="reject-modal"'));
+});
+
+test('POST /api/review regenerate_version includes context rule in instructions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 33, title: 'Context Test', draft_key: 'drafts/2026/03/ctx-test-abc123.mp3', episode_key: 'context test', revision: 3, source_urls: ['https://arxiv.org/pdf/2401.55555'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/ctx-test-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.new_revision, 4);
+
+  const subData = await env.ADMIN_BUCKET.get(body.submission_key);
+  const sub = await subData.json();
+  assert.ok(sub.instructions.includes('publicly published episodes'));
+  assert.ok(sub.instructions.includes('never private'));
+  assert.ok(sub.instructions.includes('revision 4'));
+});
+
+test('POST /api/review edit_draft does not modify other manifest entries', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 40, title: 'Keep This', description: 'Untouched', draft_key: 'drafts/2026/03/keep-abc123.mp3' },
+          { id: 41, title: 'Edit This', description: 'Will change', draft_key: 'drafts/2026/03/edit-abc123.mp3' },
+        ],
+        conferences: { neurips2025: { papers: 5 } },
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/edit-abc123.mp3',
+      action: 'edit_draft',
+      title: 'Edited Title',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'Keep This');
+  assert.equal(manifest.drafts[0].description, 'Untouched');
+  assert.equal(manifest.drafts[1].title, 'Edited Title');
+  assert.equal(manifest.drafts[1].description, 'Will change');
+  assert.deepEqual(manifest.conferences, { neurips2025: { papers: 5 } });
+});
+
+test('GET /api/revisions does not filter out rejected or published revisions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 50, title: 'Full History', draft_key: 'drafts/2026/03/hist-v1-abc123.mp3', episode_key: 'full history', revision: 1, revision_state: 'rejected' },
+          { id: 51, title: 'Full History', draft_key: 'drafts/2026/03/hist-v2-def456.mp3', episode_key: 'full history', revision: 2, revision_state: 'published' },
+          { id: 52, title: 'Full History', draft_key: 'drafts/2026/03/hist-v3-ghi789.mp3', episode_key: 'full history', revision: 3, revision_state: null },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/hist-v1-abc123.mp3': 'v1',
+      'drafts/2026/03/hist-v2-def456.mp3': 'v2',
+      'drafts/2026/03/hist-v3-ghi789.mp3': 'v3',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=full+history');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 3);
+  assert.equal(body.revisions[0].revision_state, 'rejected');
+  assert.equal(body.revisions[1].revision_state, 'published');
+  assert.ok(!body.revisions[2].revision_state);
 });
