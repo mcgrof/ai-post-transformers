@@ -117,6 +117,29 @@ def init_db(conn):
         conn.execute("ALTER TABLE podcasts ADD COLUMN image_file TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migration: add published_at column if it doesn't exist yet
+    try:
+        conn.execute("ALTER TABLE podcasts ADD COLUMN published_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migration: add revision-tracking columns
+    try:
+        conn.execute("ALTER TABLE podcasts ADD COLUMN episode_key TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE podcasts ADD COLUMN revision INTEGER DEFAULT 1"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE podcasts ADD COLUMN revision_state TEXT "
+            "DEFAULT 'active'"
+        )
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
 
 
@@ -201,7 +224,8 @@ def insert_podcast(conn, title, publish_date, elevenlabs_project_id=None,
 
 def update_podcast(conn, podcast_id, **kwargs):
     valid_fields = {"title", "publish_date", "spotify_url", "elevenlabs_project_id",
-                     "audio_file", "description", "image_file"}
+                     "audio_file", "description", "image_file", "published_at",
+                     "episode_key", "revision", "revision_state"}
     updates = {k: v for k, v in kwargs.items() if k in valid_fields}
     if not updates:
         return

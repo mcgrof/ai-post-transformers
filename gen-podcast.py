@@ -586,6 +586,13 @@ def _publish_episode(config, draft=None):
     conn_pub.execute("UPDATE podcasts SET publish_date = ?, published_at = ? WHERE id = ?",
                      (today, published_at, episode.get("id")))
     conn_pub.commit()
+
+    # Mark revision as published and supersede older revisions
+    from draft_revisions import mark_published
+    ep_key = mark_published(conn_pub, episode.get("id"))
+    if ep_key:
+        print(f"[Publish] Revision state: published (episode_key={ep_key})", file=sys.stderr)
+
     conn_pub.close()
     print(f"[Publish] publish_date set to {today}; published_at={published_at}", file=sys.stderr)
 
@@ -641,34 +648,6 @@ def _publish_episode(config, draft=None):
     _publish_site(config)
 
     # Remove from admin drafts + delete R2 draft mp3 now that publish succeeded
-    try:
-        import boto3, json, os as _os
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=_os.environ["AWS_ENDPOINT_URL"],
-            aws_access_key_id=_os.environ["AWS_ACCESS_KEY_ID"],
-            aws_secret_access_key=_os.environ["AWS_SECRET_ACCESS_KEY"],
-            region_name="auto",
-        )
-        draft_id = episode.get("id")
-        manifest_obj = s3.get_object(Bucket="podcast-admin", Key="manifest.json")
-        manifest = json.loads(manifest_obj["Body"].read())
-        before = len(manifest.get("drafts", []))
-        manifest["drafts"] = [d for d in manifest.get("drafts", []) if d.get("id") != draft_id]
-        s3.put_object(Bucket="podcast-admin", Key="manifest.json", Body=json.dumps(manifest, indent=2), ContentType="application/json")
-        try:
-            s3.delete_object(Bucket="ai-post-transformers", Key=f"drafts/ep{draft_id}.mp3")
-        except Exception:
-            pass
-        print(f"[Publish] Admin manifest cleaned: {before} -> {len(manifest.get('drafts', []))}", file=sys.stderr)
-    except Exception as e:
-        print(f"[Publish] Admin cleanup skipped: {e}", file=sys.stderr)
-
-    print(f"\nPublished!", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()
     try:
         import boto3, json, os as _os
         s3 = boto3.client(
