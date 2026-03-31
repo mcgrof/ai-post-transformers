@@ -82,16 +82,18 @@ def _episode_r2_prefix(filename):
     return "episodes"
 
 
-def publish_episode(audio_file, image_file=None, srt_file=None):
+def publish_episode(audio_file, image_file=None, srt_file=None,
+                    r2_prefix=None):
     """Upload all episode artifacts to R2.
 
-    Files are organized under episodes/YYYY/MM/ based on the
-    episode date embedded in the filename.
+    Files are organized under episodes/ by default, or under the
+    given r2_prefix for private episodes.
 
     Args:
         audio_file: Path to the MP3 file.
         image_file: Path to the PNG cover art (optional).
         srt_file: Path to the SRT transcript (optional).
+        r2_prefix: Custom R2 key prefix (e.g. "private/owner/episodes").
 
     Returns:
         Dict of uploaded URLs keyed by type.
@@ -100,7 +102,7 @@ def publish_episode(audio_file, image_file=None, srt_file=None):
     urls = {}
 
     audio_basename = os.path.basename(audio_file)
-    prefix = _episode_r2_prefix(audio_basename)
+    prefix = r2_prefix if r2_prefix else _episode_r2_prefix(audio_basename)
 
     # Upload audio
     urls["audio"] = upload_file(

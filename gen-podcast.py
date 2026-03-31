@@ -234,6 +234,14 @@ modes:
         help="limit listing to the latest N episodes",
     )
     parser.add_argument(
+        "--private", action="store_true",
+        help="publish as a private episode (use with 'publish' subcommand)",
+    )
+    parser.add_argument(
+        "--owner", metavar="OWNER_ID",
+        help="owner identity for private episodes (email or admin ID)",
+    )
+    parser.add_argument(
         "--llm-backend", choices=["openai", "claude-cli", "anthropic"],
         help="override podcast.llm_backend for this run only",
     )
@@ -265,6 +273,13 @@ modes:
     # --top requires a listing flag
     if args.top is not None and not (args.list_podcasts or args.list_generated_podcasts):
         parser.error("--top requires --list-podcasts or --list-generated-podcasts")
+
+    # --private requires --owner and publish context
+    if args.private and not args.owner:
+        parser.error("--private requires --owner")
+    if args.private:
+        if not (args.args and args.args[0] == "publish") and not args.publish:
+            parser.error("--private requires the 'publish' subcommand or --publish")
 
     # --draft requires publish/gen-viz subcommand or --publish
     if args.draft and not args.publish:
@@ -303,7 +318,8 @@ modes:
         from podcast import generate_podcast
         generate_podcast(config, arxiv_id=args.paper)
     elif command == "publish":
-        _publish_episode(config, draft=args.draft)
+        _publish_episode(config, draft=args.draft,
+                         private=args.private, owner=args.owner)
         return
     elif command == "publish-site":
         _publish_site(config)
@@ -334,7 +350,8 @@ modes:
 
     # --publish after generation
     if args.publish:
-        _publish_episode(config, draft=args.draft)
+        _publish_episode(config, draft=args.draft,
+                         private=args.private, owner=args.owner)
 
 
 def _find_episode_by_draft(draft_path):
@@ -534,10 +551,12 @@ def _publish_site(config):
     print(f"\n{_c('32', 'Site published!')}", file=sys.stderr)
 
 
-def _publish_episode(config, draft=None):
+def _publish_episode(config, draft=None, private=False, owner=None):
     """Upload an episode to R2 and regenerate the RSS feed.
 
     Requires --draft to specify which draft to publish.
+    When private=True, uploads to private/{owner}/episodes/ and skips
+    RSS regeneration, site publish, and public/ copy.
     """
     from r2_upload import publish_episode, upload_feed
     from rss import generate_feed
@@ -569,17 +588,61 @@ def _publish_episode(config, draft=None):
             image = candidate
     srt = os.path.splitext(audio)[0] + ".srt" if audio else None
 
-    print(f"\n[Publish] Uploading: {episode.get('title', 'Untitled')}",
+    r2_prefix = f"private/{owner}/episodes" if private else None
+    label = "Private publish" if private else "Publish"
+    print(f"\n[{label}] Uploading: {episode.get('title', 'Untitled')}",
           file=sys.stderr)
-    urls = publish_episode(audio, image_file=image, srt_file=srt)
+    urls = publish_episode(audio, image_file=image, srt_file=srt,
+                           r2_prefix=r2_prefix)
 
     for k, v in urls.items():
-        print(f"[Publish] {k}: {v}", file=sys.stderr)
+        print(f"[{label}] {k}: {v}", file=sys.stderr)
 
     # Set publish_date to today and published_at to now (approval/publish ordering)
     from datetime import date, datetime, timezone
     today = date.today().isoformat()
     published_at = datetime.now(timezone.utc).isoformat()
+
+    if private:
+        # Private episodes: set visibility/owner in DB, skip RSS/site/public copy
+        conn_priv = get_connection()
+        init_db(conn_priv)
+        from db import update_podcast
+        conn_priv.execute(
+            "UPDATE podcasts SET publish_date = ?, published_at = ? WHERE id = ?",
+            (today, published_at, episode.get("id")))
+        update_podcast(conn_priv, episode.get("id"),
+                       visibility="private", owner=owner)
+        conn_priv.commit()
+        conn_priv.close()
+
+        # Upload JSON sidecar so the admin worker can read metadata
+        import json as _json
+        sidecar = {
+            "title": episode.get("title", "Untitled"),
+            "publish_date": today,
+            "description": episode.get("description", ""),
+            "source_urls": episode.get("source_urls", ""),
+            "owner": owner,
+        }
+        audio_basename = os.path.basename(audio)
+        sidecar_stem = os.path.splitext(audio_basename)[0]
+        sidecar_key = f"private/{owner}/episodes/{sidecar_stem}.json"
+        from r2_upload import get_r2_client
+        client = get_r2_client()
+        bucket = os.environ.get("R2_BUCKET", "ai-post-transformers")
+        client.put_object(
+            Bucket=bucket,
+            Key=sidecar_key,
+            Body=_json.dumps(sidecar).encode(),
+            ContentType="application/json",
+        )
+        print(f"[Private publish] Uploaded sidecar: {sidecar_key}",
+              file=sys.stderr)
+        print(f"[Private publish] Done. Episode saved as private for {owner}",
+              file=sys.stderr)
+        return
+
     pub_date = today
     conn_pub = get_connection()
     init_db(conn_pub)
