@@ -361,7 +361,7 @@ def _find_episode_by_draft(draft_path):
 
     conn = get_connection()
     init_db(conn)
-    episodes = list_podcasts(conn)
+    episodes = list_podcasts(conn, include_private=True)
     conn.close()
 
     for ep in episodes:

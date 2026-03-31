@@ -497,6 +497,80 @@ def _current_running_step(job: dict) -> str:
     return _running_step(job) or "publish"
 
 
+def process_private_job(
+    job_path: str | Path,
+    *,
+    admin_id: str,
+    admin_name: str | None = None,
+    owner: str,
+    lease_seconds: int = 900,
+    store=None,
+) -> dict:
+    """Publish a private episode: upload to private R2 prefix, skip RSS.
+
+    Private episodes are uploaded under private/{owner}/episodes/ and
+    never appear in the public feed or public/ directory.
+    """
+    store = store or get_publish_job_store()
+    job = load_job(job_path, store=store)
+    if job.get("claimed_by_admin_id") and job["claimed_by_admin_id"] != admin_id:
+        raise RuntimeError(
+            f"job {job['job_id']} is claimed by {job.get('claimed_by_admin_id')}"
+        )
+
+    try:
+        start_step(job, "publish")
+        save_job(job, store=store)
+        publish_draft = _resolve_publish_draft(job)
+        _run_shell_with_heartbeat(
+            f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'"
+            f" --private --owner '{owner}'",
+            job=job,
+            admin_id=admin_id,
+            lease_seconds=lease_seconds,
+            store=store,
+        )
+        complete_step(job, "publish", _episode_artifacts(job))
+        _update_job_with_heartbeat(
+            job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
+        )
+
+        # Private episodes skip viz, cover, and site steps
+        for step in ("viz", "cover", "site"):
+            complete_step(job, step)
+            save_job(job, store=store)
+
+        # Set visibility and owner in the DB
+        episode = _find_episode(job)
+        if episode:
+            conn = get_connection()
+            init_db(conn)
+            from db import update_podcast
+            update_podcast(conn, episode["id"],
+                           visibility="private", owner=owner)
+            conn.close()
+
+        start_step(job, "verify")
+        save_job(job, store=store)
+        artifacts = _episode_artifacts(job)
+        complete_step(job, "verify", artifacts)
+        complete_job(job)
+        save_job(job, store=store)
+        save_result(job, store=store)
+        _advance_linked_submissions(job, store)
+        return job
+    except subprocess.CalledProcessError as exc:
+        fail_job(job, step=_current_running_step(job), error=str(exc))
+        save_job(job, store=store)
+        save_result(job, store=store)
+        raise
+    except Exception as exc:
+        fail_job(job, step=_current_running_step(job), error=str(exc))
+        save_job(job, store=store)
+        save_result(job, store=store)
+        raise
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one durable publish job.")
     parser.add_argument("--job", required=True, help="path to publish job JSON")
