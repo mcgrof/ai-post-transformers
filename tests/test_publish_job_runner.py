@@ -440,3 +440,111 @@ def test_advance_linked_submissions_noop_without_r2_store():
     advanced = _advance_linked_submissions(job, store)
 
     assert advanced == []
+
+
+def test_private_publish_uses_private_r2_prefix(monkeypatch, tmp_path):
+    """Verify private publish passes --private --owner flags to gen-podcast.py."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", lambda job: None)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"
+    assert len(commands) == 1
+    assert "--private" in commands[0]
+    assert "--owner 'user@example.com'" in commands[0]
+
+
+def test_private_publish_does_not_regenerate_rss(monkeypatch, tmp_path):
+    """Verify private publish skips viz, cover, and site steps (no RSS regen)."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", lambda job: None)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    # Only the publish command should run; no viz, cover, or site
+    assert len(commands) == 1
+    assert "gen-podcast.py publish" in commands[0]
+    # No make publish-site, no gen-viz, no backfill_images
+    for cmd in commands:
+        assert "publish-site" not in cmd
+        assert "gen-viz" not in cmd
+        assert "backfill_images" not in cmd
+
+    # Skipped steps should be marked as skipped
+    assert finished["progress"]["viz"] == "skipped"
+    assert finished["progress"]["cover"] == "skipped"
+    assert finished["progress"]["site"] == "skipped"
+
+
+def test_private_publish_sets_visibility_and_owner(monkeypatch, tmp_path):
+    """Verify private publish sets DB visibility and owner when episode found."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+    update_calls = []
+
+    def fake_find_episode(job):
+        return {"id": 42, "audio_file": "public/2026/03/example.mp3"}
+
+    def fake_update_podcast(conn, podcast_id, **kwargs):
+        update_calls.append((podcast_id, kwargs))
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", fake_find_episode)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+    monkeypatch.setattr("scripts.publish_job_runner.get_connection", lambda: type("C", (), {"execute": lambda s, *a: None, "commit": lambda s: None, "close": lambda s: None, "row_factory": None})())
+    monkeypatch.setattr("scripts.publish_job_runner.init_db", lambda conn: None)
+    monkeypatch.setattr("db.update_podcast", fake_update_podcast)
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"
+    assert len(update_calls) == 1
+    assert update_calls[0] == (42, {"visibility": "private", "owner": "user@example.com"})

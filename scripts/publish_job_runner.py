@@ -27,6 +27,7 @@ from scripts.publish_jobs import (
     load_job,
     save_job,
     save_result,
+    skip_step,
     start_step,
 )
 
@@ -537,7 +538,7 @@ def process_private_job(
 
         # Private episodes skip viz, cover, and site steps
         for step in ("viz", "cover", "site"):
-            complete_step(job, step)
+            skip_step(job, step, reason="private publish")
             save_job(job, store=store)
 
         # Set visibility and owner in the DB
