@@ -580,3 +580,33 @@ Minimum regression coverage for private drafts:
 - Drafts persist until explicitly deleted
 - approving a draft advances the linked submission to `approved_for_publish`
 - a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`
+
+## Private Podcasts
+
+Private podcasts are owner-scoped episodes visible only to the
+admin who created them. They are NEVER public.
+
+**CRITICAL — PRIVATE PODCAST PROTECTION RULES:**
+
+1. Private episodes (visibility='private') must NEVER appear in:
+   - The public RSS feed (feed.xml)
+   - Public episode listings or URLs
+   - The /api/drafts, /api/queue, or /api/delegation endpoints
+   - Prior-episode context used for generating new episodes
+   - Any search or recommendation surface
+
+2. Private episode storage uses `private/{owner}/episodes/` R2
+   prefix. Do NOT store private content under the public
+   `episodes/` prefix.
+
+3. Private podcast API endpoints MUST be owner-scoped. An admin
+   can only see/manage their own private podcasts.
+
+4. There is currently no promotion from private to public. This
+   is intentional for MVP safety. A private podcast must be
+   re-generated and published normally to become public.
+
+5. Private episodes use the same episode_key/revision lineage
+   system. A private episode may share an episode_key with a
+   public episode (e.g., private v1, public v2). The revision
+   chain tracks both.
