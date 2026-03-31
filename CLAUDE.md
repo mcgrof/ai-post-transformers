@@ -533,6 +533,73 @@ Minimum regression coverage for Drafts work:
 - stale or mismatched manifest draft key does not blank the bucket draft card -> sidecar-backed metadata still renders
 - `draft_manifest.py` backfill updates an existing stale entry (not just missing entries)
 - server-rendered `/drafts` includes the reject modal and real reject flow wiring
+- approving a draft advances the linked submission to `approved_for_publish`
+- a stale `draft_generated` submission does not resurface as a draft card when its publish job is `publish_completed`
+
+## Episode Versioning / Revision Iteration
+
+Draft revisions are grouped by `episode_key` (normalized title).
+Each regeneration of the same topic becomes a new numbered revision
+(v1, v2, v3...). The `draft_revisions.py` module handles detection,
+assignment, and state transitions.
+
+**Invariants:**
+
+1. The `regenerate_version` action in `/api/review` creates a new
+   submission with `parent_episode_key`, `parent_draft_key`, and
+   `parent_revision` fields linking it to the original episode.
+   Source URLs are carried forward from the parent draft.
+
+2. Regeneration instructions must include the rule: "only reference
+   publicly published episodes, never private drafts or unreleased
+   content." This prevents private material from leaking into
+   regenerated public episodes.
+
+3. The `/api/revisions` endpoint returns ALL revisions for an
+   episode_key, including superseded, rejected, and published ones.
+   This is intentional — operators need full version history.
+
+4. The `edit_draft` action updates both manifest.json and sidecar
+   JSON. If either storage is missing, the update is best-effort
+   for that target. Edits record `edited_at` and `edited_by`.
+
+5. Draft card action buttons (Edit, New Version, Versions) must
+   never embed raw description text in inline HTML attributes.
+   The Edit modal loads metadata from the API to avoid HTML
+   escaping issues with malformed content.
+
+Minimum regression coverage for versioning:
+- `/api/revisions` returns all revisions including superseded/rejected
+- `/api/revisions` returns empty for unknown episode_key
+- `/api/revisions` requires episode_key parameter
+- `regenerate_version` creates submission with parent linkage
+- `regenerate_version` fails without source URLs
+- `regenerate_version` falls back to sidecar for metadata
+- `regenerate_version` includes public-only context rule
+- `edit_draft` updates manifest title and description
+- `edit_draft` also updates sidecar JSON
+- `edit_draft` rejects empty edits and missing key
+- `edit_draft` handles partial updates (title only)
+- `edit_draft` does not modify other manifest entries
+- Draft cards show Edit/New Version/Versions buttons appropriately
+
+## Secure Live Verification
+
+`scripts/verify_deploy.py` provides a secure way to verify the
+live admin worker deployment state without weakening auth or
+committing secrets to git.
+
+**Setup:** Requires three environment variables:
+- `ADMIN_URL` — base URL of the admin dashboard
+- `CF_ACCESS_CLIENT_ID` — Cloudflare Access service token ID
+- `CF_ACCESS_CLIENT_SECRET` — Cloudflare Access service token secret
+
+These must NEVER be committed to git. Store them in a local `.env`
+file (already in `.gitignore`) or export in shell profile.
+
+The script checks `/api/version`, `/api/drafts`, and
+`/api/submissions` through CF Access authentication. It is
+read-only and does not modify any state.
 
 ## Private Drafts — Invariant Rules
 
