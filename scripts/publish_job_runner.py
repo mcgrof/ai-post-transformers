@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -26,6 +27,7 @@ from scripts.publish_jobs import (
     load_job,
     save_job,
     save_result,
+    skip_step,
     start_step,
 )
 
@@ -426,6 +428,7 @@ def process_job(
         complete_job(job)
         save_job(job, store=store)
         save_result(job, verification=verification, store=store)
+        _advance_linked_submissions(job, store)
         return job
     except subprocess.CalledProcessError as exc:
         fail_job(job, step=_current_running_step(job), error=str(exc))
@@ -439,8 +442,134 @@ def process_job(
         raise
 
 
+def _advance_linked_submissions(job: dict, store) -> list[str]:
+    """Advance R2 submissions matching this job's draft to 'published'.
+
+    When the publish runner completes a job, the linked submission
+    record in the admin bucket must be advanced to 'published' so it
+    stops resurfacing as a draft card on the Drafts page.
+    """
+    if not hasattr(store, "client") or not hasattr(store, "bucket"):
+        return []
+    draft_key = job.get("draft_key", "")
+    draft_stem = draft_key.replace(".mp3", "").replace(".txt", "")
+    if not draft_stem:
+        return []
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    advanced = []
+    try:
+        paginator = store.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(
+            Bucket=store.bucket, Prefix="submissions/"
+        ):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                raw = store.client.get_object(
+                    Bucket=store.bucket, Key=key
+                )
+                body = raw["Body"].read()
+                if isinstance(body, bytes):
+                    body = body.decode("utf-8")
+                sub = json.loads(body)
+                sub_stem = sub.get("draft_stem", "")
+                if not sub_stem or sub_stem != draft_stem:
+                    continue
+                if sub.get("status") == "published":
+                    continue
+                sub["status"] = "published"
+                sub["updated_at"] = now
+                history = sub.get("status_history") or []
+                history.append({"status": "published", "at": now})
+                sub["status_history"] = history
+                store.client.put_object(
+                    Bucket=store.bucket,
+                    Key=key,
+                    Body=json.dumps(sub, indent=2) + "\n",
+                    ContentType="application/json",
+                )
+                advanced.append(key)
+    except Exception as exc:
+        print(f"warning: failed to advance submissions: {exc}")
+    return advanced
+
+
 def _current_running_step(job: dict) -> str:
     return _running_step(job) or "publish"
+
+
+def process_private_job(
+    job_path: str | Path,
+    *,
+    admin_id: str,
+    admin_name: str | None = None,
+    owner: str,
+    lease_seconds: int = 900,
+    store=None,
+) -> dict:
+    """Publish a private episode: upload to private R2 prefix, skip RSS.
+
+    Private episodes are uploaded under private/{owner}/episodes/ and
+    never appear in the public feed or public/ directory.
+    """
+    store = store or get_publish_job_store()
+    job = load_job(job_path, store=store)
+    if job.get("claimed_by_admin_id") and job["claimed_by_admin_id"] != admin_id:
+        raise RuntimeError(
+            f"job {job['job_id']} is claimed by {job.get('claimed_by_admin_id')}"
+        )
+
+    try:
+        start_step(job, "publish")
+        save_job(job, store=store)
+        publish_draft = _resolve_publish_draft(job)
+        _run_shell_with_heartbeat(
+            f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'"
+            f" --private --owner '{owner}'",
+            job=job,
+            admin_id=admin_id,
+            lease_seconds=lease_seconds,
+            store=store,
+        )
+        complete_step(job, "publish", _episode_artifacts(job))
+        _update_job_with_heartbeat(
+            job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
+        )
+
+        # Private episodes skip viz, cover, and site steps
+        for step in ("viz", "cover", "site"):
+            skip_step(job, step, reason="private publish")
+            save_job(job, store=store)
+
+        # Set visibility and owner in the DB
+        episode = _find_episode(job)
+        if episode:
+            conn = get_connection()
+            init_db(conn)
+            from db import update_podcast
+            update_podcast(conn, episode["id"],
+                           visibility="private", owner=owner)
+            conn.close()
+
+        start_step(job, "verify")
+        save_job(job, store=store)
+        artifacts = _episode_artifacts(job)
+        complete_step(job, "verify", artifacts)
+        complete_job(job)
+        save_job(job, store=store)
+        save_result(job, store=store)
+        _advance_linked_submissions(job, store)
+        return job
+    except subprocess.CalledProcessError as exc:
+        fail_job(job, step=_current_running_step(job), error=str(exc))
+        save_job(job, store=store)
+        save_result(job, store=store)
+        raise
+    except Exception as exc:
+        fail_job(job, step=_current_running_step(job), error=str(exc))
+        save_job(job, store=store)
+        save_result(job, store=store)
+        raise
 
 
 def main() -> int:

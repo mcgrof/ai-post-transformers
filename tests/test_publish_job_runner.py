@@ -302,3 +302,249 @@ def test_run_shell_with_heartbeat_renews_lease_during_long_step(monkeypatch):
     )
 
     assert updates == ["pub_2026_03_28_130000"]
+
+
+# =========================================================================
+# _advance_linked_submissions
+# =========================================================================
+
+import io
+import json
+
+
+class FakeS3Client:
+    """Minimal S3-compatible mock for _advance_linked_submissions tests."""
+
+    def __init__(self, objects=None):
+        self._objects = dict(objects or {})
+
+    def get_paginator(self, method):
+        assert method == "list_objects_v2"
+        return self
+
+    def paginate(self, Bucket, Prefix):
+        contents = [
+            {"Key": k}
+            for k in self._objects
+            if k.startswith(Prefix)
+        ]
+        return [{"Contents": contents}]
+
+    def get_object(self, Bucket, Key):
+        data = self._objects[Key]
+        body = data if isinstance(data, bytes) else json.dumps(data).encode()
+        return {"Body": io.BytesIO(body)}
+
+    def put_object(self, Bucket, Key, Body, ContentType=None):
+        self._objects[Key] = json.loads(Body)
+
+
+class FakeR2Store:
+    """Store with client and bucket attrs for _advance_linked_submissions."""
+
+    def __init__(self, objects=None):
+        self.client = FakeS3Client(objects)
+        self.bucket = "test-bucket"
+
+
+def test_advance_linked_submissions_sets_published(monkeypatch):
+    from scripts.publish_job_runner import _advance_linked_submissions
+
+    sub = {
+        "urls": ["https://arxiv.org/abs/2603.20639"],
+        "status": "draft_generated",
+        "draft_stem": "drafts/2026/03/2026-03-28-agentic-ai-d06561",
+        "status_history": [],
+    }
+    store = FakeR2Store({
+        "submissions/2026-03-28T20-02-42-230Z.json": sub,
+    })
+    job = {"draft_key": "drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == ["submissions/2026-03-28T20-02-42-230Z.json"]
+    updated = store.client._objects["submissions/2026-03-28T20-02-42-230Z.json"]
+    assert updated["status"] == "published"
+    assert any(h["status"] == "published" for h in updated["status_history"])
+
+
+def test_advance_linked_submissions_skips_already_published():
+    from scripts.publish_job_runner import _advance_linked_submissions
+
+    sub = {
+        "status": "published",
+        "draft_stem": "drafts/2026/03/2026-03-28-agentic-ai-d06561",
+    }
+    store = FakeR2Store({
+        "submissions/2026-03-28T20-02-42-230Z.json": sub,
+    })
+    job = {"draft_key": "drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == []
+    updated = store.client._objects["submissions/2026-03-28T20-02-42-230Z.json"]
+    assert updated["status"] == "published"
+
+
+def test_advance_linked_submissions_skips_unrelated_submissions():
+    from scripts.publish_job_runner import _advance_linked_submissions
+
+    related = {
+        "status": "draft_generated",
+        "draft_stem": "drafts/2026/03/2026-03-28-agentic-ai-d06561",
+        "status_history": [],
+    }
+    unrelated = {
+        "status": "draft_generated",
+        "draft_stem": "drafts/2026/03/2026-03-28-other-paper-xyz789",
+        "status_history": [],
+    }
+    store = FakeR2Store({
+        "submissions/related.json": related,
+        "submissions/unrelated.json": unrelated,
+    })
+    job = {"draft_key": "drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == ["submissions/related.json"]
+    assert store.client._objects["submissions/unrelated.json"]["status"] == "draft_generated"
+
+
+def test_advance_linked_submissions_skips_no_draft_stem():
+    from scripts.publish_job_runner import _advance_linked_submissions
+
+    sub_no_stem = {
+        "status": "submitted",
+        "urls": ["https://arxiv.org/abs/2603.11111"],
+    }
+    store = FakeR2Store({
+        "submissions/no-stem.json": sub_no_stem,
+    })
+    job = {"draft_key": "drafts/2026/03/2026-03-28-agentic-ai-d06561.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == []
+    assert store.client._objects["submissions/no-stem.json"]["status"] == "submitted"
+
+
+def test_advance_linked_submissions_noop_without_r2_store():
+    from scripts.publish_job_runner import _advance_linked_submissions
+
+    store = LocalPublishJobStore(root="/tmp/noop")
+    job = {"draft_key": "drafts/2026/03/example.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == []
+
+
+def test_private_publish_uses_private_r2_prefix(monkeypatch, tmp_path):
+    """Verify private publish passes --private --owner flags to gen-podcast.py."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", lambda job: None)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"
+    assert len(commands) == 1
+    assert "--private" in commands[0]
+    assert "--owner 'user@example.com'" in commands[0]
+
+
+def test_private_publish_does_not_regenerate_rss(monkeypatch, tmp_path):
+    """Verify private publish skips viz, cover, and site steps (no RSS regen)."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", lambda job: None)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    # Only the publish command should run; no viz, cover, or site
+    assert len(commands) == 1
+    assert "gen-podcast.py publish" in commands[0]
+    # No make publish-site, no gen-viz, no backfill_images
+    for cmd in commands:
+        assert "publish-site" not in cmd
+        assert "gen-viz" not in cmd
+        assert "backfill_images" not in cmd
+
+    # Skipped steps should be marked as skipped
+    assert finished["progress"]["viz"] == "skipped"
+    assert finished["progress"]["cover"] == "skipped"
+    assert finished["progress"]["site"] == "skipped"
+
+
+def test_private_publish_sets_visibility_and_owner(monkeypatch, tmp_path):
+    """Verify private publish sets DB visibility and owner when episode found."""
+    from scripts.publish_job_runner import process_private_job
+
+    store, path, _ = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+    update_calls = []
+
+    def fake_find_episode(job):
+        return {"id": 42, "audio_file": "public/2026/03/example.mp3"}
+
+    def fake_update_podcast(conn, podcast_id, **kwargs):
+        update_calls.append((podcast_id, kwargs))
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr("scripts.publish_job_runner._find_episode", fake_find_episode)
+    monkeypatch.setattr("scripts.publish_job_runner._verify_local_artifacts", lambda artifacts: {"ok": True})
+    monkeypatch.setattr("scripts.publish_job_runner.get_connection", lambda: type("C", (), {"execute": lambda s, *a: None, "commit": lambda s: None, "close": lambda s: None, "row_factory": None})())
+    monkeypatch.setattr("scripts.publish_job_runner.init_db", lambda conn: None)
+    monkeypatch.setattr("db.update_podcast", fake_update_podcast)
+
+    finished = process_private_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        owner="user@example.com",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"
+    assert len(update_calls) == 1
+    assert update_calls[0] == (42, {"visibility": "private", "owner": "user@example.com"})
