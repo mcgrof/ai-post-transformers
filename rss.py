@@ -1127,21 +1127,44 @@ function escapeHtml(value) {{
     .replace(/'/g, '&#39;');
 }}
 
+function normalizeSearchText(value) {{
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9.\s-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}}
+
+function countOccurrences(haystack, needle) {{
+  if (!needle) return 0;
+  let count = 0;
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {{
+    count += 1;
+    idx = haystack.indexOf(needle, idx + needle.length);
+  }}
+  return count;
+}}
+
 function scoreEpisode(item, terms) {{
-  const title = (item.t || '').toLowerCase();
-  const desc = (item.x || '').toLowerCase();
-  const queryText = (item.q || item.x || '').toLowerCase();
-  const date = (item.d || '').toLowerCase();
+  const title = normalizeSearchText(item.t || '');
+  const queryText = normalizeSearchText(item.q || item.x || '');
+  const date = normalizeSearchText(item.d || '');
   let score = 0;
   for (const term of terms) {{
     const inTitle = title.includes(term);
     const inDesc = queryText.includes(term);
     const inDate = date.includes(term);
     if (!inTitle && !inDesc && !inDate) return -1;
-    if (title === term) score += 80;
-    else if (title.startsWith(term)) score += 35;
-    else if (inTitle) score += 20;
-    if (inDesc) score += 6;
+    if (title === term) score += 100;
+    else if (title.startsWith(term)) score += 45;
+    else if (inTitle) score += 28;
+    if (inDesc) {{
+      score += 8;
+      const first = queryText.indexOf(term);
+      if (first >= 0) score += Math.max(0, 18 - Math.min(18, Math.floor(first / 120)));
+      score += Math.min(8, countOccurrences(queryText, term));
+    }}
     if (inDate) score += 2;
   }}
   if (item.l) score -= 1;
@@ -1168,7 +1191,8 @@ function renderSearchResults(items, query) {{
 }}
 
 searchInput.addEventListener('input', function() {{
-  const q = this.value.toLowerCase().trim();
+  const rawQuery = this.value;
+  const q = normalizeSearchText(rawQuery);
   if (!q) {{
     latestTitle.style.display = '';
     latestGrid.style.display = 'grid';
