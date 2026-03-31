@@ -3436,3 +3436,536 @@ test('Private Podcasts page renders for authenticated admin', async () => {
   assert.match(html, /Private Podcasts/);
   assert.match(html, /My Private Episode/);
 });
+
+
+// ── Version iteration, edit, and regenerate tests ──
+
+test('GET /api/revisions returns all revisions for episode_key including superseded', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 10, title: 'KV Caches Deep Dive', draft_key: 'drafts/2026/03/kv-caches-v1-abc123.mp3', episode_key: 'kv caches deep dive', revision: 1, revision_state: 'superseded', source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+          { id: 11, title: 'KV Caches Deep Dive', draft_key: 'drafts/2026/03/kv-caches-v2-def456.mp3', episode_key: 'kv caches deep dive', revision: 2, revision_state: null, source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/kv-caches-v1-abc123.mp3': 'audio-v1',
+      'drafts/2026/03/kv-caches-v2-def456.mp3': 'audio-v2',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=kv+caches+deep+dive');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.episode_key, 'kv caches deep dive');
+  assert.equal(body.revisions.length, 2);
+  assert.equal(body.revisions[0].revision, 1);
+  assert.equal(body.revisions[0].revision_state, 'superseded');
+  assert.equal(body.revisions[1].revision, 2);
+  assert.ok(!body.revisions[1].revision_state);
+});
+
+test('GET /api/revisions returns empty for unknown episode_key', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=nonexistent');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 0);
+});
+
+test('GET /api/revisions requires episode_key parameter', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/revisions');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /episode_key/i);
+});
+
+test('GET /api/revisions shows visibility from publish job', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 20, title: 'Private Episode', draft_key: 'drafts/2026/03/private-ep-abc123.mp3', episode_key: 'private episode', revision: 1 },
+        ],
+        conferences: {},
+      },
+      'publish-jobs/pub_2026_03_30_120000.json': {
+        job_id: 'pub_2026_03_30_120000',
+        draft_key: 'drafts/2026/03/private-ep-abc123.mp3',
+        state: 'approved_for_publish',
+        visibility: 'private',
+        owner: 'admin-1',
+        created_at: '2026-03-30T12:00:00Z',
+      },
+    },
+    podcast: {
+      'drafts/2026/03/private-ep-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=private+episode');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 1);
+  assert.equal(body.revisions[0].visibility, 'private');
+});
+
+test('POST /api/review regenerate_version creates new submission with parent linkage', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 15, title: 'Attention Mechanisms', draft_key: 'drafts/2026/03/attention-abc123.mp3', episode_key: 'attention mechanisms', revision: 1, source_urls: ['https://arxiv.org/pdf/2401.00001', 'https://arxiv.org/pdf/2401.00002'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/attention-abc123.mp3',
+      action: 'regenerate_version',
+      focus_text: 'Emphasize practical applications more',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.action, 'regenerate_version');
+  assert.equal(body.new_revision, 2);
+  assert.equal(body.episode_key, 'attention mechanisms');
+  assert.ok(body.submission_key);
+
+  // Verify the submission was persisted
+  const subData = await env.ADMIN_BUCKET.get(body.submission_key);
+  const sub = await subData.json();
+  assert.equal(sub.status, 'submitted');
+  assert.equal(sub.parent_episode_key, 'attention mechanisms');
+  assert.equal(sub.parent_draft_key, 'drafts/2026/03/attention-abc123.mp3');
+  assert.equal(sub.parent_revision, 1);
+  assert.deepEqual(sub.urls, ['https://arxiv.org/pdf/2401.00001', 'https://arxiv.org/pdf/2401.00002']);
+  assert.ok(sub.instructions.includes('Emphasize practical applications'));
+  assert.ok(sub.instructions.includes('publicly published episodes'));
+});
+
+test('POST /api/review regenerate_version fails without source URLs', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 16, title: 'Empty Sources', draft_key: 'drafts/2026/03/empty-src-abc123.mp3', episode_key: 'empty sources', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/empty-src-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /source URLs/i);
+});
+
+test('POST /api/review regenerate_version falls back to sidecar for metadata', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': { drafts: [], conferences: {} },
+    },
+    podcast: {
+      'drafts/2026/03/sidecar-only-abc123.json': {
+        title: 'Sidecar Episode',
+        episode_key: 'sidecar episode',
+        revision: 1,
+        source_urls: ['https://arxiv.org/pdf/2401.99999'],
+      },
+    },
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/sidecar-only-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.new_revision, 2);
+});
+
+test('POST /api/review regenerate_version requires draft key', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'regenerate_version' }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+});
+
+test('POST /api/review edit_draft updates manifest title and description', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 17, title: 'Old Title', description: 'Old desc', draft_key: 'drafts/2026/03/edit-test-abc123.mp3', episode_key: 'old title', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/edit-test-abc123.mp3',
+      action: 'edit_draft',
+      title: 'New Title',
+      description: 'New description with more detail',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.manifest_updated, true);
+
+  // Verify manifest was updated
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'New Title');
+  assert.equal(manifest.drafts[0].description, 'New description with more detail');
+  assert.ok(manifest.drafts[0].edited_at);
+});
+
+test('POST /api/review edit_draft also updates sidecar JSON', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 18, title: 'Sidecar Edit', draft_key: 'drafts/2026/03/sidecar-edit-abc123.mp3', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/sidecar-edit-abc123.json': {
+        title: 'Sidecar Edit',
+        description: 'Original sidecar desc',
+      },
+    },
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/sidecar-edit-abc123.mp3',
+      action: 'edit_draft',
+      title: 'Updated Sidecar Title',
+      description: 'Updated sidecar description',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  // Verify sidecar was updated
+  const sidecarData = await env.PODCAST_BUCKET.get('drafts/2026/03/sidecar-edit-abc123.json');
+  const sidecar = await sidecarData.json();
+  assert.equal(sidecar.title, 'Updated Sidecar Title');
+  assert.equal(sidecar.description, 'Updated sidecar description');
+  assert.ok(sidecar.edited_at);
+});
+
+test('POST /api/review edit_draft rejects when nothing to edit', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/noop-abc123.mp3',
+      action: 'edit_draft',
+    }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+  assert.match(body.error, /nothing to edit/i);
+});
+
+test('POST /api/review edit_draft requires key', async () => {
+  const env = makeEnv({});
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'edit_draft', title: 'Test' }),
+  });
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.error);
+});
+
+test('POST /api/review edit_draft handles partial updates (title only)', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 19, title: 'Original', description: 'Keep this', draft_key: 'drafts/2026/03/partial-abc123.mp3', revision: 1 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/partial-abc123.mp3',
+      action: 'edit_draft',
+      title: 'New Title Only',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'New Title Only');
+  assert.equal(manifest.drafts[0].description, 'Keep this');
+});
+
+test('GET /api/drafts includes source_urls from manifest', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 25, title: 'Source Test', draft_key: 'drafts/2026/03/src-test-abc123.mp3', source_urls: ['https://arxiv.org/pdf/2401.00001'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/src-test-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/drafts');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.ok(body.drafts.length >= 1);
+  const draft = body.drafts.find(d => d.key === 'drafts/2026/03/src-test-abc123.mp3');
+  assert.ok(draft);
+  assert.deepEqual(draft.source_urls, ['https://arxiv.org/pdf/2401.00001']);
+});
+
+test('GET /drafts draft card shows Edit and New Version buttons when episode_key exists', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 30, title: 'Versioned Draft', draft_key: 'drafts/2026/03/versioned-abc123.mp3', episode_key: 'versioned draft', revision: 2 },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/versioned-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('Edit'));
+  assert.ok(html.includes('New Version'));
+  assert.ok(html.includes('Versions'));
+  assert.ok(html.includes('(v2)'));
+});
+
+test('GET /drafts draft card shows Edit button even without episode_key', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 31, title: 'No Episode Key Draft', draft_key: 'drafts/2026/03/no-ek-abc123.mp3' },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/no-ek-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('Edit'));
+  // No episode_key, so the draft card action buttons should not contain
+  // the openRegenerateModal onclick for this specific draft. The modal
+  // shell and function definition still exist on the page, but the
+  // button to trigger regeneration for this draft should not.
+  assert.ok(!html.includes("openRegenerateModal('drafts/2026/03/no-ek-abc123.mp3'"));
+});
+
+test('GET /drafts renders edit, regenerate, and versions modals', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 32, title: 'Modal Test', draft_key: 'drafts/2026/03/modal-abc123.mp3' },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/modal-abc123.mp3': 'audio',
+    },
+  });
+
+  const request = new Request('https://admin.test/drafts');
+  const response = await worker.fetch(request, env, {});
+  const html = await response.text();
+  assert.ok(html.includes('id="edit-modal"'));
+  assert.ok(html.includes('id="regenerate-modal"'));
+  assert.ok(html.includes('id="versions-modal"'));
+  assert.ok(html.includes('id="reject-modal"'));
+});
+
+test('POST /api/review regenerate_version includes context rule in instructions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 33, title: 'Context Test', draft_key: 'drafts/2026/03/ctx-test-abc123.mp3', episode_key: 'context test', revision: 3, source_urls: ['https://arxiv.org/pdf/2401.55555'] },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/ctx-test-abc123.mp3',
+      action: 'regenerate_version',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.equal(body.new_revision, 4);
+
+  const subData = await env.ADMIN_BUCKET.get(body.submission_key);
+  const sub = await subData.json();
+  assert.ok(sub.instructions.includes('publicly published episodes'));
+  assert.ok(sub.instructions.includes('never private'));
+  assert.ok(sub.instructions.includes('revision 4'));
+});
+
+test('POST /api/review edit_draft does not modify other manifest entries', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 40, title: 'Keep This', description: 'Untouched', draft_key: 'drafts/2026/03/keep-abc123.mp3' },
+          { id: 41, title: 'Edit This', description: 'Will change', draft_key: 'drafts/2026/03/edit-abc123.mp3' },
+        ],
+        conferences: { neurips2025: { papers: 5 } },
+      },
+    },
+    podcast: {},
+  });
+
+  const request = new Request('https://admin.test/api/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: 'drafts/2026/03/edit-abc123.mp3',
+      action: 'edit_draft',
+      title: 'Edited Title',
+    }),
+  });
+
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const manifestData = await env.ADMIN_BUCKET.get('manifest.json');
+  const manifest = await manifestData.json();
+  assert.equal(manifest.drafts[0].title, 'Keep This');
+  assert.equal(manifest.drafts[0].description, 'Untouched');
+  assert.equal(manifest.drafts[1].title, 'Edited Title');
+  assert.equal(manifest.drafts[1].description, 'Will change');
+  assert.deepEqual(manifest.conferences, { neurips2025: { papers: 5 } });
+});
+
+test('GET /api/revisions does not filter out rejected or published revisions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          { id: 50, title: 'Full History', draft_key: 'drafts/2026/03/hist-v1-abc123.mp3', episode_key: 'full history', revision: 1, revision_state: 'rejected' },
+          { id: 51, title: 'Full History', draft_key: 'drafts/2026/03/hist-v2-def456.mp3', episode_key: 'full history', revision: 2, revision_state: 'published' },
+          { id: 52, title: 'Full History', draft_key: 'drafts/2026/03/hist-v3-ghi789.mp3', episode_key: 'full history', revision: 3, revision_state: null },
+        ],
+        conferences: {},
+      },
+    },
+    podcast: {
+      'drafts/2026/03/hist-v1-abc123.mp3': 'v1',
+      'drafts/2026/03/hist-v2-def456.mp3': 'v2',
+      'drafts/2026/03/hist-v3-ghi789.mp3': 'v3',
+    },
+  });
+
+  const request = new Request('https://admin.test/api/revisions?episode_key=full+history');
+  const response = await worker.fetch(request, env, {});
+  const body = await response.json();
+  assert.equal(body.revisions.length, 3);
+  assert.equal(body.revisions[0].revision_state, 'rejected');
+  assert.equal(body.revisions[1].revision_state, 'published');
+  assert.ok(!body.revisions[2].revision_state);
+});
