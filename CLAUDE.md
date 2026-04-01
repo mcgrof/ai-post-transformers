@@ -205,7 +205,10 @@ The following paths are local-only and intentionally ignored by git:
 - `inputs/` — saved prompt/URL bundles used to generate specific
   episodes. Useful locally, but not source code.
 - `podcasts/` — generated RSS output and other publish artifacts.
-- `queue/` and `queue.yaml` — local editorial queue output.
+- `queue/`, `queue.yaml`, and `queue.json` — generated editorial queue
+  output. `queue.json` is the full diffable queue snapshot emitted by
+  `make queue` / `gen-podcast.py queue`; routine churn here is normal,
+  not an alarm condition.
 - `viz/`, `viz_cache/`, `generated_covers/` — generated visuals and
   caches. Only commit visualization source/templates when explicitly
   intended for publication.
@@ -214,6 +217,15 @@ The following paths are local-only and intentionally ignored by git:
 
 Treat these as deploy/runtime artifacts. Sync them between hosts with
 `rsync` or explicit publish steps, not normal git commits.
+
+Queue-specific rule:
+- `queue.json` is a normal generated snapshot from `make queue`, not a
+  scary mystery file. If it changed after a queue refresh, that is
+  expected. Treat it as a deliberate queue-output refresh artifact and
+  avoid mixing it into unrelated code commits.
+- Queue refreshes should not piggyback on the 2-minute submission /
+  publish pickup worker timer. If automated, they should use a separate
+  service/timer with explicit ownership and conflict control.
 
 ### Episode filenames
 
@@ -662,12 +674,9 @@ admin who created them. They are NEVER public.
    - Prior-episode context used for generating new episodes
    - Any search or recommendation surface
 
-2. Private episode storage uses `private-episodes/{token}/` in the
-   **admin bucket** (`podcast-admin` / `ADMIN_BUCKET`). The token
-   is an opaque SHA-256 prefix derived from the owner email via
-   `owner_token()` (Python) / `ownerToken()` (JS). Do NOT store
-   private content in the public bucket (`ai-post-transformers`)
-   or under the public `episodes/` prefix.
+2. Private episode storage uses `private/{owner}/episodes/` R2
+   prefix. Do NOT store private content under the public
+   `episodes/` prefix.
 
 3. Private podcast API endpoints MUST be owner-scoped. An admin
    can only see/manage their own private podcasts.
@@ -680,51 +689,3 @@ admin who created them. They are NEVER public.
    system. A private episode may share an episode_key with a
    public episode (e.g., private v1, public v2). The revision
    chain tracks both.
-
-## Security Invariants
-
-### Public Site Worker (`site/worker.js`)
-
-1. The public site worker serves ONLY allowlisted paths from
-   the public bucket (`ai-post-transformers`). Unknown paths
-   return 404.
-2. Allowed paths: exact files (`index.html`, `feed.xml`, etc.)
-   and public prefixes (`episodes/`, `viz/`, `drafts/`, etc.).
-3. `private/`, `private-drafts/`, `submissions/`, `publish-jobs/`,
-   `reviews/`, `delegation/`, and `manifest.json` are always
-   denied.
-4. The workers.dev hostname (`summer-frog-cfd1.mcgrof.workers.dev`)
-   redirects 301 to `podcast.do-not-panic.com` preserving
-   path/query. Unknown hosts return 404.
-5. Do NOT add new allowed prefixes without explicit approval.
-
-### Admin Worker (`admin/src/worker.js`)
-
-1. The workers.dev hostname (`podcast-admin.mcgrof.workers.dev`)
-   redirects 301 to `admin.podcast.do-not-panic.com`. Unknown
-   hosts return 404.
-2. The canonical admin host requires `Cf-Access-Jwt-Assertion`
-   as defense-in-depth. Requests without it return 403.
-3. Dev/test hosts (`admin.test`, `localhost`, `127.0.0.1`) skip
-   the JWT check for local development ergonomics.
-4. Server-derived identity from CF Access headers always takes
-   precedence over client-supplied `adminId`/`owner` values in
-   request bodies. Do NOT trust `body.adminId` when
-   `cf-access-authenticated-user-email` is present.
-
-### Private Podcast Storage
-
-1. Private podcasts live ONLY in the admin bucket
-   (`podcast-admin` / `ADMIN_BUCKET`), never in the public
-   bucket.
-2. Object keys use opaque owner tokens:
-   `private-episodes/{sha256_prefix}/filename.mp3`. Raw email
-   addresses must NEVER appear in R2 object keys.
-3. The `owner_token()` function (Python) and `ownerToken()` (JS)
-   use SHA-256 of the lowercased, trimmed email, first 16 hex
-   chars. Both implementations must produce identical output.
-4. Private episode playback uses the authenticated admin media
-   route (`/api/private-media`), not public podcast URLs.
-5. The Python publish path (`gen-podcast.py --private`) uploads
-   to the admin bucket via `R2_PRIVATE_BUCKET` env var
-   (defaults to `podcast-admin`).
