@@ -588,12 +588,20 @@ def _publish_episode(config, draft=None, private=False, owner=None):
             image = candidate
     srt = os.path.splitext(audio)[0] + ".srt" if audio else None
 
-    r2_prefix = f"private/{owner}/episodes" if private else None
+    if private:
+        from owner_token import owner_token
+        token = owner_token(owner)
+        r2_prefix = f"private-episodes/{token}"
+        private_bucket = os.environ.get("R2_PRIVATE_BUCKET", "podcast-admin")
+    else:
+        r2_prefix = None
+        private_bucket = None
     label = "Private publish" if private else "Publish"
     print(f"\n[{label}] Uploading: {episode.get('title', 'Untitled')}",
           file=sys.stderr)
     urls = publish_episode(audio, image_file=image, srt_file=srt,
-                           r2_prefix=r2_prefix)
+                           r2_prefix=r2_prefix,
+                           bucket_override=private_bucket)
 
     for k, v in urls.items():
         print(f"[{label}] {k}: {v}", file=sys.stderr)
@@ -616,7 +624,7 @@ def _publish_episode(config, draft=None, private=False, owner=None):
         conn_priv.commit()
         conn_priv.close()
 
-        # Upload JSON sidecar so the admin worker can read metadata
+        # Upload JSON sidecar to the admin bucket so the admin worker can read metadata
         import json as _json
         sidecar = {
             "title": episode.get("title", "Untitled"),
@@ -627,12 +635,11 @@ def _publish_episode(config, draft=None, private=False, owner=None):
         }
         audio_basename = os.path.basename(audio)
         sidecar_stem = os.path.splitext(audio_basename)[0]
-        sidecar_key = f"private/{owner}/episodes/{sidecar_stem}.json"
-        from r2_upload import get_r2_client
+        sidecar_key = f"private-episodes/{token}/{sidecar_stem}.json"
+        from r2_upload import get_r2_client, upload_file
         client = get_r2_client()
-        bucket = os.environ.get("R2_BUCKET", "ai-post-transformers")
         client.put_object(
-            Bucket=bucket,
+            Bucket=private_bucket,
             Key=sidecar_key,
             Body=_json.dumps(sidecar).encode(),
             ContentType="application/json",

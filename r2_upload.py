@@ -83,7 +83,7 @@ def _episode_r2_prefix(filename):
 
 
 def publish_episode(audio_file, image_file=None, srt_file=None,
-                    r2_prefix=None):
+                    r2_prefix=None, bucket_override=None):
     """Upload all episode artifacts to R2.
 
     Files are organized under episodes/ by default, or under the
@@ -93,7 +93,9 @@ def publish_episode(audio_file, image_file=None, srt_file=None,
         audio_file: Path to the MP3 file.
         image_file: Path to the PNG cover art (optional).
         srt_file: Path to the SRT transcript (optional).
-        r2_prefix: Custom R2 key prefix (e.g. "private/owner/episodes").
+        r2_prefix: Custom R2 key prefix (e.g. "private-episodes/token").
+        bucket_override: Target bucket name (e.g. "podcast-admin"
+            for private episodes in the admin bucket).
 
     Returns:
         Dict of uploaded URLs keyed by type.
@@ -106,21 +108,24 @@ def publish_episode(audio_file, image_file=None, srt_file=None,
 
     # Upload audio
     urls["audio"] = upload_file(
-        client, audio_file, f"{prefix}/{audio_basename}"
+        client, audio_file, f"{prefix}/{audio_basename}",
+        bucket=bucket_override,
     )
 
     # Upload cover art
     if image_file and os.path.exists(image_file):
         urls["image"] = upload_file(
             client, image_file,
-            f"{prefix}/{os.path.basename(image_file)}"
+            f"{prefix}/{os.path.basename(image_file)}",
+            bucket=bucket_override,
         )
 
     # Upload transcript
     if srt_file and os.path.exists(srt_file):
         urls["transcript"] = upload_file(
             client, srt_file,
-            f"{prefix}/{os.path.basename(srt_file)}"
+            f"{prefix}/{os.path.basename(srt_file)}",
+            bucket=bucket_override,
         )
 
     return urls

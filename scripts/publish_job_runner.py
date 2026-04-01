@@ -507,10 +507,12 @@ def process_private_job(
     lease_seconds: int = 900,
     store=None,
 ) -> dict:
-    """Publish a private episode: upload to private R2 prefix, skip RSS.
+    """Publish a private episode to the admin bucket, skip RSS.
 
-    Private episodes are uploaded under private/{owner}/episodes/ and
-    never appear in the public feed or public/ directory.
+    Private episodes are uploaded under private-episodes/{token}/ in
+    the admin bucket (podcast-admin) and never appear in the public
+    feed or public/ directory. The owner value is passed through to
+    gen-podcast.py which derives the opaque storage token.
     """
     store = store or get_publish_job_store()
     job = load_job(job_path, store=store)

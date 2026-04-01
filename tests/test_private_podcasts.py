@@ -11,6 +11,7 @@ from db import (
     insert_podcast,
     list_podcasts,
 )
+from owner_token import owner_token
 
 
 def _make_test_db(tmp_path):
@@ -116,3 +117,39 @@ def test_list_podcasts_include_private_flag(tmp_path):
     all_eps = list_podcasts(conn, include_private=True)
     assert len(all_eps) == 2
     conn.close()
+
+
+def test_owner_token_deterministic():
+    """owner_token must return the same value for the same email."""
+    t1 = owner_token("test@example.com")
+    t2 = owner_token("test@example.com")
+    assert t1 == t2
+    assert len(t1) == 16
+    assert "@" not in t1
+    assert "test" not in t1
+
+
+def test_owner_token_case_insensitive():
+    """owner_token must be case-insensitive."""
+    t1 = owner_token("Test@Example.COM")
+    t2 = owner_token("test@example.com")
+    assert t1 == t2
+
+
+def test_owner_token_matches_js():
+    """owner_token must match the JS ownerTokenSync output.
+
+    Verified with: node -e "require('crypto').createHash('sha256')
+      .update('owner-1@test.com').digest('hex').slice(0,16)"
+    """
+    assert owner_token("owner-1@test.com") == "bb026207927ee37e"
+
+
+def test_private_storage_prefix_uses_opaque_token():
+    """Private episode R2 keys must use opaque token, not raw email."""
+    email = "admin@example.com"
+    token = owner_token(email)
+    prefix = f"private-episodes/{token}/"
+    assert "@" not in prefix
+    assert "admin" not in prefix
+    assert email not in prefix
