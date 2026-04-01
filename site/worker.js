@@ -1,52 +1,142 @@
+// Public site worker for podcast.do-not-panic.com
+// Serves only explicitly allowed public content from R2.
+//
+// Security invariants:
+// - workers.dev hostname redirects to canonical host
+// - Only allowlisted paths/prefixes are served
+// - private/, admin, and internal prefixes are always denied
+// - Range requests supported for public audio
+
+const CANONICAL_HOST = 'podcast.do-not-panic.com';
+const WORKERS_DEV_SUFFIX = '.workers.dev';
+
+// Exact files allowed at the root level
+const ALLOWED_EXACT_FILES = new Set([
+  'index.html',
+  'feed.xml',
+  'anchor_feed.xml',
+  'queue.html',
+  'queue.xml',
+  'sponsor.html',
+  'robots.txt',
+  'favicon.ico',
+]);
+
+// Prefixes under which all objects are publicly served
+const ALLOWED_PREFIXES = [
+  'episodes/',
+  'viz/',
+  'thumbs/',
+  'images/',
+  'conference/',
+  'drafts/',
+  'queue/',
+  'archive/',
+];
+
+// Prefixes that are always denied, even if they somehow match
+// an allowed prefix pattern. Checked before allow rules.
+const DENIED_PREFIXES = [
+  'private/',
+  'private-drafts/',
+  'submissions/',
+  'publish-jobs/',
+  'reviews/',
+  'delegation/',
+  'manifest.json',
+];
+
+function isAllowedPath(key) {
+  // Deny-first: block sensitive prefixes
+  for (const denied of DENIED_PREFIXES) {
+    if (key === denied || key.startsWith(denied)) return false;
+  }
+
+  // Exact match
+  if (ALLOWED_EXACT_FILES.has(key)) return true;
+
+  // Prefix match
+  for (const prefix of ALLOWED_PREFIXES) {
+    if (key.startsWith(prefix)) return true;
+  }
+
+  return false;
+}
+
+export { isAllowedPath, CANONICAL_HOST, WORKERS_DEV_SUFFIX, DENIED_PREFIXES, ALLOWED_PREFIXES, ALLOWED_EXACT_FILES };
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url)
+    const url = new URL(request.url);
+    const hostname = url.hostname;
 
-    let key = url.pathname === "/" ? "index.html" : url.pathname.slice(1)
+    // Canonical host enforcement: redirect workers.dev to canonical
+    if (hostname.endsWith(WORKERS_DEV_SUFFIX)) {
+      const target = new URL(url);
+      target.hostname = CANONICAL_HOST;
+      target.port = '';
+      target.protocol = 'https:';
+      return Response.redirect(target.toString(), 301);
+    }
+
+    // Reject unknown hosts (defense-in-depth)
+    if (hostname !== CANONICAL_HOST) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    let key = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+
+    // Reject path traversal attempts
+    if (key.includes('..') || key.includes('//')) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    // Allowlist check
+    if (!isAllowedPath(key)) {
+      return new Response('Not found', { status: 404 });
+    }
 
     // Support Range requests for audio seeking
-    const rangeHeader = request.headers.get("Range")
-    let object
+    const rangeHeader = request.headers.get('Range');
+    let object;
 
     if (rangeHeader) {
-      // Parse "bytes=START-END" format
-      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
       if (match) {
-        const start = parseInt(match[1])
-        const end = match[2] ? parseInt(match[2]) : undefined
+        const start = parseInt(match[1]);
+        const end = match[2] ? parseInt(match[2]) : undefined;
 
-        // R2 expects { offset, length } or { offset, suffix }
         const range = end !== undefined
           ? { offset: start, length: end - start + 1 }
-          : { offset: start }
+          : { offset: start };
 
-        object = await env.BUCKET.get(key, { range })
+        object = await env.BUCKET.get(key, { range });
       } else {
-        object = await env.BUCKET.get(key)
+        object = await env.BUCKET.get(key);
       }
     } else {
-      object = await env.BUCKET.get(key)
+      object = await env.BUCKET.get(key);
     }
 
     if (!object) {
-      return new Response("Not found", { status: 404 })
+      return new Response('Not found', { status: 404 });
     }
 
-    const headers = new Headers()
-    object.writeHttpMetadata(headers)
-    headers.set("Accept-Ranges", "bytes")
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set('Accept-Ranges', 'bytes');
 
     if (rangeHeader && object.range) {
-      const r = object.range
-      const offset = r.offset || 0
-      const length = r.length || (object.size - offset)
-      const end = offset + length - 1
-      headers.set("Content-Range", `bytes ${offset}-${end}/${object.size}`)
-      headers.set("Content-Length", String(length))
-      return new Response(object.body, { status: 206, headers })
+      const r = object.range;
+      const offset = r.offset || 0;
+      const length = r.length || (object.size - offset);
+      const end = offset + length - 1;
+      headers.set('Content-Range', `bytes ${offset}-${end}/${object.size}`);
+      headers.set('Content-Length', String(length));
+      return new Response(object.body, { status: 206, headers });
     }
 
-    headers.set("Content-Length", String(object.size))
-    return new Response(object.body, { headers })
+    headers.set('Content-Length', String(object.size));
+    return new Response(object.body, { headers });
   }
-}
+};
