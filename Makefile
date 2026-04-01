@@ -36,4 +36,6 @@ test-publish:
 		tests/test_run_podcast_worker.py -v
 	node --test admin/src/worker.test.js
 	node --test admin/src/systemd.test.js
+	node --test site/worker.test.js
 	$(PYTHON) -m pytest tests/test_systemd_units.py -v
+	$(PYTHON) -m pytest tests/test_private_podcasts.py -v
