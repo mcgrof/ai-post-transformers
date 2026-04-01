@@ -4,6 +4,7 @@
 import { ADMIN_RELEASE_TAG } from './release.js';
 import {
   getAdminIdentity,
+  ownerToken,
   generateSystemdService,
   generateSystemdTimer,
   generateEnvFile,
@@ -12,6 +13,10 @@ import {
 
 const GITHUB_REPO = 'mcgrof/ai-post-transformers';
 const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
+const ADMIN_CANONICAL_HOST = 'admin.podcast.do-not-panic.com';
+const WORKERS_DEV_SUFFIX = '.workers.dev';
+// Hosts allowed without CF Access JWT (local dev, tests)
+const DEV_HOSTS = new Set(['admin.test', 'localhost', '127.0.0.1']);
 const PUBLISH_JOB_PROGRESS_STEPS = ['publish', 'viz', 'cover', 'site', 'verify'];
 
 // ============================================================================
@@ -3201,16 +3206,17 @@ function privateDraftsModal() {
 // ============================================================================
 // Private Podcasts — owner-scoped published episodes
 // ============================================================================
-async function listPrivatePodcasts(env, ownerId) {
-  const prefix = `private/${ownerId}/episodes/`;
-  const listed = await env.PODCAST_BUCKET.list({ prefix });
+async function listPrivatePodcasts(env, ownerId, ownerEmail) {
+  const token = ownerEmail ? await ownerToken(ownerEmail) : ownerId;
+  const prefix = `private-episodes/${token}/`;
+  const listed = await env.ADMIN_BUCKET.list({ prefix });
   const episodes = [];
   for (const obj of listed.objects) {
     if (!obj.key.endsWith('.mp3')) continue;
     const stem = obj.key.replace(/\.mp3$/, '');
     const jsonKey = stem + '.json';
     let meta = { key: obj.key, title: obj.key, date: '', description: '' };
-    const metaObj = await env.PODCAST_BUCKET.get(jsonKey);
+    const metaObj = await env.ADMIN_BUCKET.get(jsonKey);
     if (metaObj) {
       try {
         const parsed = await metaObj.json();
@@ -3219,24 +3225,26 @@ async function listPrivatePodcasts(env, ownerId) {
         meta.description = parsed.description || '';
       } catch (e) { /* ignore parse errors */ }
     }
-    meta.audio_url = `${PODCAST_DOMAIN}/${obj.key}`;
+    // Private audio is served through the authenticated admin media route
+    meta.audio_url = `/api/private-media?key=${encodeURIComponent(obj.key)}`;
     episodes.push(meta);
   }
   return { episodes };
 }
 
-async function deletePrivatePodcast(env, ownerId, body) {
+async function deletePrivatePodcast(env, ownerId, ownerEmail, body) {
   const key = body.key;
   if (!key) return { error: 'Missing key' };
-  const expectedPrefix = `private/${ownerId}/episodes/`;
+  const token = ownerEmail ? await ownerToken(ownerEmail) : ownerId;
+  const expectedPrefix = `private-episodes/${token}/`;
   if (!key.startsWith(expectedPrefix)) {
     return { error: 'Forbidden: not your private podcast', status: 403 };
   }
-  await env.PODCAST_BUCKET.delete(key);
+  await env.ADMIN_BUCKET.delete(key);
   // Also delete companion files
   const stem = key.replace(/\.mp3$/, '');
   for (const ext of ['.json', '.txt', '.srt', '.png']) {
-    await env.PODCAST_BUCKET.delete(stem + ext);
+    await env.ADMIN_BUCKET.delete(stem + ext);
   }
   return { success: true, deleted: key };
 }
@@ -3267,6 +3275,76 @@ function privatePodcastsPage(episodes) {
 }
 
 // ============================================================================
+// Authenticated private media route
+// Streams private podcast assets from ADMIN_BUCKET with owner-scoping.
+// Supports Range requests for audio seeking in the admin UI.
+// ============================================================================
+async function handlePrivateMedia(request, env) {
+  const identity = getAdminIdentity(request);
+  const url = new URL(request.url);
+  const key = url.searchParams.get('key');
+
+  if (!key) {
+    return new Response(JSON.stringify({ error: 'Missing key parameter' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Verify the key belongs to the requesting admin
+  const token = identity.email ? await ownerToken(identity.email) : identity.id;
+  const expectedPrefix = `private-episodes/${token}/`;
+  if (!key.startsWith(expectedPrefix)) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Support Range requests for audio seeking
+  const rangeHeader = request.headers.get('Range');
+  let object;
+
+  if (rangeHeader) {
+    const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+    if (match) {
+      const start = parseInt(match[1]);
+      const end = match[2] ? parseInt(match[2]) : undefined;
+      const range = end !== undefined
+        ? { offset: start, length: end - start + 1 }
+        : { offset: start };
+      object = await env.ADMIN_BUCKET.get(key, { range });
+    } else {
+      object = await env.ADMIN_BUCKET.get(key);
+    }
+  } else {
+    object = await env.ADMIN_BUCKET.get(key);
+  }
+
+  if (!object) {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('Accept-Ranges', 'bytes');
+  headers.set('Cache-Control', 'private, no-store');
+
+  if (rangeHeader && object.range) {
+    const r = object.range;
+    const offset = r.offset || 0;
+    const length = r.length || (object.size - offset);
+    const end = offset + length - 1;
+    headers.set('Content-Range', `bytes ${offset}-${end}/${object.size}`);
+    headers.set('Content-Length', String(length));
+    return new Response(object.body, { status: 206, headers });
+  }
+
+  headers.set('Content-Length', String(object.size));
+  return new Response(object.body, { headers });
+}
+
+// ============================================================================
 // WORKER HANDLER
 // ============================================================================
 export {
@@ -3274,12 +3352,35 @@ export {
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
   listPrivatePodcasts, deletePrivatePodcast,
+  ADMIN_CANONICAL_HOST, WORKERS_DEV_SUFFIX, DEV_HOSTS,
 };
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const hostname = url.hostname;
     const path = url.pathname;
+
+    // Canonical host enforcement: redirect workers.dev → canonical admin host
+    if (hostname.endsWith(WORKERS_DEV_SUFFIX)) {
+      const target = new URL(url);
+      target.hostname = ADMIN_CANONICAL_HOST;
+      target.port = '';
+      target.protocol = 'https:';
+      return Response.redirect(target.toString(), 301);
+    }
+
+    // Allow canonical host and dev/test hosts; reject everything else
+    const isDev = DEV_HOSTS.has(hostname);
+    if (hostname !== ADMIN_CANONICAL_HOST && !isDev) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    // Defense-in-depth: require CF Access JWT on canonical host.
+    // Dev/test hosts skip this check for local development ergonomics.
+    if (!isDev && !request.headers.get('Cf-Access-Jwt-Assertion')) {
+      return new Response('Unauthorized', { status: 403 });
+    }
 
     // CORS headers for API
     const corsHeaders = {
@@ -3293,6 +3394,11 @@ export default {
     }
 
     try {
+      // Private media route — returns raw binary, not JSON
+      if (path === '/api/private-media') {
+        return await handlePrivateMedia(request, env);
+      }
+
       // API Routes
       if (path.startsWith('/api/')) {
         const apiResponse = await handleAPI(path, request, env, ctx);
@@ -3353,7 +3459,7 @@ export default {
           break;
         }
         case '/private-podcasts': {
-          const ppData = await listPrivatePodcasts(env, adminIdentity.id);
+          const ppData = await listPrivatePodcasts(env, adminIdentity.id, adminIdentity.email);
           html = baseHTML('Private Podcasts', privatePodcastsPage(ppData.episodes || []), 'private-podcasts', navCtx);
           break;
         }
@@ -3457,9 +3563,9 @@ async function handleAPI(path, request, env, ctx) {
       const ppIdentity = getAdminIdentity(request);
       if (request.method === 'DELETE') {
         const body = await request.json();
-        return await deletePrivatePodcast(env, ppIdentity.id, body);
+        return await deletePrivatePodcast(env, ppIdentity.id, ppIdentity.email, body);
       }
-      return await listPrivatePodcasts(env, ppIdentity.id);
+      return await listPrivatePodcasts(env, ppIdentity.id, ppIdentity.email);
     }
 
     case '/api/revisions': {
@@ -4091,13 +4197,13 @@ async function reviewDraft(request, env) {
       action,
       reason,
       jobId,
-      adminId,
-      adminName,
       leaseSeconds,
     } = body;
     const ts = Date.now();
-    const effectiveAdminId = adminId || 'admin';
-    const effectiveAdminName = adminName || effectiveAdminId;
+    // Server-derived identity takes precedence over client-supplied values
+    const serverIdentity = getAdminIdentity(request);
+    const effectiveAdminId = serverIdentity.email ? serverIdentity.id : (body.adminId || 'admin');
+    const effectiveAdminName = body.adminName || effectiveAdminId;
     
     // Write review (append-only, race-free)
     const reviewTarget = key || jobId || 'unknown';
@@ -4177,9 +4283,9 @@ async function reviewDraft(request, env) {
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
-      // Tag the publish job as private with owner info
+      // Tag the publish job as private — owner is always the authenticated admin
       job.visibility = 'private';
-      job.owner = body.owner || effectiveAdminId;
+      job.owner = effectiveAdminId;
       await savePublishJob(env, job);
       // Advance linked submissions to private_saved
       await advanceLinkedSubmissions(env, key, 'private_saved', {
@@ -4378,7 +4484,9 @@ async function handlePublishAPI(request, env) {
 
     const body = await request.json();
     const action = body.action || 'get_publish_status';
-    const effectiveAdminId = body.adminId || 'admin';
+    // Server-derived identity takes precedence over client-supplied values
+    const publishIdentity = getAdminIdentity(request);
+    const effectiveAdminId = publishIdentity.email ? publishIdentity.id : (body.adminId || 'admin');
     const effectiveAdminName = body.adminName || effectiveAdminId;
 
     if (action === 'get_publish_status' || action === 'refresh_job_status') {

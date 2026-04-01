@@ -19,6 +19,25 @@ export function getAdminIdentity(request) {
 }
 
 /**
+ * Derive a deterministic opaque owner token from an email address.
+ * Avoids leaking PII in R2 object keys and log output while remaining
+ * stable across JS and Python (both use SHA-256, first 16 hex chars).
+ *
+ * This is NOT a secret — it just avoids raw email addresses in paths.
+ * The same algorithm is implemented in Python as owner_token() in
+ * owner_token.py.
+ */
+export async function ownerToken(email) {
+  const data = new TextEncoder().encode(email.toLowerCase().trim());
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const hex = [...new Uint8Array(hash)]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return hex.slice(0, 16);
+}
+
+
+/**
  * Generate a systemd user service unit that runs both the generation
  * worker (pick up pending submissions) and the publish worker
  * (claim and process approved publish jobs) in sequence.

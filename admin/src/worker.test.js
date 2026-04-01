@@ -7,13 +7,33 @@ import worker, {
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
   listPrivatePodcasts, deletePrivatePodcast,
+  ADMIN_CANONICAL_HOST, WORKERS_DEV_SUFFIX, DEV_HOSTS,
 } from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
+import { createHash } from 'node:crypto';
+
+// Sync version of ownerToken for test use (mirrors the async
+// ownerToken in systemd.js which uses Web Crypto in Workers).
+function ownerTokenSync(email) {
+  const hex = createHash('sha256')
+    .update(email.toLowerCase().trim())
+    .digest('hex');
+  return hex.slice(0, 16);
+}
 
 
 class MockBucketObject {
-  constructor(value) {
+  constructor(value, opts = {}) {
     this.value = value;
+    this.body = value;
+    this.size = value.length;
+    if (opts.range) {
+      this.range = opts.range;
+    }
+  }
+
+  writeHttpMetadata(headers) {
+    // No-op for tests
   }
 
   async json() {
@@ -35,11 +55,17 @@ class MockBucket {
     this.objects.set(key, body);
   }
 
-  async get(key) {
+  async get(key, opts) {
     if (!this.objects.has(key)) {
       return null;
     }
-    return new MockBucketObject(this.objects.get(key));
+    const rangeOpt = opts && opts.range ? {
+      range: {
+        offset: opts.range.offset || 0,
+        length: opts.range.length || (this.objects.get(key).length - (opts.range.offset || 0)),
+      },
+    } : {};
+    return new MockBucketObject(this.objects.get(key), rangeOpt);
   }
 
   async put(key, value) {
@@ -3286,16 +3312,18 @@ test('POST /api/review save_private creates private publish job', async () => {
 });
 
 test('GET /api/private-podcasts returns only owner-scoped episodes', async () => {
+  const token1 = ownerTokenSync('owner-1@test.com');
+  const token2 = ownerTokenSync('owner-2@test.com');
   const env = makeEnv({
-    podcast: {
-      'private/owner-1/episodes/ep1.mp3': 'audio-1',
-      'private/owner-1/episodes/ep1.json': JSON.stringify({
+    admin: {
+      [`private-episodes/${token1}/ep1.mp3`]: 'audio-1',
+      [`private-episodes/${token1}/ep1.json`]: JSON.stringify({
         title: 'Owner 1 Episode',
         publish_date: '2026-03-30',
         description: 'Private ep for owner 1',
       }),
-      'private/owner-2/episodes/ep2.mp3': 'audio-2',
-      'private/owner-2/episodes/ep2.json': JSON.stringify({
+      [`private-episodes/${token2}/ep2.mp3`]: 'audio-2',
+      [`private-episodes/${token2}/ep2.json`]: JSON.stringify({
         title: 'Owner 2 Episode',
         publish_date: '2026-03-30',
         description: 'Private ep for owner 2',
@@ -3332,9 +3360,10 @@ test('GET /api/private-podcasts returns empty for owner with no private episodes
 });
 
 test('DELETE /api/private-podcasts verifies ownership before delete', async () => {
+  const token1 = ownerTokenSync('owner-1@test.com');
   const env = makeEnv({
-    podcast: {
-      'private/owner-1/episodes/ep1.mp3': 'audio',
+    admin: {
+      [`private-episodes/${token1}/ep1.mp3`]: 'audio',
     },
   });
 
@@ -3346,7 +3375,7 @@ test('DELETE /api/private-podcasts verifies ownership before delete', async () =
         'Content-Type': 'application/json',
         'cf-access-authenticated-user-email': 'owner-2@test.com',
       },
-      body: JSON.stringify({ key: 'private/owner-1/episodes/ep1.mp3' }),
+      body: JSON.stringify({ key: `private-episodes/${token1}/ep1.mp3` }),
     }),
     env,
     {},
@@ -3355,7 +3384,7 @@ test('DELETE /api/private-podcasts verifies ownership before delete', async () =
   assert.ok(body.error);
   assert.match(body.error, /Forbidden/i);
   // Verify the file is still there
-  const obj = await env.PODCAST_BUCKET.get('private/owner-1/episodes/ep1.mp3');
+  const obj = await env.ADMIN_BUCKET.get(`private-episodes/${token1}/ep1.mp3`);
   assert.ok(obj);
 });
 
@@ -3391,12 +3420,11 @@ test('Private episodes never appear in RSS feed data', async () => {
   // The RSS feed is generated server-side in rss.py, not in the worker.
   // At the API level, we verify private-saved submissions don't show in
   // /api/drafts which is the entry point for publishing to RSS.
+  const token1 = ownerTokenSync('owner-1@test.com');
   const env = makeEnv({
     admin: {
       'manifest.json': { drafts: [] },
-    },
-    podcast: {
-      'private/owner-1/episodes/secret.mp3': 'audio',
+      [`private-episodes/${token1}/secret.mp3`]: 'audio',
     },
   });
 
@@ -3408,16 +3436,17 @@ test('Private episodes never appear in RSS feed data', async () => {
   );
   const body = await response.json();
   const found = (body.drafts || []).some(d =>
-    (d.key || '').includes('private/'),
+    (d.key || '').includes('private'),
   );
   assert.equal(found, false, 'private R2 objects must not appear in drafts');
 });
 
 test('Private Podcasts page renders for authenticated admin', async () => {
+  const token = ownerTokenSync('admin-1@test.com');
   const env = makeEnv({
-    podcast: {
-      'private/admin-1/episodes/ep1.mp3': 'audio',
-      'private/admin-1/episodes/ep1.json': JSON.stringify({
+    admin: {
+      [`private-episodes/${token}/ep1.mp3`]: 'audio',
+      [`private-episodes/${token}/ep1.json`]: JSON.stringify({
         title: 'My Private Episode',
         publish_date: '2026-03-30',
         description: 'Private content',
@@ -3968,4 +3997,177 @@ test('GET /api/revisions does not filter out rejected or published revisions', a
   assert.equal(body.revisions[0].revision_state, 'rejected');
   assert.equal(body.revisions[1].revision_state, 'published');
   assert.ok(!body.revisions[2].revision_state);
+});
+
+
+// ============================================================================
+// Security hardening tests
+// ============================================================================
+
+test('workers.dev hostname gets 301 redirect to canonical admin host', async () => {
+  const env = makeEnv({});
+  const response = await worker.fetch(
+    new Request('https://podcast-admin.mcgrof.workers.dev/api/drafts'),
+    env,
+    {},
+  );
+  assert.equal(response.status, 301);
+  const location = response.headers.get('Location');
+  assert.ok(location.startsWith(`https://${ADMIN_CANONICAL_HOST}`));
+  assert.ok(location.includes('/api/drafts'));
+});
+
+test('unknown host returns 404', async () => {
+  const env = makeEnv({});
+  const response = await worker.fetch(
+    new Request('https://evil.example.com/'),
+    env,
+    {},
+  );
+  assert.equal(response.status, 404);
+});
+
+test('canonical host without CF Access JWT returns 403', async () => {
+  const env = makeEnv({});
+  const response = await worker.fetch(
+    new Request(`https://${ADMIN_CANONICAL_HOST}/`),
+    env,
+    {},
+  );
+  assert.equal(response.status, 403);
+});
+
+test('canonical host with CF Access JWT is allowed', async () => {
+  const env = makeEnv({
+    admin: { 'manifest.json': { drafts: [] } },
+  });
+  const response = await worker.fetch(
+    new Request(`https://${ADMIN_CANONICAL_HOST}/api/version`, {
+      headers: {
+        'Cf-Access-Jwt-Assertion': 'dummy-jwt-for-test',
+        'cf-access-authenticated-user-email': 'admin@test.com',
+      },
+    }),
+    env,
+    {},
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.ok(body.release);
+});
+
+test('dev host (admin.test) works without JWT for test ergonomics', async () => {
+  const env = makeEnv({});
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/version'),
+    env,
+    {},
+  );
+  assert.equal(response.status, 200);
+});
+
+test('server-derived identity overrides client-supplied adminId in review', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          id: 300,
+          title: 'Test Episode',
+          draft_key: 'drafts/2026/03/test-ep.mp3',
+        }],
+      },
+    },
+    podcast: {
+      'drafts/2026/03/test-ep.mp3': 'audio',
+    },
+  });
+
+  // Client sends adminId: 'spoofed-admin' but CF Access says 'real-admin@test.com'
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-access-authenticated-user-email': 'real-admin@test.com',
+      },
+      body: JSON.stringify({
+        key: 'drafts/2026/03/test-ep.mp3',
+        action: 'approve',
+        adminId: 'spoofed-admin',
+        adminName: 'Spoofed Name',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  // The publish job should use server-derived 'real-admin', not 'spoofed-admin'
+  assert.equal(body.publish_job.approved_by_admin_id, 'real-admin');
+});
+
+test('private media route denies access for wrong owner', async () => {
+  const token1 = ownerTokenSync('owner-1@test.com');
+  const env = makeEnv({
+    admin: {
+      [`private-episodes/${token1}/ep1.mp3`]: 'secret-audio',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request(`https://admin.test/api/private-media?key=private-episodes/${token1}/ep1.mp3`, {
+      headers: { 'cf-access-authenticated-user-email': 'owner-2@test.com' },
+    }),
+    env,
+    {},
+  );
+  assert.equal(response.status, 403);
+});
+
+test('private media route serves audio for correct owner', async () => {
+  const token1 = ownerTokenSync('owner-1@test.com');
+  const env = makeEnv({
+    admin: {
+      [`private-episodes/${token1}/ep1.mp3`]: 'secret-audio-data',
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request(`https://admin.test/api/private-media?key=private-episodes/${token1}/ep1.mp3`, {
+      headers: { 'cf-access-authenticated-user-email': 'owner-1@test.com' },
+    }),
+    env,
+    {},
+  );
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.equal(body, 'secret-audio-data');
+});
+
+test('private media route requires key parameter', async () => {
+  const env = makeEnv({});
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/private-media', {
+      headers: { 'cf-access-authenticated-user-email': 'admin@test.com' },
+    }),
+    env,
+    {},
+  );
+  assert.equal(response.status, 400);
+});
+
+test('ownerTokenSync produces deterministic opaque tokens', () => {
+  const token1 = ownerTokenSync('test@example.com');
+  const token2 = ownerTokenSync('test@example.com');
+  assert.equal(token1, token2);
+  assert.equal(token1.length, 16);
+  // Should not contain the email
+  assert.ok(!token1.includes('test'));
+  assert.ok(!token1.includes('@'));
+});
+
+test('ownerTokenSync is case-insensitive', () => {
+  const token1 = ownerTokenSync('Test@Example.COM');
+  const token2 = ownerTokenSync('test@example.com');
+  assert.equal(token1, token2);
 });
