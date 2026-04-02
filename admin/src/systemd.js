@@ -86,6 +86,72 @@ WantedBy=timers.target
 `;
 }
 
+// --- Queue-refresh lane (separate from podcast-worker) ---
+
+/**
+ * Generate a systemd user service for the queue-refresh worker.
+ * Uses its own lock file so it cannot collide with podcast-worker.
+ * The admin allowlist in config.yaml gates execution at runtime.
+ */
+export function generateQueueRefreshService(adminId) {
+  return `[Unit]
+Description=AI Post Transformers queue refresh (${adminId})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/podcast-worker/env
+WorkingDirectory=%h/devel/ai-post-transformers
+ExecStart=/usr/bin/flock -n -E 0 %t/queue-refresh.lock /bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && exec .venv/bin/python scripts/run_queue_worker.py --admin-id ${adminId} --once'
+Restart=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+/**
+ * Generate a systemd user timer for periodic queue refresh.
+ * Fires every 6 hours by default — much less frequent than the
+ * 2-minute podcast-worker timer.
+ */
+export function generateQueueRefreshTimer() {
+  return `[Unit]
+Description=Periodic trigger for queue-refresh
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=6h
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`;
+}
+
+/**
+ * Generate shell commands to install the queue-refresh units.
+ */
+export function generateQueueRefreshInstallCommands() {
+  return `# Install queue-refresh systemd user units
+mkdir -p ~/.config/systemd/user
+cp queue-refresh.service ~/.config/systemd/user/
+cp queue-refresh.timer   ~/.config/systemd/user/
+
+# Reload and enable
+systemctl --user daemon-reload
+systemctl --user enable --now queue-refresh.timer
+
+# Check status
+systemctl --user status queue-refresh.timer
+journalctl --user -u queue-refresh.service -f
+`;
+}
+
 /**
  * Generate a skeleton environment file with placeholders.
  */

@@ -273,6 +273,10 @@ social_signals:
       type: "reviewer"
       weight: 0.7
       platforms: ["twitter/x", "huggingface"]
+admin:
+  admins:
+    - id: mcgrof
+      capabilities: [queue_refresh, publish]
 editorial:
   enabled: true
   lenses_file: editorial_lenses.yaml

@@ -26,7 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def _node_eval(expr: str) -> str:
     """Run a JS expression that returns a string and capture stdout."""
     script = (
-        "import {generateSystemdService, generateSystemdTimer} "
+        "import {generateSystemdService, generateSystemdTimer, "
+        "generateQueueRefreshService, generateQueueRefreshTimer} "
         f"from './admin/src/systemd.js'; "
         f"process.stdout.write({expr});"
     )
@@ -175,3 +176,67 @@ class TestSystemdAnalyze:
                     f"systemd-analyze verify failed:\n"
                     + "\n".join(errors)
                 )
+
+
+# ==== Queue-refresh lane units ====
+
+@pytest.fixture(scope="module")
+def qr_service_unit() -> str:
+    return _node_eval("generateQueueRefreshService('testadmin')")
+
+
+@pytest.fixture(scope="module")
+def qr_timer_unit() -> str:
+    return _node_eval("generateQueueRefreshTimer()")
+
+
+# ---- structural tests ----
+
+def test_qr_service_has_required_sections(qr_service_unit: str):
+    for section in ("[Unit]", "[Service]", "[Install]"):
+        assert section in qr_service_unit
+
+
+def test_qr_timer_has_required_sections(qr_timer_unit: str):
+    for section in ("[Unit]", "[Timer]", "[Install]"):
+        assert section in qr_timer_unit
+
+
+def test_qr_service_parseable_as_ini(qr_service_unit: str):
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.read_string(qr_service_unit)
+    assert "Unit" in cp
+    assert "Service" in cp
+    assert cp["Service"]["Type"] == "oneshot"
+
+
+def test_qr_timer_parseable_as_ini(qr_timer_unit: str):
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.read_string(qr_timer_unit)
+    assert "Timer" in cp
+    assert "Install" in cp
+
+
+def test_qr_service_admin_id_embedded(qr_service_unit: str):
+    assert "--admin-id testadmin" in qr_service_unit
+
+
+def test_qr_service_runs_queue_worker(qr_service_unit: str):
+    """Queue-refresh service must use run_queue_worker.py, not podcast worker."""
+    assert "run_queue_worker.py" in qr_service_unit
+    assert "run_podcast_worker.py" not in qr_service_unit
+
+
+def test_qr_service_uses_separate_lock(qr_service_unit: str):
+    """Queue-refresh must use its own lock file, not podcast-worker.lock."""
+    assert "%t/queue-refresh.lock" in qr_service_unit
+    assert "podcast-worker.lock" not in qr_service_unit
+
+
+def test_qr_service_uses_flock(qr_service_unit: str):
+    assert "/usr/bin/flock -n -E 0" in qr_service_unit
+
+
+def test_qr_timer_interval_is_hours(qr_timer_unit: str):
+    """Queue-refresh timer should fire on an hours-scale interval."""
+    assert "OnUnitInactiveSec=6h" in qr_timer_unit
