@@ -81,6 +81,7 @@ def build_manifest_entry(row, *, draft_key=None, draft_stem=None):
         "date": row.get("publish_date") or "",
         "description": row.get("description") or "",
         "draft_key": draft_key,
+        "draft_stem": draft_stem,
         "filename": filename,
         "basename": basename,
         "source_urls": source_urls,

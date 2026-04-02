@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rss version="2.0">
+  <channel>
+    <title>AI Post Transformers (legacy test fixture)</title>
+    <item>
+      <title>RetNet and other things</title>
+      <link>https://arxiv.org/abs/2307.08621</link>
+      <guid>https://arxiv.org/abs/2307.08621</guid>
+      <description>This legacy episode covered RetNet (2307.08621).</description>
+    </item>
+  </channel>
+</rss>
