@@ -25,6 +25,7 @@ from scripts.run_generation_worker import (
     _heartbeat_submission,
     _lease_is_active,
     _list_submissions,
+    _parse_generation_result,
     _read_submission,
     _release_stale_claims,
     _update_submission,
@@ -130,6 +131,32 @@ class TestLeaseIsActive:
 # ---------------------------------------------------------------------------
 # Claim semantics
 # ---------------------------------------------------------------------------
+
+
+class TestParseGenerationResult:
+    def test_finds_draft_stem_in_stdout(self):
+        result = type("R", (), {
+            "returncode": 0,
+            "stdout": "done\ndrafts/2026/04/example.mp3\n",
+            "stderr": "",
+        })()
+
+        ok, stem = _parse_generation_result(result)
+
+        assert ok is True
+        assert stem == "drafts/2026/04/example"
+
+    def test_finds_draft_stem_in_stderr_audio_line(self):
+        result = type("R", (), {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "[Podcast] Complete\n  Audio: /home/mcgrof/devel/ai-post-transformers/drafts/2026/04/example.mp3\n",
+        })()
+
+        ok, stem = _parse_generation_result(result)
+
+        assert ok is True
+        assert stem == "/home/mcgrof/devel/ai-post-transformers/drafts/2026/04/example"
 
 
 class TestClaimSubmission:

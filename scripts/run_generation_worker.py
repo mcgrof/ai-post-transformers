@@ -370,9 +370,14 @@ def _parse_generation_result(result):
         err_msg = "\n".join(err_lines[-5:]) if err_lines else "Unknown error"
         return False, err_msg
 
-    stdout_lines = (result.stdout or "").strip().splitlines()
     draft_stem = None
-    for line in reversed(stdout_lines):
+    output_lines = []
+    if result.stdout:
+        output_lines.extend((result.stdout or "").strip().splitlines())
+    if result.stderr:
+        output_lines.extend((result.stderr or "").strip().splitlines())
+
+    for line in reversed(output_lines):
         if "drafts/" in line:
             for token in line.split():
                 if "drafts/" in token:
