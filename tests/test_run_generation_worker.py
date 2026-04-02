@@ -26,8 +26,10 @@ from scripts.run_generation_worker import (
     _lease_is_active,
     _list_submissions,
     _parse_generation_result,
+    _prepare_generation_inputs,
     _read_submission,
     _release_stale_claims,
+    _run_generation,
     _update_submission,
     _verify_claim_token,
     process_submission,
@@ -157,6 +159,72 @@ class TestParseGenerationResult:
 
         assert ok is True
         assert stem == "/home/mcgrof/devel/ai-post-transformers/drafts/2026/04/example"
+
+
+class TestPrepareGenerationInputs:
+    def test_uses_fallback_source_text_when_present(self):
+        sub = {
+            "title": "AI Agent Traps",
+            "urls": ["https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6372438"],
+            "metadata": {
+                "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6372438": {
+                    "fallback_source_text": "Recovered summary text.",
+                }
+            },
+        }
+
+        prepared, temp_paths = _prepare_generation_inputs(sub)
+
+        assert len(prepared) == 1
+        assert prepared[0].endswith(".txt")
+        assert len(temp_paths) == 1
+        text = Path(prepared[0]).read_text(encoding="utf-8")
+        assert "Title: AI Agent Traps" in text
+        assert "Recovered summary text." in text
+
+        for path in temp_paths:
+            path.unlink(missing_ok=True)
+
+    def test_leaves_normal_urls_unchanged(self):
+        sub = {
+            "urls": ["https://arxiv.org/abs/2401.12345"],
+            "metadata": {},
+        }
+
+        prepared, temp_paths = _prepare_generation_inputs(sub)
+
+        assert prepared == ["https://arxiv.org/abs/2401.12345"]
+        assert temp_paths == []
+
+    def test_run_generation_cleans_up_temp_fallback_files(self):
+        sub = {
+            "title": "AI Agent Traps",
+            "urls": ["https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6372438"],
+            "metadata": {
+                "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6372438": {
+                    "fallback_source_text": "Recovered summary text.",
+                }
+            },
+        }
+        seen = {}
+
+        def fake_run_generation_simple(cmd):
+            txt_inputs = [item for item in cmd if item.endswith('.txt')]
+            assert len(txt_inputs) == 1
+            seen['path'] = txt_inputs[0]
+            assert Path(txt_inputs[0]).exists()
+            return True, "drafts/2026/04/example"
+
+        with patch(
+            "scripts.run_generation_worker._run_generation_simple",
+            side_effect=fake_run_generation_simple,
+        ):
+            ok, stem = _run_generation(sub)
+
+        assert ok is True
+        assert stem == "drafts/2026/04/example"
+        assert seen['path'].endswith('.txt')
+        assert not Path(seen['path']).exists()
 
 
 class TestClaimSubmission:

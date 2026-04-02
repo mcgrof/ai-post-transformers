@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_utils import _normalize_pdf_url, download_pdf
+from pdf_utils import _normalize_pdf_url, download_and_extract, download_pdf
 from podcast import generate_podcast_from_urls
 
 
@@ -57,6 +57,15 @@ def test_download_pdf_rejects_non_pdf_response(monkeypatch):
 
     with pytest.raises(ValueError, match="did not return a PDF"):
         download_pdf("https://example.com/not-a-pdf")
+
+
+def test_download_and_extract_reads_local_text_sources(tmp_path):
+    src = tmp_path / "source.txt"
+    src.write_text("Recovered fallback source text.\n", encoding="utf-8")
+
+    text = download_and_extract(str(src))
+
+    assert text == "Recovered fallback source text.\n"
 
 
 def test_generate_podcast_from_urls_reports_extract_failures_cleanly(

@@ -8,6 +8,8 @@ from pathlib import Path
 import requests
 from pypdf import PdfReader
 
+_TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".text"}
+
 
 _ARXIV_ABS_RE = re.compile(
     r"https?://(?:www\.)?arxiv\.org/(?:abs|html)/"
@@ -95,6 +97,8 @@ def extract_text(pdf_path):
 def download_and_extract(url):
     """Download a PDF from a URL (or read a local path) and extract its text.
 
+    Local `.txt` / `.md` files are treated as already-extracted source text.
+
     Args:
         url: URL pointing to a PDF file, or a local filesystem path.
 
@@ -103,6 +107,13 @@ def download_and_extract(url):
     """
     local = Path(url).expanduser()
     if local.is_file():
+        if local.suffix.lower() in _TEXT_SUFFIXES:
+            text = local.read_text(encoding="utf-8")
+            print(
+                f"[PDF] Loaded {len(text)} chars from text source {local}",
+                file=sys.stderr,
+            )
+            return text
         return extract_text(local)
     pdf_path = download_pdf(url)
     try:

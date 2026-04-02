@@ -33,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -177,6 +178,49 @@ def _active_generation_for_admin(bucket, client, admin_id):
 # Generation logic
 # ---------------------------------------------------------------------------
 
+def _submission_source_text(sub, url):
+    metadata = (sub.get("metadata") or {}).get(url) or {}
+    for key in ("fallback_source_text", "manual_source_text", "summary_text"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _prepare_generation_inputs(sub):
+    urls = sub.get("urls", [])
+    prepared = []
+    temp_paths = []
+
+    for url in urls:
+        fallback_text = _submission_source_text(sub, url)
+        if not fallback_text:
+            prepared.append(url)
+            continue
+
+        metadata = (sub.get("metadata") or {}).get(url) or {}
+        title = metadata.get("title") or sub.get("title") or ""
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".txt",
+            prefix="submission-source-",
+            delete=False,
+        )
+        if title:
+            tmp.write(f"Title: {title}\n\n")
+        tmp.write(f"Source URL: {url}\n\n")
+        tmp.write(fallback_text)
+        tmp.write("\n")
+        tmp.close()
+
+        prepared.append(tmp.name)
+        temp_paths.append(Path(tmp.name))
+        print(f"[gen-worker] Using fallback source text for {url} -> {tmp.name}")
+
+    return prepared, temp_paths
+
+
 def _find_pending(bucket, client):
     pending = []
     for sub in _list_submissions(bucket, client):
@@ -227,33 +271,39 @@ def _run_generation(sub, *, bucket=None, client=None, claim_token=None,
     if not urls:
         return False, "No URLs in submission"
 
+    prepared_inputs, temp_paths = _prepare_generation_inputs(sub)
+
     cmd = [
         str(ROOT / ".venv" / "bin" / "python"),
         str(ROOT / "gen-podcast.py"),
-    ] + urls
+    ] + prepared_inputs
 
     instructions = sub.get("instructions")
     if instructions:
         cmd += ["--goal", instructions]
 
-    print(f"[gen-worker] Running: {' '.join(cmd[:4])}... ({len(urls)} URLs)")
+    print(f"[gen-worker] Running: {' '.join(cmd[:4])}... ({len(prepared_inputs)} URLs)")
 
     can_heartbeat_r2 = all((bucket, client, claim_token, key))
     can_heartbeat_store = all((store, claim_token, key))
 
-    if can_heartbeat_store:
-        return _run_generation_with_heartbeat_store(
-            cmd, store=store, claim_token=claim_token, key=key,
-        )
+    try:
+        if can_heartbeat_store:
+            return _run_generation_with_heartbeat_store(
+                cmd, store=store, claim_token=claim_token, key=key,
+            )
 
-    if can_heartbeat_r2:
-        return _run_generation_with_heartbeat(
-            cmd, bucket=bucket, client=client,
-            claim_token=claim_token, key=key,
-        )
+        if can_heartbeat_r2:
+            return _run_generation_with_heartbeat(
+                cmd, bucket=bucket, client=client,
+                claim_token=claim_token, key=key,
+            )
 
-    # Fallback: simple blocking run (tests, or missing context)
-    return _run_generation_simple(cmd)
+        # Fallback: simple blocking run (tests, or missing context)
+        return _run_generation_simple(cmd)
+    finally:
+        for path in temp_paths:
+            path.unlink(missing_ok=True)
 
 
 def _run_generation_simple(cmd):
