@@ -1721,7 +1721,7 @@ function queuePageWithData(data, subsData) {
       <label style="color:var(--text-secondary);font-size:0.813rem;display:block;margin-bottom:6px">Quick generate from URL:</label>
       <div style="display:flex;gap:8px">
         <input id="quick-gen-url" placeholder="https://arxiv.org/pdf/2401.12345" style="flex:1;padding:10px 14px;background:var(--background);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.875rem">
-        <button class="btn btn-success" onclick="quickGenerate()" style="white-space:nowrap">🎙️ Generate</button>
+        <button id="quick-generate-btn" class="btn btn-success" onclick="quickGenerate(this)" style="white-space:nowrap">🎙️ Generate</button>
       </div>
     </div>`;
 
@@ -1824,7 +1824,7 @@ function queuePageWithData(data, subsData) {
               <a href="${arxivUrl}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:0.95rem">${escapeHtml(title)}</a>
               <p style="color:var(--text-secondary);font-size:0.813rem;margin:4px 0 0">${abstract}</p>
             </div>
-            <button class="btn btn-success" onclick="quickGenerateUrl('${pdfUrl}')" style="font-size:0.75rem;padding:4px 10px;white-space:nowrap">🎙️</button>
+            <button class="btn btn-success" onclick="quickGenerateUrl('${pdfUrl}', this)" style="font-size:0.75rem;padding:4px 10px;white-space:nowrap">🎙️</button>
           </div>
         </div>`;
     });
@@ -1833,13 +1833,21 @@ function queuePageWithData(data, subsData) {
   });
 
   html += `<script>
-    async function quickGenerate() {
+    async function quickGenerate(triggerBtn) {
       const url = document.getElementById('quick-gen-url').value.trim();
       if (!url) { showToast('Enter a URL', 'error'); return; }
-      quickGenerateUrl(url);
-      document.getElementById('quick-gen-url').value = '';
+      const ok = await quickGenerateUrl(url, triggerBtn || document.getElementById('quick-generate-btn'));
+      if (ok) {
+        document.getElementById('quick-gen-url').value = '';
+      }
     }
-    async function quickGenerateUrl(url) {
+    async function quickGenerateUrl(url, triggerBtn) {
+      const btn = triggerBtn || null;
+      const originalLabel = btn ? btn.innerHTML : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳';
+      }
       try {
         const res = await fetch('/api/generate', {
           method: 'POST',
@@ -1847,8 +1855,25 @@ function queuePageWithData(data, subsData) {
           body: JSON.stringify({urls: [url], action: 'generate'}),
           credentials: 'same-origin'
         });
-        showToast('Queued for generation!');
-      } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to queue generation');
+        }
+        const duplicate = Boolean(data.duplicate);
+        const state = data.existing_submission && data.existing_submission.status
+          ? data.existing_submission.status.replace(/_/g, ' ')
+          : 'existing submission';
+        showToast(duplicate ? ('Already tracked — ' + state) : 'Queued for generation!');
+        setTimeout(() => location.reload(), 350);
+        return true;
+      } catch(e) {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalLabel || '🎙️';
+        }
+        showToast('Failed: ' + e.message, 'error');
+        return false;
+      }
     }
     async function retrySubmission(key) {
       try {
@@ -3352,6 +3377,7 @@ export {
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
   listPrivatePodcasts, deletePrivatePodcast,
+  deriveSourceIdentities, dedupeSubmissionsForUi,
   ADMIN_CANONICAL_HOST, WORKERS_DEV_SUFFIX, DEV_HOSTS,
 };
 
@@ -3531,7 +3557,7 @@ async function handleAPI(path, request, env, ctx) {
 
     case '/api/generate':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
-      return await generatePodcast(request, env);
+      return await generatePodcast(request, env, ctx);
 
     case '/api/systemd': {
       const identity = getAdminIdentity(request);
@@ -3902,36 +3928,7 @@ function queueScore(record) {
 // Get submissions — returns full records with status and R2 key
 async function getSubmissions(env) {
   try {
-    const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
-    const submissions = [];
-
-    for (const obj of list.objects) {
-      try {
-        const data = await env.ADMIN_BUCKET.get(obj.key);
-        if (data) {
-          const sub = await data.json();
-          if (sub.urls) {
-            submissions.push({
-              key: obj.key,
-              urls: sub.urls,
-              instructions: sub.instructions || null,
-              timestamp: sub.timestamp,
-              status: sub.status || 'submitted',
-              claimed_by: sub.claimed_by || null,
-              error: sub.error || null,
-              draft_stem: sub.draft_stem || null,
-              metadata: sub.metadata || null,
-              updated_at: sub.updated_at || sub.timestamp,
-            });
-          }
-        }
-      } catch (e) {
-        // Skip invalid entries
-      }
-    }
-
-    // Sort by timestamp descending
-    submissions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const submissions = dedupeSubmissionsForUi(await listSubmissionRecords(env));
     return { submissions: submissions.slice(0, 100) };
   } catch (error) {
     return { error: error.message, submissions: [] };
@@ -4072,47 +4069,235 @@ const SUBMISSION_STATUSES = [
   'rejected',
 ];
 
+const BLOCKING_SUBMISSION_STATUSES = new Set([
+  'submitted',
+  'pending',
+  'generation_claimed',
+  'generation_running',
+  'draft_generated',
+  'approved_for_publish',
+  'published',
+]);
+
+const SUBMISSION_STATUS_PRIORITY = {
+  published: 70,
+  approved_for_publish: 60,
+  draft_generated: 50,
+  generation_running: 40,
+  generation_claimed: 35,
+  submitted: 30,
+  pending: 25,
+  generation_failed: 20,
+  rejected: 10,
+};
+
+function extractSsrnId(url) {
+  const m = (url || '').match(/papers\.ssrn\.com\/sol3\/papers\.cfm\?(?:[^#]*&)?abstract_id=(\d+)/i);
+  return m ? m[1] : null;
+}
+
+function normalizeSubmissionIdentity(url) {
+  const raw = (url || '').trim();
+  if (!raw) return null;
+
+  const arxivId = extractArxivId(raw);
+  if (arxivId) return `arxiv:${arxivId}`;
+
+  const ssrnId = extractSsrnId(raw);
+  if (ssrnId) return `ssrn:${ssrnId}`;
+
+  try {
+    const u = new URL(raw);
+    u.hash = '';
+    if (u.searchParams && typeof u.searchParams.sort === 'function') {
+      u.searchParams.sort();
+    }
+    return `url:${u.origin}${u.pathname}${u.search}`;
+  } catch {
+    return `url:${raw}`;
+  }
+}
+
+function deriveSourceIdentities(urls) {
+  return [...new Set((urls || [])
+    .map(normalizeSubmissionIdentity)
+    .filter(Boolean))].sort();
+}
+
+function submissionSourceIdentities(sub) {
+  if (Array.isArray(sub.source_identities) && sub.source_identities.length > 0) {
+    return [...new Set(sub.source_identities.filter(Boolean))].sort();
+  }
+  return deriveSourceIdentities(sub.urls || []);
+}
+
+function submissionIdentityKey(sub) {
+  const ids = submissionSourceIdentities(sub);
+  return ids.length > 0
+    ? ids.join('||')
+    : (sub.key || sub.draft_stem || sub.timestamp || JSON.stringify(sub.urls || []));
+}
+
+function submissionStatusRank(status) {
+  return SUBMISSION_STATUS_PRIORITY[status] || 0;
+}
+
+function submissionTimestampValue(sub) {
+  const raw = sub.updated_at || sub.timestamp || '';
+  const ts = Date.parse(raw);
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+function choosePreferredSubmission(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+
+  const rankA = submissionStatusRank(a.status);
+  const rankB = submissionStatusRank(b.status);
+  if (rankB !== rankA) return rankB > rankA ? b : a;
+
+  const tsA = submissionTimestampValue(a);
+  const tsB = submissionTimestampValue(b);
+  if (tsB !== tsA) return tsB > tsA ? b : a;
+
+  const aHasDraft = Boolean(a.draft_stem);
+  const bHasDraft = Boolean(b.draft_stem);
+  if (aHasDraft !== bHasDraft) return bHasDraft ? b : a;
+
+  return (b.key || '') > (a.key || '') ? b : a;
+}
+
+function dedupeSubmissionsForUi(submissions) {
+  const grouped = new Map();
+  for (const sub of submissions || []) {
+    const key = submissionIdentityKey(sub);
+    grouped.set(key, choosePreferredSubmission(grouped.get(key), sub));
+  }
+  return [...grouped.values()].sort((a, b) => submissionTimestampValue(b) - submissionTimestampValue(a));
+}
+
+function summarizeExistingSubmission(sub) {
+  return {
+    key: sub.key || null,
+    status: sub.status || 'submitted',
+    title: displayTitle(sub),
+    draft_stem: sub.draft_stem || null,
+    claimed_by: sub.claimed_by || null,
+    source_identities: submissionSourceIdentities(sub),
+  };
+}
+
+async function listSubmissionRecords(env) {
+  const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
+  const submissions = [];
+
+  for (const obj of list.objects) {
+    try {
+      const data = await env.ADMIN_BUCKET.get(obj.key);
+      if (!data) continue;
+      const sub = await data.json();
+      if (!sub.urls) continue;
+      submissions.push({
+        key: obj.key,
+        urls: sub.urls,
+        instructions: sub.instructions || null,
+        timestamp: sub.timestamp,
+        status: sub.status || 'submitted',
+        claimed_by: sub.claimed_by || null,
+        error: sub.error || null,
+        draft_stem: sub.draft_stem || null,
+        metadata: sub.metadata || null,
+        updated_at: sub.updated_at || sub.timestamp,
+        source_identities: submissionSourceIdentities(sub),
+      });
+    } catch {
+      // Skip invalid entries
+    }
+  }
+
+  submissions.sort((a, b) => new Date(b.timestamp || b.updated_at || 0) - new Date(a.timestamp || a.updated_at || 0));
+  return submissions;
+}
+
+function findBlockingSubmission(submissions, urls) {
+  const wanted = new Set(deriveSourceIdentities(urls));
+  if (wanted.size === 0) return null;
+
+  let match = null;
+  for (const sub of submissions || []) {
+    if (!BLOCKING_SUBMISSION_STATUSES.has(sub.status || 'submitted')) continue;
+    const overlap = submissionSourceIdentities(sub).some(id => wanted.has(id));
+    if (!overlap) continue;
+    match = choosePreferredSubmission(match, sub);
+  }
+  return match;
+}
+
+async function submitPapersPayload(body, env, ctx) {
+  const { urls, instructions } = body || {};
+
+  if (!urls || !Array.isArray(urls) || urls.length === 0) {
+    return { error: 'No URLs provided' };
+  }
+
+  // Validate URLs
+  const validUrlPattern = /^https?:\/\/.+/;
+  for (const url of urls) {
+    if (!validUrlPattern.test(url)) {
+      return { error: `Invalid URL: ${url}` };
+    }
+  }
+
+  const submissions = await listSubmissionRecords(env);
+  const existing = findBlockingSubmission(submissions, urls);
+  if (existing) {
+    return {
+      success: true,
+      duplicate: true,
+      count: 0,
+      existing_submission: summarizeExistingSubmission(existing),
+    };
+  }
+
+  const timestamp = new Date().toISOString();
+  const key = `submissions/${timestamp.replace(/[:.]/g, '-')}.json`;
+
+  // Initialize metadata with pending status for each URL
+  const metadata = {};
+  for (const url of urls) {
+    metadata[url] = { enrichment_status: 'pending' };
+  }
+
+  const sourceIdentities = deriveSourceIdentities(urls);
+
+  await env.ADMIN_BUCKET.put(key, JSON.stringify({
+    urls,
+    instructions: instructions || null,
+    timestamp,
+    status: 'submitted',
+    metadata,
+    source_identities: sourceIdentities,
+    status_history: [{ status: 'submitted', at: timestamp }],
+  }));
+
+  // Fire-and-forget metadata enrichment via arXiv API
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(enrichSubmissionMetadata(key, env));
+  }
+
+  return {
+    success: true,
+    count: urls.length,
+    key,
+    source_identities: sourceIdentities,
+  };
+}
+
 // Submit papers
 async function submitPapers(request, env, ctx) {
   try {
-    const { urls, instructions } = await request.json();
-
-    if (!urls || !Array.isArray(urls) || urls.length === 0) {
-      return { error: 'No URLs provided' };
-    }
-
-    // Validate URLs
-    const validUrlPattern = /^https?:\/\/.+/;
-    for (const url of urls) {
-      if (!validUrlPattern.test(url)) {
-        return { error: `Invalid URL: ${url}` };
-      }
-    }
-
-    const timestamp = new Date().toISOString();
-    const key = `submissions/${timestamp.replace(/[:.]/g, '-')}.json`;
-
-    // Initialize metadata with pending status for each URL
-    const metadata = {};
-    for (const url of urls) {
-      metadata[url] = { enrichment_status: 'pending' };
-    }
-
-    await env.ADMIN_BUCKET.put(key, JSON.stringify({
-      urls,
-      instructions: instructions || null,
-      timestamp,
-      status: 'submitted',
-      metadata,
-      status_history: [{ status: 'submitted', at: timestamp }],
-    }));
-
-    // Fire-and-forget metadata enrichment via arXiv API
-    if (ctx && ctx.waitUntil) {
-      ctx.waitUntil(enrichSubmissionMetadata(key, env));
-    }
-
-    return { success: true, count: urls.length };
+    const body = await request.json();
+    return await submitPapersPayload(body, env, ctx);
   } catch (error) {
     return { error: error.message };
   }
@@ -5028,12 +5213,18 @@ async function retryPublishJob(env, { jobId, adminId, adminName }) {
 }
 
 // Queue podcast generation
-async function generatePodcast(request, env) {
+async function generatePodcast(request, env, ctx) {
   try {
-    const { paperId } = await request.json();
+    const body = await request.json();
+
+    if (body && Array.isArray(body.urls) && body.urls.length > 0) {
+      return await submitPapersPayload(body, env, ctx);
+    }
+
+    const { paperId } = body || {};
 
     if (!paperId) {
-      return { error: 'Missing paper ID' };
+      return { error: 'Missing paper ID or URLs' };
     }
 
     const timestamp = new Date().toISOString();

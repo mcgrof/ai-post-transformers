@@ -7,6 +7,7 @@ import worker, {
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
   listPrivatePodcasts, deletePrivatePodcast,
+  deriveSourceIdentities, dedupeSubmissionsForUi,
   ADMIN_CANONICAL_HOST, WORKERS_DEV_SUFFIX, DEV_HOSTS,
 } from './worker.js';
 import { ADMIN_RELEASE_TAG } from './release.js';
@@ -969,8 +970,113 @@ test('POST /api/submit stores submission with status submitted', async () => {
   assert.equal(stored.status, 'submitted');
   assert.deepEqual(stored.urls, ['https://arxiv.org/pdf/2401.00001']);
   assert.equal(stored.instructions, 'Focus on memory systems');
+  assert.deepEqual(stored.source_identities, ['arxiv:2401.00001']);
   assert.ok(Array.isArray(stored.status_history));
   assert.equal(stored.status_history[0].status, 'submitted');
+});
+
+
+test('deriveSourceIdentities canonicalizes arXiv and SSRN URLs', () => {
+  assert.deepEqual(
+    deriveSourceIdentities([
+      'https://arxiv.org/abs/2401.00001v2',
+      'https://arxiv.org/pdf/2401.00001',
+      'https://papers.ssrn.com/sol3/papers.cfm?download=yes&abstract_id=6372438',
+    ]),
+    ['arxiv:2401.00001', 'ssrn:6372438'],
+  );
+});
+
+
+test('dedupeSubmissionsForUi keeps the most advanced duplicate submission', () => {
+  const deduped = dedupeSubmissionsForUi([
+    {
+      key: 'submissions/older.json',
+      urls: ['https://arxiv.org/pdf/2401.12345'],
+      status: 'submitted',
+      timestamp: '2026-04-02T10:00:00.000Z',
+      updated_at: '2026-04-02T10:00:00.000Z',
+    },
+    {
+      key: 'submissions/newer.json',
+      urls: ['https://arxiv.org/abs/2401.12345'],
+      status: 'draft_generated',
+      draft_stem: 'drafts/2026/04/test-abc123',
+      timestamp: '2026-04-02T10:05:00.000Z',
+      updated_at: '2026-04-02T10:05:00.000Z',
+    },
+  ]);
+
+  assert.equal(deduped.length, 1);
+  assert.equal(deduped[0].key, 'submissions/newer.json');
+  assert.equal(deduped[0].status, 'draft_generated');
+});
+
+
+test('POST /api/submit dedupes active submissions across arXiv URL variants', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/existing.json': {
+        urls: ['https://arxiv.org/abs/2401.00001'],
+        timestamp: '2026-04-02T10:00:00.000Z',
+        status: 'generation_running',
+        claimed_by: 'worker-1',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  assert.equal(body.duplicate, true);
+  assert.equal(body.existing_submission.status, 'generation_running');
+  assert.equal(body.existing_submission.key, 'submissions/existing.json');
+  const submissionKeys = [...env.ADMIN_BUCKET.objects.keys()].filter(k => k.startsWith('submissions/'));
+  assert.deepEqual(submissionKeys, ['submissions/existing.json']);
+});
+
+
+test('POST /api/generate accepts urls payload and dedupes ready drafts', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/existing.json': {
+        urls: ['https://arxiv.org/pdf/2401.22222'],
+        timestamp: '2026-04-02T10:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/04/test-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/abs/2401.22222'],
+        action: 'generate',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  assert.equal(body.duplicate, true);
+  assert.equal(body.existing_submission.status, 'draft_generated');
+  assert.equal([...env.ADMIN_BUCKET.objects.keys()].filter(k => k.startsWith('actions/')).length, 0);
 });
 
 
@@ -1430,6 +1536,53 @@ test('GET /drafts shows draft_generated submissions for review with summary desc
 });
 
 
+test('GET /drafts dedupes duplicate draft submissions for the same paper', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/older.json': {
+        urls: ['https://arxiv.org/pdf/2401.55555'],
+        metadata: {
+          'https://arxiv.org/pdf/2401.55555': {
+            enrichment_status: 'done',
+            title: 'Interesting Paper',
+            summary: 'Older duplicate.',
+          },
+        },
+        timestamp: '2026-03-27T09:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/older-abc123',
+      },
+      'submissions/newer.json': {
+        urls: ['https://arxiv.org/abs/2401.55555'],
+        metadata: {
+          'https://arxiv.org/abs/2401.55555': {
+            enrichment_status: 'done',
+            title: 'Interesting Paper',
+            summary: 'Newer duplicate.',
+          },
+        },
+        timestamp: '2026-03-27T10:00:00.000Z',
+        status: 'approved_for_publish',
+        draft_stem: 'drafts/2026/03/newer-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Newer duplicate.'), 'newer/more advanced duplicate is shown');
+  assert.ok(!html.includes('Older duplicate.'), 'older duplicate is suppressed');
+  assert.ok(html.includes('drafts/2026/03/newer-abc123.mp3'), 'newer draft remains visible');
+  assert.ok(!html.includes('drafts/2026/03/older-abc123.mp3'), 'older duplicate draft is suppressed');
+});
+
+
 // =========================================================================
 // Corner-case and extended tests
 // =========================================================================
@@ -1660,6 +1813,66 @@ test('Queue page filters draft_generated papers from editorial sections', async 
     'paper with ready draft should be filtered from editorial sections');
   assert.ok(html.includes('Draft Ready'),
     'paper should appear in Draft Ready section instead');
+});
+
+
+test('Queue page collapses duplicate submissions for the same paper to one advanced state', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        public: [
+          { arxiv_id: '2401.00003', title: 'Draft Already Done', max_axis_score: 0.8 },
+        ],
+      },
+      'submissions/submitted.json': {
+        urls: ['https://arxiv.org/pdf/2401.00003'],
+        timestamp: '2026-03-27T08:00:00.000Z',
+        status: 'submitted',
+      },
+      'submissions/done.json': {
+        urls: ['https://arxiv.org/abs/2401.00003'],
+        timestamp: '2026-03-27T09:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/test-abc123',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Pending Generation'), 'older submitted duplicate is suppressed');
+  assert.ok(html.includes('Draft Ready'), 'more advanced duplicate wins');
+  assert.ok(!html.includes('Draft Already Done'), 'paper remains filtered from editorial queue');
+});
+
+
+test('Queue page queue buttons use click-lock helper for immediate disable', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [
+          { arxiv_id: '2401.00009', title: 'Clickable Once Paper', abstract: 'Test' },
+        ],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(html.includes("quickGenerateUrl('https://arxiv.org/pdf/2401.00009', this)"));
+  assert.ok(html.includes("btn.disabled = true"), 'page script disables clicked buttons immediately');
 });
 
 
