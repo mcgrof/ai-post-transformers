@@ -369,6 +369,26 @@ def test_advance_linked_submissions_sets_published(monkeypatch):
     assert any(h["status"] == "published" for h in updated["status_history"])
 
 
+def test_advance_linked_submissions_matches_absolute_local_draft_stem():
+    from scripts.publish_job_runner import _advance_linked_submissions, ROOT
+
+    sub = {
+        "status": "draft_generated",
+        "draft_stem": str(ROOT / "drafts/2026/04/2026-04-02-ai-agent-traps-7ce4ba"),
+        "status_history": [],
+    }
+    store = FakeR2Store({
+        "submissions/2026-04-02T07-29-12-121Z.json": sub,
+    })
+    job = {"draft_key": "drafts/2026/04/2026-04-02-ai-agent-traps-7ce4ba.mp3"}
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == ["submissions/2026-04-02T07-29-12-121Z.json"]
+    updated = store.client._objects["submissions/2026-04-02T07-29-12-121Z.json"]
+    assert updated["status"] == "published"
+
+
 def test_advance_linked_submissions_skips_already_published():
     from scripts.publish_job_runner import _advance_linked_submissions
 

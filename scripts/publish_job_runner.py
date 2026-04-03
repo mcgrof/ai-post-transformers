@@ -35,6 +35,18 @@ PODCAST_DOMAIN = "https://podcast.do-not-panic.com"
 STEP_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
+def _normalize_draft_stem(value: str | None) -> str:
+    stem = str(value or "").strip().rstrip("/")
+    if not stem:
+        return ""
+    if stem.endswith(".mp3") or stem.endswith(".txt"):
+        stem = os.path.splitext(stem)[0]
+    root_prefix = str(ROOT) + os.sep
+    if stem.startswith(root_prefix):
+        stem = os.path.relpath(stem, ROOT)
+    return stem
+
+
 def _run_shell(command: str, *, cwd: Path = ROOT) -> None:
     wrapped = f"source ~/.enhance-bash >/dev/null 2>&1 && {command}"
     subprocess.run(
@@ -452,7 +464,7 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
     if not hasattr(store, "client") or not hasattr(store, "bucket"):
         return []
     draft_key = job.get("draft_key", "")
-    draft_stem = draft_key.replace(".mp3", "").replace(".txt", "")
+    draft_stem = _normalize_draft_stem(draft_key)
     if not draft_stem:
         return []
     import datetime
@@ -472,7 +484,7 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
                 if isinstance(body, bytes):
                     body = body.decode("utf-8")
                 sub = json.loads(body)
-                sub_stem = sub.get("draft_stem", "")
+                sub_stem = _normalize_draft_stem(sub.get("draft_stem", ""))
                 if not sub_stem or sub_stem != draft_stem:
                     continue
                 if sub.get("status") == "published":
