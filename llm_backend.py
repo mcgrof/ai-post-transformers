@@ -6,10 +6,11 @@ Supports four backends:
   - claude-cli: Claude CLI subprocess (uses Max subscription, not API credits)
   - anthropic: Anthropic API via Python SDK
 
-When llm_backend is "openai", the codex CLI is preferred automatically
-so that the Codex subscription is used instead of pay-per-token API
-credits.  The openai SDK path is only used as a fallback when the
-codex binary is not found.
+Important operational rule:
+When llm_backend is "openai", use the OpenAI SDK/API path directly.
+Do NOT silently reroute unattended generation work through the Codex CLI,
+because CLI subscription limits and local sandbox behavior are a different
+operational surface than the API.
 
 Usage:
     from llm_backend import get_llm_backend, llm_call
@@ -21,7 +22,6 @@ Usage:
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -38,13 +38,13 @@ def get_llm_backend(config):
         return {"type": "codex"}
 
     if backend_type == "openai":
-        # Prefer codex CLI over the OpenAI SDK so we use the Codex
-        # subscription instead of burning pay-per-token API credits.
-        if shutil.which("codex"):
-            print("[LLM] openai backend: routing through codex CLI "
-                  "(subscription credits)", file=sys.stderr)
-            return {"type": "codex"}
-        import openai
+        try:
+            import openai
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "openai backend requires the 'openai' Python package; "
+                "install requirements.txt into the worker venv"
+            ) from exc
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             try:
@@ -54,6 +54,7 @@ def get_llm_backend(config):
                 pass
         if not api_key:
             raise RuntimeError("Set OPENAI_API_KEY for openai backend")
+        print("[LLM] openai backend: using OpenAI SDK/API", file=sys.stderr)
         return {"type": "openai", "client": openai.OpenAI(api_key=api_key)}
 
     if backend_type == "anthropic":
@@ -105,12 +106,16 @@ def llm_call(backend, model, prompt, temperature=0.4,
 # ---------------------------------------------------------------------------
 
 def _call_openai(client, model, prompt, temperature, max_tokens):
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+    kwargs = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+    }
+    if (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs["max_completion_tokens"] = max_tokens
+    else:
+        kwargs["max_tokens"] = max_tokens
+    resp = client.chat.completions.create(**kwargs)
     return resp.choices[0].message.content.strip()
 
 
@@ -174,10 +179,13 @@ def _call_codex(model, prompt, max_tokens):
             cmd, input=prompt, capture_output=True,
             text=True, timeout=timeout)
         if result.returncode != 0:
-            stderr_msg = result.stderr[:300] if result.stderr else ""
+            stderr_lines = [line for line in (result.stderr or "").splitlines() if line.strip()]
+            stderr_tail = "\n".join(stderr_lines[-8:]) if stderr_lines else ""
+            stdout_tail = (result.stdout or "").strip()[-300:]
+            details = stderr_tail or stdout_tail or "Codex CLI returned non-zero exit status"
             raise RuntimeError(
                 f"Codex CLI error (rc={result.returncode}, "
-                f"timeout={timeout}s): {stderr_msg}")
+                f"timeout={timeout}s): {details}")
         output = open(outfile.name).read().strip()
         if not output:
             raise RuntimeError(
