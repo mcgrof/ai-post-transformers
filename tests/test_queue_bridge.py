@@ -243,6 +243,43 @@ class TestSyncSubmissionsFromR2:
         data, _ = store.load_submission("submissions/test.json")
         assert data["status"] == "generation_failed"
 
+    def test_imports_r2_rejection_over_local_draft_generated(
+        self, store, client
+    ):
+        """Admin UI rejection on R2 must overwrite local draft_generated.
+
+        This is the real-world scenario: the worker generates a draft
+        locally (draft_generated), syncs up to R2, then an admin rejects
+        via the UI (which updates R2 with a newer timestamp). The next
+        sync_down must import the rejection.
+        """
+        local_sub = {
+            "status": "draft_generated",
+            "urls": ["https://arxiv.org/pdf/2603.03271"],
+            "updated_at": _ts(10),
+            "draft_stem": "drafts/2026/04/some-draft",
+        }
+        store.save_submission("submissions/rejected.json", local_sub)
+
+        r2_sub = {
+            "status": "rejected",
+            "urls": ["https://arxiv.org/pdf/2603.03271"],
+            "updated_at": _ts(0),
+            "draft_stem": "drafts/2026/04/some-draft",
+            "rejection_reason": "Not AI related",
+            "rejected_by": "admin",
+        }
+        _put_json(client, BUCKET, "submissions/rejected.json", r2_sub)
+
+        counts = sync_submissions_from_r2(
+            store, bucket=BUCKET, client=client
+        )
+        assert counts["imported"] == 1
+
+        data, _ = store.load_submission("submissions/rejected.json")
+        assert data["status"] == "rejected"
+        assert data["rejection_reason"] == "Not AI related"
+
 
 # ---------------------------------------------------------------------------
 # Import publish jobs from R2
