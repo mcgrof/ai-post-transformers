@@ -38,6 +38,7 @@ penalties:
   fatigue_max: 0.25
   negative_profile_max: 0.30
   narrow_domain: 0.20
+  non_ai_relevance: 0.60       # heavy penalty for non-AI papers from broad categories
 
 # Shortlist configuration
 shortlist:

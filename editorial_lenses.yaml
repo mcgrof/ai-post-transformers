@@ -93,6 +93,64 @@ narrow_domain_penalty_list:
   - video editing
   - quantum-classical hybrids
 
+# Categories that are broad enough to include non-AI papers.
+# Papers from these categories must mention at least one AI/ML
+# keyword in their title or abstract; otherwise they receive a
+# heavy penalty via the non_ai_relevance_flag.
+broad_non_ai_categories:
+  - cs.DC
+  - cs.DB
+  - cs.PF
+  - cs.AR
+
+ai_relevance_keywords:
+  - neural
+  - deep learning
+  - machine learning
+  - transformer
+  - attention mechanism
+  - language model
+  - llm
+  - diffusion model
+  - generative model
+  - reinforcement learning
+  - convolutional
+  - embedding
+  - fine-tun
+  - pretrain
+  - pre-train
+  - foundation model
+  - large model
+  - inference server
+  - gpu cluster
+  - training run
+  - gradient
+  - backpropagat
+  - autoregressive
+  - token
+  - kv cache
+  - quantiz
+  - pruning
+  - distillation
+  - mixture of experts
+  - sparse attention
+  - activation
+  - checkpoint
+  - model parallel
+  - tensor parallel
+  - pipeline parallel
+  - data parallel
+  - federated learning
+  - gpt
+  - bert
+  - llama
+  - vllm
+  - serving framework
+  - ai system
+  - ai infra
+  - ml system
+  - ml infra
+
 # Maps arXiv primary categories to taxonomy buckets
 arxiv_category_map:
   scope:

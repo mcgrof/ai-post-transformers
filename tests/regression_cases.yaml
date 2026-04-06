@@ -135,6 +135,32 @@ cases:
       expected_status: "Cover now"
       expected_badges_contain: "Public AI"
 
+  - name: non_ai_systems_paper
+    description: >
+      Pure systems paper about database buffer management with no
+      AI/ML connection.  From cs.DC but mentions "memory" heavily,
+      which could fool embedding similarity.  Should be heavily
+      penalized and excluded from the queue.
+    paper:
+      arxiv_id: "9999.00007"
+      title: "Virtual-Memory Assisted Buffer Management in Tiered Memory"
+      abstract: >
+        We present VMBuf, a buffer management scheme for database
+        systems running on tiered memory (DRAM + CXL-attached memory).
+        VMBuf leverages OS virtual memory page migration hints to
+        co-optimize database buffer pool eviction with hardware-level
+        page placement.  Evaluated on TPC-H and TPC-DS with PostgreSQL
+        on a 2-socket server with CXL memory expanders, VMBuf reduces
+        query latency by 35% compared to Linux AutoNUMA.
+      authors: ["Yeasir Rayhan", "Donghyun Gouk"]
+      categories: ["cs.DC", "cs.DB"]
+      published: "2026-03-01T00:00:00Z"
+    expected:
+      scope_bucket: systems
+      non_ai_relevance_flag: true
+      public_interest_low: true
+      memory_score_low: true
+
   - name: cross_category_memory_systems
     description: >
       Cross-category math + systems paper with real memory relevance.

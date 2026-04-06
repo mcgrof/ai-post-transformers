@@ -4384,3 +4384,69 @@ test('ownerTokenSync is case-insensitive', () => {
   const token2 = ownerTokenSync('test@example.com');
   assert.equal(token1, token2);
 });
+
+
+test('Queue page filters rejected submissions from editorial sections', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [
+          { arxiv_id: '2603.03271', title: 'Rejected Non-AI Paper', max_axis_score: 0.5 },
+          { arxiv_id: '2401.99999', title: 'Good AI Paper', max_axis_score: 0.8 },
+        ],
+      },
+      'submissions/rejected.json': {
+        urls: ['https://arxiv.org/pdf/2603.03271'],
+        timestamp: '2026-03-20T10:00:00.000Z',
+        status: 'rejected',
+        rejection_reason: 'Not AI related',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Rejected Non-AI Paper'),
+    'rejected paper should be filtered from editorial queue');
+  assert.ok(html.includes('Good AI Paper'),
+    'non-rejected paper should remain in editorial queue');
+});
+
+
+test('Queue page filters generation_failed submissions from editorial sections', async () => {
+  const env = makeEnv({
+    admin: {
+      'queue/latest.json': {
+        bridge: [
+          { arxiv_id: '2401.55555', title: 'Failed Paper', max_axis_score: 0.6 },
+          { arxiv_id: '2401.66666', title: 'Untouched Paper', max_axis_score: 0.7 },
+        ],
+      },
+      'submissions/failed.json': {
+        urls: ['https://arxiv.org/pdf/2401.55555'],
+        timestamp: '2026-03-20T10:00:00.000Z',
+        status: 'generation_failed',
+        error: 'LLM returned empty output',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/queue'),
+    env,
+    {},
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Failed Paper'),
+    'failed-generation paper should be filtered from editorial queue');
+  assert.ok(html.includes('Untouched Paper'),
+    'unhandled paper should remain in editorial queue');
+});

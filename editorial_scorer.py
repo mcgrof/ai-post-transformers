@@ -99,6 +99,11 @@ class EditorialScorer:
         self.narrow_domains = set(
             d.lower() for d in self.lenses.get(
                 "narrow_domain_penalty_list", []))
+        self.broad_non_ai_cats = set(
+            self.lenses.get("broad_non_ai_categories", []))
+        self.ai_keywords = [
+            kw.lower() for kw in self.lenses.get(
+                "ai_relevance_keywords", [])]
 
         _log("[Editorial]",
              f"Seeds: {_c('bold', str(len(self.public_seeds)))} public, "
@@ -263,7 +268,8 @@ class EditorialScorer:
         return "empirical"
 
     def _apply_editorial_filters(self, records):
-        """Flag narrow domain papers for downstream penalty."""
+        """Flag narrow domain and non-AI papers for downstream penalty."""
+        flagged_non_ai = 0
         for rec in records:
             text = f"{rec.title} {rec.abstract}".lower()
             for narrow in self.narrow_domains:
@@ -274,6 +280,30 @@ class EditorialScorer:
             if rec.domain_bucket in ("medical", "bio", "graphics",
                                      "pde", "recommendation"):
                 rec.narrow_domain_flag = True
+
+            # Flag papers from broad non-AI categories that lack
+            # any AI/ML keyword in title+abstract.  A paper from
+            # cs.DC about database buffer management is not relevant
+            # to an AI podcast even if it mentions "memory".
+            if self.broad_non_ai_cats and self.ai_keywords:
+                from_broad = any(
+                    cat in self.broad_non_ai_cats
+                    for cat in rec.categories)
+                # Only check papers whose *primary* category is
+                # non-core-AI.  Papers cross-listed with cs.LG etc.
+                # are fine.
+                core_ai = {"cs.LG", "cs.AI", "stat.ML", "cs.CL",
+                           "cs.CV", "cs.NE"}
+                has_core = any(
+                    cat in core_ai for cat in rec.categories)
+                if from_broad and not has_core:
+                    if not any(kw in text for kw in self.ai_keywords):
+                        rec.non_ai_relevance_flag = True
+                        flagged_non_ai += 1
+
+        if flagged_non_ai:
+            _log("[Editorial]",
+                 f"Non-AI relevance flag: {flagged_non_ai} papers")
 
     def _compute_similarities(self, records, embeddings):
         """Compute triple similarity against seed profiles."""
@@ -497,6 +527,16 @@ class EditorialScorer:
                 rec.negative_profile_penalty = min(
                     penalties.get("negative_profile_max", 0.30),
                     (rec.sim_negative - 0.5) * 0.6)
+
+            # Non-AI relevance penalty — papers from broad systems
+            # categories that don't mention any AI/ML concepts.
+            # This is a heavy penalty to keep the queue AI-focused.
+            if rec.non_ai_relevance_flag:
+                non_ai_pen = penalties.get("non_ai_relevance", 0.60)
+                rec.public_interest_score = clamp(
+                    rec.public_interest_score - non_ai_pen)
+                rec.memory_score = clamp(
+                    rec.memory_score - non_ai_pen)
 
             # Narrow domain penalty
             if rec.narrow_domain_flag and \

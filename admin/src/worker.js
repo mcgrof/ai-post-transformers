@@ -1785,7 +1785,9 @@ function queuePageWithData(data, subsData) {
   const handledStatuses = [
     'submitted', 'pending',
     'generation_claimed', 'generation_running', 'draft_generated',
+    'generation_failed',
     'approved_for_publish', 'published',
+    'rejected',
   ];
   const handledArxivIds = new Set();
   submissions.filter(s => handledStatuses.includes(s.status)).forEach(s => {
@@ -3616,9 +3618,11 @@ async function getDashboardStats(env) {
   };
 
   try {
-    // Count drafts
-    const drafts = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
-    stats.pendingDrafts = drafts.objects.filter(o => o.key.endsWith('.mp3')).length;
+    // Count drafts using the same filtering as the Drafts page so the
+    // homepage number matches what operators actually see (excludes
+    // rejected, superseded, published, and publish-completed drafts).
+    const draftsResult = await getDrafts(env);
+    stats.pendingDrafts = (draftsResult.drafts || []).length;
 
     // Count queue
     const queueData = await env.ADMIN_BUCKET.get('queue/latest.json');

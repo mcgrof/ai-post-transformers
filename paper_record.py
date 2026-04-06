@@ -34,6 +34,7 @@ class PaperRecord:
     domain_bucket: str = ""     # llm|multimodal|vision|audio|...
     paper_type: str = ""        # theory|empirical|systems|benchmark|survey|application
     narrow_domain_flag: bool = False
+    non_ai_relevance_flag: bool = False
 
     # Similarities (set by first pass)
     sim_public: float = 0.0

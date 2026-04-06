@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_backend import _call_codex, _call_openai, get_llm_backend
+from llm_backend import _call_codex, _call_openai, _parse_json, get_llm_backend
 
 
 class _FakeOpenAIClient:
@@ -59,6 +59,7 @@ def test_call_openai_uses_max_completion_tokens_for_gpt5_models():
     assert raw == '{"ok": true}'
     assert calls[0]['max_completion_tokens'] == 123
     assert 'max_tokens' not in calls[0]
+    assert 'temperature' not in calls[0]
 
 
 
@@ -79,6 +80,7 @@ def test_call_openai_uses_max_tokens_for_legacy_models():
     assert raw == '{"ok": true}'
     assert calls[0]['max_tokens'] == 77
     assert 'max_completion_tokens' not in calls[0]
+    assert calls[0]['temperature'] == 0.4
 
 
 
@@ -111,3 +113,63 @@ def test_call_codex_surfaces_useful_stderr_tail(monkeypatch):
     assert "Codex CLI error" in msg
     assert "You've hit your usage limit" in msg
     assert "sandbox: read-only" in msg
+
+
+def test_call_openai_none_content_gives_clear_error():
+    """OpenAI reasoning models can return None content on refusal/filter."""
+    class _Create:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    message=SimpleNamespace(content=None, refusal="content policy"),
+                    finish_reason="content_filter",
+                )]
+            )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=_Create()))
+
+    with pytest.raises(RuntimeError) as exc:
+        _call_openai(client, "gpt-5.4", "test prompt", 0.4, 100)
+
+    msg = str(exc.value)
+    assert "empty content" in msg
+    assert "finish_reason=content_filter" in msg
+    assert "refusal=content policy" in msg
+
+
+def test_call_openai_empty_string_content_gives_clear_error():
+    """Empty string content should also produce a clear error."""
+    class _Create:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    message=SimpleNamespace(content="", refusal=None),
+                    finish_reason="stop",
+                )]
+            )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=_Create()))
+
+    with pytest.raises(RuntimeError) as exc:
+        _call_openai(client, "gpt-5.4", "test prompt", 0.4, 100)
+
+    msg = str(exc.value)
+    assert "empty content" in msg
+    assert "finish_reason=stop" in msg
+
+
+def test_parse_json_empty_output_gives_clear_error():
+    with pytest.raises(RuntimeError) as exc:
+        _parse_json("", {"type": "openai", "client": object()}, "gpt-5.4", "prompt", 0.4, 100)
+
+    assert "empty output" in str(exc.value)
+
+
+def test_parse_json_retry_empty_output_gives_clear_error(monkeypatch):
+    monkeypatch.setattr("llm_backend._call_openai", lambda *a, **k: "")
+
+    with pytest.raises(RuntimeError) as exc:
+        _parse_json("not json", {"type": "openai", "client": object()}, "gpt-5.4", "prompt", 0.4, 100)
+
+    msg = str(exc.value)
+    assert "All JSON parse attempts failed" in msg or "empty output" in msg

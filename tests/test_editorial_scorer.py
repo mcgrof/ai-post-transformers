@@ -188,6 +188,30 @@ class TestEditorialFilters:
         rec = _score_case(editorial_scorer, case)
         assert rec.narrow_domain_flag is False
 
+    def test_non_ai_systems_paper_flagged(self, editorial_scorer,
+                                          regression_cases):
+        case = _find_case(regression_cases,
+                          "non_ai_systems_paper")
+        rec = _score_case(editorial_scorer, case)
+        assert rec.non_ai_relevance_flag is True
+        assert rec.public_interest_score < 0.3
+
+    def test_ai_systems_paper_not_flagged(self, editorial_scorer,
+                                          regression_cases):
+        """cs.DC paper that mentions AI/ML terms should pass."""
+        case = _find_case(regression_cases,
+                          "broad_llm_inference_cache")
+        rec = _score_case(editorial_scorer, case)
+        assert rec.non_ai_relevance_flag is False
+
+    def test_cross_listed_paper_not_flagged(self, editorial_scorer,
+                                            regression_cases):
+        """cs.DC + cs.LG cross-listed paper should pass."""
+        case = _find_case(regression_cases,
+                          "cross_category_memory_systems")
+        rec = _score_case(editorial_scorer, case)
+        assert rec.non_ai_relevance_flag is False
+
 
 class TestShortlist:
     def test_shortlist_respects_min_threshold(

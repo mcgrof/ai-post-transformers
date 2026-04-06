@@ -109,14 +109,34 @@ def _call_openai(client, model, prompt, temperature, max_tokens):
     kwargs = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
     }
+
+    # Newer reasoning models are stricter about accepted request fields.
+    # Avoid sending temperature unless we have to, and prefer the newer
+    # completion-token field for GPT-5 / o* families.
+    if not (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs["temperature"] = temperature
+
     if (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
         kwargs["max_completion_tokens"] = max_tokens
     else:
         kwargs["max_tokens"] = max_tokens
+
     resp = client.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content.strip()
+    choice = resp.choices[0]
+    content = choice.message.content
+    finish = getattr(choice, "finish_reason", None)
+    refusal = getattr(choice.message, "refusal", None)
+
+    if content is None or not content.strip():
+        parts = [f"OpenAI returned empty content (model={model}"]
+        if finish:
+            parts.append(f"finish_reason={finish}")
+        if refusal:
+            parts.append(f"refusal={refusal}")
+        raise RuntimeError(", ".join(parts) + ")")
+
+    return content.strip()
 
 
 def _call_anthropic(client, model, prompt, temperature, max_tokens):
@@ -126,7 +146,17 @@ def _call_anthropic(client, model, prompt, temperature, max_tokens):
         temperature=temperature,
         messages=[{"role": "user", "content": prompt}],
     )
-    return resp.content[0].text.strip()
+    stop = getattr(resp, "stop_reason", None)
+    if not resp.content:
+        raise RuntimeError(
+            f"Anthropic returned empty content (model={model}, "
+            f"stop_reason={stop})")
+    text = resp.content[0].text
+    if text is None or not text.strip():
+        raise RuntimeError(
+            f"Anthropic returned empty text (model={model}, "
+            f"stop_reason={stop})")
+    return text.strip()
 
 
 def _call_claude_cli(model, prompt, max_tokens):
@@ -235,6 +265,15 @@ def _extract_json_block(text):
 
 def _parse_json(raw, backend, model, prompt, temperature, max_tokens):
     """Parse JSON from LLM output, with progressive repair attempts."""
+    raw = raw if isinstance(raw, str) else ("" if raw is None else str(raw))
+
+    # Empty / whitespace-only output is a common transient backend failure.
+    # Surface a clear error instead of the opaque JSON "char 0" failure.
+    if not raw.strip():
+        raise RuntimeError(
+            "LLM returned empty output while JSON was required"
+        )
+
     # Strip markdown code fences
     result = re.sub(r"^```(?:json)?\n?", "", raw, flags=re.MULTILINE)
     result = re.sub(r"\n?```\s*$", "", result, flags=re.MULTILINE).strip()
@@ -283,6 +322,7 @@ def _parse_json(raw, backend, model, prompt, temperature, max_tokens):
           file=sys.stderr)
 
     # Try up to 2 retries with increasingly strict instructions
+    raw2 = raw
     for retry_num in range(2):
         retry_prompt = (prompt +
                         "\n\nIMPORTANT: Output valid JSON only. "
@@ -301,6 +341,12 @@ def _parse_json(raw, backend, model, prompt, temperature, max_tokens):
             raw2 = _call_codex(model, retry_prompt, max_tokens)
         else:
             raise ValueError(f"Unknown backend type: {btype!r}")
+
+        raw2 = raw2 if isinstance(raw2, str) else ("" if raw2 is None else str(raw2))
+        if not raw2.strip():
+            print(f"[LLM] Retry {retry_num + 1} returned empty output.",
+                  file=sys.stderr)
+            continue
 
         result2 = re.sub(r"^```(?:json)?\n?", "", raw2, flags=re.MULTILINE)
         result2 = re.sub(r"\n?```\s*$", "", result2, flags=re.MULTILINE).strip()
@@ -322,6 +368,8 @@ def _parse_json(raw, backend, model, prompt, temperature, max_tokens):
             print(f"[LLM] Retry {retry_num + 1} failed. Output: {repr(result2[:300])}...",
                   file=sys.stderr)
 
-    raise json.JSONDecodeError(
-        f"All JSON parse attempts failed after retries. Last raw output: {repr(raw2[:500])}",
-        raw2[:500] if raw2 else "", 0)
+    sample = raw2[:500] if raw2 else ""
+    raise RuntimeError(
+        "All JSON parse attempts failed after retries. "
+        f"Last raw output: {repr(sample)}"
+    )
