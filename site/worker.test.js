@@ -234,3 +234,40 @@ test('missing objects return 404 even if path is allowed', async () => {
   const resp = await worker.fetch(req, env);
   assert.equal(resp.status, 404);
 });
+
+
+test('year-month archive index.html is served', async () => {
+  const env = makeEnv({
+    '2026/04/index.html': '<html>April 2026 archive</html>',
+  });
+  const req = makeRequest('/2026/04/index.html');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+  const body = await resp.text();
+  assert.ok(body.includes('April 2026 archive'));
+});
+
+
+test('year-month archive bare directory rewrites to index.html', async () => {
+  const env = makeEnv({
+    '2026/04/index.html': '<html>April 2026 archive</html>',
+  });
+  const req = makeRequest('/2026/04/');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+  const body = await resp.text();
+  assert.ok(body.includes('April 2026 archive'));
+});
+
+
+test('isAllowedPath accepts year-month archive paths', () => {
+  assert.ok(isAllowedPath('2026/04/index.html'));
+  assert.ok(isAllowedPath('2025/12/index.html'));
+  assert.ok(isAllowedPath('2026/04/'));
+  // Reject malformed year-month paths
+  assert.ok(!isAllowedPath('2026/4/index.html'));        // single-digit month
+  assert.ok(!isAllowedPath('2026/04/something.html'));    // non-index file
+  assert.ok(!isAllowedPath('2026/04/secrets.json'));      // non-index file
+  assert.ok(!isAllowedPath('20266/04/index.html'));       // 5-digit year
+  assert.ok(!isAllowedPath('2026/04/sub/index.html'));    // nested
+});
