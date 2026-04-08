@@ -260,6 +260,50 @@ test('year-month archive bare directory rewrites to index.html', async () => {
 });
 
 
+test('episode URL without trailing slash serves index.html', async () => {
+  const env = makeEnv({
+    'episodes/some-episode-slug/index.html': '<html>Some Episode</html>',
+  });
+  const req = makeRequest('/episodes/some-episode-slug');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+  const body = await resp.text();
+  assert.ok(body.includes('Some Episode'));
+});
+
+
+test('episode URL with trailing slash still works', async () => {
+  const env = makeEnv({
+    'episodes/some-episode-slug/': '<html>Some Episode</html>',
+  });
+  const req = makeRequest('/episodes/some-episode-slug/');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+});
+
+
+test('conference URL without trailing slash serves index.html', async () => {
+  const env = makeEnv({
+    'conference/neurips-2025/index.html': '<html>NeurIPS 2025</html>',
+  });
+  const req = makeRequest('/conference/neurips-2025');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+  const body = await resp.text();
+  assert.ok(body.includes('NeurIPS 2025'));
+});
+
+
+test('episode subpath assets are not rewritten', async () => {
+  const env = makeEnv({
+    'episodes/some-slug/cover.png': 'png-data',
+  });
+  const req = makeRequest('/episodes/some-slug/cover.png');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+});
+
+
 test('isAllowedPath accepts year-month archive paths', () => {
   assert.ok(isAllowedPath('2026/04/index.html'));
   assert.ok(isAllowedPath('2025/12/index.html'));

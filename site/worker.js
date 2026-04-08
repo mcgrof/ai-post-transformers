@@ -111,6 +111,18 @@ export default {
       key = key + 'index.html';
     }
 
+    // Rewrite missing-trailing-slash URLs for episode and conference
+    // pages: /episodes/foo -> episodes/foo/index.html.
+    // The publish-site uploads at both episodes/{slug}/ and
+    // episodes/{slug}/index.html but NOT at the bare episodes/{slug}.
+    // Exclude paths that contain a "." (file extensions like .mp3,
+    // .png, .json) so we don't break the legacy flat audio layout.
+    if ((/^episodes\/[^\/]+$/.test(key) ||
+         /^conference\/[^\/]+$/.test(key)) &&
+        !key.split('/').pop().includes('.')) {
+      key = key + '/index.html';
+    }
+
     // Support Range requests for audio seeking
     const rangeHeader = request.headers.get('Range');
     let object;
