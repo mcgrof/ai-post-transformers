@@ -76,15 +76,24 @@ def llm_call(backend, model, prompt, temperature=0.4,
         model: Model name (backend-specific).
         prompt: User prompt string.
         temperature: Sampling temperature (ignored by claude-cli).
-        max_tokens: Maximum output tokens.
+        max_tokens: Maximum output tokens.  For OpenAI reasoning
+            models (gpt-5, o1/o3/o4) this is also the budget for
+            internal reasoning tokens, so the effective starting
+            budget is bumped to give the model headroom.
         json_mode: If True, parse response as JSON with repair logic.
                    If False, return raw text string.
     """
     btype = backend["type"]
 
     if btype == "openai":
+        # Reasoning models budget reasoning + output against the same
+        # ceiling. Start with at least 32K headroom; auto-escalation
+        # in _call_openai handles further growth on length-truncation.
+        effective = max_tokens
+        if _is_reasoning_model(model) and effective < 32000:
+            effective = 32000
         raw = _call_openai(backend["client"], model, prompt,
-                           temperature, max_tokens)
+                           temperature, effective)
     elif btype == "anthropic":
         raw = _call_anthropic(backend["client"], model, prompt,
                               temperature, max_tokens)
@@ -105,38 +114,88 @@ def llm_call(backend, model, prompt, temperature=0.4,
 # Backend implementations
 # ---------------------------------------------------------------------------
 
-def _call_openai(client, model, prompt, temperature, max_tokens):
+# Hard cap on max_completion_tokens auto-escalation. Reasoning models
+# can burn enormous budgets thinking; this prevents an unbounded retry
+# loop. 128K is the practical ceiling for current GPT-5 / o-family
+# models.
+_OPENAI_MAX_TOKENS_CAP = 128000
+
+# Reasoning model prefixes. These models budget BOTH internal reasoning
+# tokens AND output tokens against max_completion_tokens, so they need
+# substantially more headroom than legacy chat models.
+_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _is_reasoning_model(model):
+    return (model or "").startswith(_REASONING_MODEL_PREFIXES)
+
+
+def _openai_create_once(client, model, prompt, temperature, max_tokens):
+    """Single OpenAI chat completion call. Returns the choice object."""
     kwargs = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
     }
-
-    # Newer reasoning models are stricter about accepted request fields.
-    # Avoid sending temperature unless we have to, and prefer the newer
-    # completion-token field for GPT-5 / o* families.
-    if not (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
+    if not _is_reasoning_model(model):
         kwargs["temperature"] = temperature
-
-    if (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
-        kwargs["max_completion_tokens"] = max_tokens
-    else:
         kwargs["max_tokens"] = max_tokens
-
+    else:
+        kwargs["max_completion_tokens"] = max_tokens
     resp = client.chat.completions.create(**kwargs)
-    choice = resp.choices[0]
-    content = choice.message.content
-    finish = getattr(choice, "finish_reason", None)
-    refusal = getattr(choice.message, "refusal", None)
+    return resp.choices[0]
 
-    if content is None or not content.strip():
+
+def _call_openai(client, model, prompt, temperature, max_tokens):
+    """Call OpenAI with auto-escalation on length-truncation.
+
+    Reasoning models (gpt-5, o1/o3/o4) budget BOTH internal reasoning
+    tokens AND output tokens against max_completion_tokens. A complex
+    prompt can burn the entire budget thinking, leaving zero output
+    and finish_reason=length. When that happens we retry with double
+    the budget up to _OPENAI_MAX_TOKENS_CAP. This is the difference
+    between "the API failed" and "the model needs more headroom".
+    """
+    attempts = []
+    budget = max_tokens
+    is_reasoning = _is_reasoning_model(model)
+
+    while True:
+        choice = _openai_create_once(
+            client, model, prompt, temperature, budget)
+        content = choice.message.content
+        finish = getattr(choice, "finish_reason", None)
+        refusal = getattr(choice.message, "refusal", None)
+        attempts.append({
+            "budget": budget, "finish": finish,
+            "had_content": bool(content and content.strip()),
+        })
+
+        if content is not None and content.strip():
+            return content.strip()
+
+        # Empty content. Decide whether to escalate or give up.
+        # Only auto-escalate when the cause is length truncation on a
+        # reasoning model — that's the recoverable case. Refusals,
+        # content-filter hits, and stop-with-empty are not recoverable
+        # by retrying with more tokens.
+        if (is_reasoning and finish == "length"
+                and budget < _OPENAI_MAX_TOKENS_CAP):
+            new_budget = min(budget * 2, _OPENAI_MAX_TOKENS_CAP)
+            print(f"[LLM] OpenAI hit length on {model} with "
+                  f"max_completion_tokens={budget}; "
+                  f"retrying with {new_budget}", file=sys.stderr)
+            budget = new_budget
+            continue
+
         parts = [f"OpenAI returned empty content (model={model}"]
         if finish:
             parts.append(f"finish_reason={finish}")
         if refusal:
             parts.append(f"refusal={refusal}")
+        if len(attempts) > 1:
+            parts.append(f"attempts={len(attempts)}")
+            parts.append(f"final_budget={budget}")
         raise RuntimeError(", ".join(parts) + ")")
-
-    return content.strip()
 
 
 def _call_anthropic(client, model, prompt, temperature, max_tokens):
