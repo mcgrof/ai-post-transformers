@@ -437,6 +437,15 @@ def _parse_generation_result(result):
             if draft_stem:
                 break
 
+    # Normalize absolute filesystem paths to relative R2 keys.
+    # gen-podcast.py prints absolute paths like
+    # /home/.../drafts/2026/04/slug but submissions and the admin
+    # UI expect relative paths like drafts/2026/04/slug.
+    if draft_stem:
+        idx = draft_stem.find("drafts/")
+        if idx > 0:
+            draft_stem = draft_stem[idx:]
+
     return True, draft_stem
 
 

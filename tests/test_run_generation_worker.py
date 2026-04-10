@@ -158,7 +158,22 @@ class TestParseGenerationResult:
         ok, stem = _parse_generation_result(result)
 
         assert ok is True
-        assert stem == "/home/mcgrof/devel/ai-post-transformers/drafts/2026/04/example"
+        # Absolute paths must be normalized to relative R2 keys
+        assert stem == "drafts/2026/04/example"
+
+    def test_normalizes_absolute_draft_stem_to_relative(self):
+        result = type("R", (), {
+            "returncode": 0,
+            "stdout": "[Podcast] Saved to /home/user/devel/ai-post-transformers/drafts/2026/04/2026-04-07-test-slug-abc123.mp3\n",
+            "stderr": "",
+        })()
+
+        ok, stem = _parse_generation_result(result)
+
+        assert ok is True
+        assert stem == "drafts/2026/04/2026-04-07-test-slug-abc123"
+        # Must NOT contain absolute path prefix
+        assert not stem.startswith("/")
 
 
 class TestPrepareGenerationInputs:
