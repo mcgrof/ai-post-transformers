@@ -1011,9 +1011,6 @@ thoroughly. Compare to familiar concepts (transformers, SGD, neural nets).
 {background_text}
 """
 
-    # --- Generate script in 4 PARTS for sufficient length ---
-    quarter_words = max_words // 4  # ~950 words each
-
     # Build dynamics instructions
     dynamics_text = f"""
 CONVERSATION DYNAMICS — Make this sound like a REAL podcast:
@@ -1039,22 +1036,7 @@ One host should push back firmly: "I actually disagree with you there, Hal..." o
 exchanges before they find common ground or agree to disagree. This adds authenticity.
 """
 
-    common_style = f"""Each speaker turn should be 80-200 words — like a real conversation
-paragraph, NOT a one-liner. Write substantial, detailed dialogue. If a turn is under
-50 words, it's too short — expand it with examples, analogies, or follow-up thoughts.
-Generate APPROXIMATELY {quarter_words} words for this part (hard maximum: {int(quarter_words * 1.3)}).
-
-IMPORTANT — SEAMLESS TRANSITIONS: This is ONE continuous conversation. Do NOT include
-any "welcome back", "in this segment", "moving on to part two", or any language that
-suggests a break or section change. The listener hears this as one unbroken audio stream.
-Transition naturally — e.g., "That actually ties into something else I found interesting..."
-or "So given all that, Ada, what do you think about..." — just flow naturally.
-{dynamics_text}
-
-OUTPUT FORMAT: JSON array of objects. Each object has "speaker" (A or B) and "text".
-Optionally include "interrupt": true on segments where the speaker is cutting in
-mid-sentence of the other host."""
-
+    # common_style is built after num_parts / quarter_words are set below.
     all_scripts = []
 
     # Build topic list for prompts
@@ -1092,17 +1074,39 @@ point, use NONE. Do NOT force irrelevant facts into the conversation:
     num_refs = len(analysis.get("additional_references", []))
     paper_len = len(text)
 
-    # Complexity score: topics + questions + references + paper length factor
-    complexity = num_topics + (num_questions * 0.5) + (num_refs * 0.3) + (paper_len / 20000)
+    # Complexity score: topics + questions + references + paper length factor.
+    # Tuned so most single-paper episodes land at 2 parts (~15 min).
+    # Only genuinely complex multi-topic papers earn 3 parts.
+    complexity = num_topics + (num_questions * 0.3) + (num_refs * 0.1) + (paper_len / 40000)
 
-    if complexity < 5:
-        num_parts = 2  # Simple paper: ~8-10 min
-    elif complexity < 8:
-        num_parts = 3  # Moderate: ~12-15 min
+    if complexity < 8:
+        num_parts = 2  # Standard paper: ~12-15 min
+    elif complexity < 14:
+        num_parts = 3  # Complex paper: ~15-18 min
     else:
-        num_parts = 4  # Complex: ~17-23 min
+        num_parts = 4  # Multi-paper / exceptionally dense: ~20+ min
 
-    print(f"[Podcast]   Complexity: {complexity:.1f} (topics={num_topics}, questions={num_questions}, refs={num_refs}, len={paper_len}) → {num_parts} parts", file=sys.stderr)
+    # Per-part word budget: divide total budget by actual part count.
+    quarter_words = max_words // num_parts
+
+    print(f"[Podcast]   Complexity: {complexity:.1f} (topics={num_topics}, questions={num_questions}, refs={num_refs}, len={paper_len}) → {num_parts} parts, {quarter_words} words/part, {max_words} total", file=sys.stderr)
+
+    common_style = f"""Each speaker turn should be 80-200 words — like a real conversation
+paragraph, NOT a one-liner. Write substantial, detailed dialogue. If a turn is under
+50 words, it's too short — expand it with examples, analogies, or follow-up thoughts.
+Generate APPROXIMATELY {quarter_words} words for this part (hard maximum: {int(quarter_words * 1.3)}).
+Do NOT pad. If you've covered the material, stop. Shorter is better than repetitive.
+
+IMPORTANT — SEAMLESS TRANSITIONS: This is ONE continuous conversation. Do NOT include
+any "welcome back", "in this segment", "moving on to part two", or any language that
+suggests a break or section change. The listener hears this as one unbroken audio stream.
+Transition naturally — e.g., "That actually ties into something else I found interesting..."
+or "So given all that, Ada, what do you think about..." — just flow naturally.
+{dynamics_text}
+
+OUTPUT FORMAT: JSON array of objects. Each object has "speaker" (A or B) and "text".
+Optionally include "interrupt": true on segments where the speaker is cutting in
+mid-sentence of the other host."""
 
     # --- EPISODE BIBLE: Plan content allocation to prevent cross-part repetition ---
     print("[Podcast]   Generating episode bible...", file=sys.stderr)

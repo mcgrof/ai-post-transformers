@@ -105,11 +105,11 @@ image_generation:
 podcast:
   audio_dir: drafts
   tts_backend: auto  # 'elevenlabs', 'kokoro', 'piper', or 'auto' (try in order)
-  max_words: 3800
-  max_words_multi: 4500
-  min_minutes: 15
-  max_minutes: 23
-  multi_paper_minutes: 30
+  max_words: 2200
+  max_words_multi: 3200
+  min_minutes: 12
+  max_minutes: 17
+  multi_paper_minutes: 22
   llm_backend: openai   # Codex/OpenAI default; switch to claude-cli or anthropic only when explicitly wanted
   llm_model: gpt-5.4
   analysis_model: gpt-5.4
@@ -173,10 +173,11 @@ podcast:
     \ learning. E.g., \"GP uses a kernel function where a neural net would learn features\"\
     \ — make it concrete.\nRULE 6 — HONESTY: If a paper oversells or the claims aren't\
     \ well-supported, say so. Our listeners deserve honest analysis, not hype.\nRULE\
-    \ 7 — LENGTH: The podcast should be substantial. For a single paper, aim for 15-23\
-    \ minutes of audio (~3000-3500 words). Don't rush through concepts — if you're\
-    \ citing more papers and explaining more background, use the space. Better to\
-    \ be thorough than superficial.\n"
+    \ 7 — LENGTH: Keep it tight. For a single paper, aim for ~15\
+    \ minutes of audio (~2000-2200 words). Quality over quantity —\
+    \ cut filler, don't pad with excessive background, and trust\
+    \ the listener to follow. If a concept needs explaining, explain\
+    \ it once clearly. Do NOT repeat points across segments.\n"
   multi_paper_instructions: 'You are two AI researchers discussing {num_papers} papers
     together. Start by identifying the common themes and connections across all papers.
     Explain why these papers are interesting when considered together — what shared
