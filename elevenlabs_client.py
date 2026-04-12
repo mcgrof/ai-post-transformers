@@ -982,8 +982,13 @@ def generate_podcast_script(text, config, covered_topics=None):
     host_a_personality = host_a.get("personality", "Warm, curious, asks good questions.")
     host_b_personality = host_b.get("personality", "Sharp, knowledgeable, direct expert.")
 
-    # Intro
+    # Intro — must always be present. Without it the LLM skips the
+    # opening entirely and dives straight into technical content.
     intro = podcast_config.get("intro", "")
+    if not intro.strip():
+        intro = ("Alrighty! Thanks for tuning in! Hello AI world! "
+                 "I am your host, Hal Turing, and my co-host is "
+                 "Dr. Ada Shannon.")
 
     host_block = f"""HOST A — {host_a_name} (speaker "A"):
 {host_a_personality}

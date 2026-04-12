@@ -110,6 +110,9 @@ podcast:
   min_minutes: 12
   max_minutes: 17
   multi_paper_minutes: 22
+  intro: >-
+    Alrighty! Thanks for tuning in! Hello AI world! I am your host,
+    Hal Turing, and my co-host is Dr. Ada Shannon.
   llm_backend: openai   # Codex/OpenAI default; switch to claude-cli or anthropic only when explicitly wanted
   llm_model: gpt-5.4
   analysis_model: gpt-5.4
