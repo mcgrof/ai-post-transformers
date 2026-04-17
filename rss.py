@@ -781,48 +781,60 @@ def _generate_thumbnail(image_url, stem, output_dir):
         year, month = m.groups()
         local_candidate = Path(output_dir).parent / "public" / year / month / basename
 
+    # Prefer local public image; fall back to downloading into a
+    # tempfile that MUST be cleaned up in every exit path.  Previously
+    # the download path leaked /tmp/tmp*.png files on fetch errors
+    # because the except branch returned without unlinking.
+    tmp_path = None
+    cleanup_tmp = False
     try:
         if local_candidate and local_candidate.exists():
             tmp_path = str(local_candidate)
+            cleanup_tmp = False
         else:
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                    suffix=".png", delete=False) as tmp:
                 tmp_path = tmp.name
-            req = urllib.request.Request(
-                image_url,
-                headers={"User-Agent": "podcast-thumbgen/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                with open(tmp_path, "wb") as f:
-                    f.write(resp.read())
-    except Exception as e:
-        print(f"[Thumb] Failed to fetch {image_url}: {e}", file=sys.stderr)
-        return None
+            cleanup_tmp = True
+            try:
+                req = urllib.request.Request(
+                    image_url,
+                    headers={"User-Agent": "podcast-thumbgen/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    with open(tmp_path, "wb") as f:
+                        f.write(resp.read())
+            except Exception as e:
+                print(f"[Thumb] Failed to fetch {image_url}: {e}",
+                      file=sys.stderr)
+                return None
 
-    # Generate thumbnail using ImageMagick
-    thumb_path = Path(output_dir) / "thumbs" / f"{stem}.webp"
-    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        # Generate thumbnail using ImageMagick
+        thumb_path = Path(output_dir) / "thumbs" / f"{stem}.webp"
+        thumb_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cleanup_tmp = not (local_candidate and str(local_candidate) == tmp_path)
+        try:
+            subprocess.run([
+                "magick", tmp_path, "-resize", "128x128",
+                "-quality", "80", str(thumb_path)
+            ], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[Thumb] ImageMagick failed for {stem}: {e}",
+                  file=sys.stderr)
+            return None
+        except FileNotFoundError:
+            print("[Thumb] ImageMagick not found, skipping "
+                  "thumbnail generation", file=sys.stderr)
+            return None
 
-    try:
-        subprocess.run([
-            "magick", tmp_path, "-resize", "128x128",
-            "-quality", "80", str(thumb_path)
-        ], check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
-        print(f"[Thumb] ImageMagick failed for {stem}: {e}", file=sys.stderr)
-        if cleanup_tmp:
-            os.unlink(tmp_path)
-        return None
-    except FileNotFoundError:
-        print("[Thumb] ImageMagick not found, skipping thumbnail generation",
-              file=sys.stderr)
-        if cleanup_tmp:
-            os.unlink(tmp_path)
-        return None
-
-    if cleanup_tmp:
-        os.unlink(tmp_path)
-    return thumb_path
+        return thumb_path
+    finally:
+        # Always remove the downloaded temp file — on success, error,
+        # or any other exit. Never delete a local_candidate path.
+        if cleanup_tmp and tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _upload_thumbnail(thumb_path):

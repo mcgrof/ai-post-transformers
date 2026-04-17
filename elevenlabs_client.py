@@ -164,8 +164,14 @@ def sweep_stale_podcast_tmp(max_age_hours=2, tmp_dir="/tmp"):
         except OSError:
             pass
 
-    # Stray kokoro artifacts
-    for pattern_suffix in ("kokoro_tts_*.py", "kokoro_out_*.wav"):
+    # Stray kokoro artifacts and stale thumb-gen PNGs.  The thumb
+    # generator in rss.py downloads cover images to tempfile
+    # NamedTemporaryFile(suffix=".png") which produces /tmp/tmp*.png.
+    # A try/finally now cleans those on success, but older code
+    # left leaks, so sweep any that persist across worker ticks.
+    for pattern_suffix in ("kokoro_tts_*.py",
+                           "kokoro_out_*.wav",
+                           "tmp*.png"):
         for path in glob.glob(os.path.join(tmp_dir, pattern_suffix)):
             try:
                 st = os.stat(path)

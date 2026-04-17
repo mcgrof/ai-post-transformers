@@ -99,6 +99,24 @@ class TestSweepStalePodcastTmp:
             max_age_hours=2, tmp_dir=str(tmp_path))
         assert removed == 0
 
+    def test_removes_stale_tmp_png_files(self, tmp_path):
+        """Thumbnail downloads create tempfile.NamedTemporaryFile
+        with suffix=.png which produces /tmp/tmp*.png. Sweep these
+        when they leak from crashed thumb-gen runs."""
+        stale_png = tmp_path / "tmpfoobar.png"
+        stale_png.write_bytes(b"fake png" * 100)
+        _age_backwards(stale_png, hours=3)
+
+        fresh_png = tmp_path / "tmpxyz.png"
+        fresh_png.write_bytes(b"recent")
+
+        removed = sweep_stale_podcast_tmp(
+            max_age_hours=2, tmp_dir=str(tmp_path))
+
+        assert removed == 1
+        assert not stale_png.exists()
+        assert fresh_png.exists()
+
     def test_does_not_touch_unrelated_paths(self, tmp_path):
         # Files that don't match our prefixes must be left alone,
         # even if old, even if named suspiciously.
