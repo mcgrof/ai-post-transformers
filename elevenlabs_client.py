@@ -104,19 +104,84 @@ def _tts_piper(text, voice_id, output_path):
     else:
         model = os.path.expanduser("~/devel/piper-voices/lessac.onnx")
     wav_path = output_path + ".wav"
-    proc = subprocess.run(
-        ["piper", "--model", model, "--output_file", wav_path],
-        input=text, capture_output=True, text=True, timeout=120
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"Piper TTS failed: {proc.stderr[:200]}")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "64k", output_path],
-        capture_output=True, timeout=60
-    )
-    if os.path.exists(wav_path):
-        os.unlink(wav_path)
-    return output_path
+    try:
+        proc = subprocess.run(
+            ["piper", "--model", model, "--output_file", wav_path],
+            input=text, capture_output=True, text=True, timeout=120
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"Piper TTS failed: {proc.stderr[:200]}")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "64k", output_path],
+            capture_output=True, timeout=60
+        )
+        return output_path
+    finally:
+        # Always clean up the intermediate wav, even on ffmpeg failure.
+        if os.path.exists(wav_path):
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+
+
+def sweep_stale_podcast_tmp(max_age_hours=2, tmp_dir="/tmp"):
+    """Delete stale podcast artifacts from crashed/killed runs.
+
+    Removes:
+      - {tmp_dir}/podcast_* directories older than max_age_hours
+      - {tmp_dir}/kokoro_tts_*.py and kokoro_out_*.wav older than max_age_hours
+
+    Called at the start of generation so a prior failed run can't
+    leave /tmp full.  Best-effort: failures are logged and ignored.
+
+    The tmp_dir parameter exists so tests can target a pytest-provided
+    directory without monkey-patching glob.
+    """
+    import glob, shutil, time
+
+    cutoff = time.time() - (max_age_hours * 3600)
+    removed = 0
+    freed_bytes = 0
+
+    # podcast_* directories
+    for path in glob.glob(os.path.join(tmp_dir, "podcast_*")):
+        try:
+            st = os.stat(path)
+            if st.st_mtime >= cutoff:
+                continue
+            if os.path.isdir(path):
+                # Estimate freed space before removal
+                for root, _dirs, files in os.walk(path):
+                    for f in files:
+                        try:
+                            freed_bytes += os.path.getsize(
+                                os.path.join(root, f))
+                        except OSError:
+                            pass
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+
+    # Stray kokoro artifacts
+    for pattern_suffix in ("kokoro_tts_*.py", "kokoro_out_*.wav"):
+        for path in glob.glob(os.path.join(tmp_dir, pattern_suffix)):
+            try:
+                st = os.stat(path)
+                if st.st_mtime >= cutoff:
+                    continue
+                freed_bytes += st.st_size
+                os.unlink(path)
+                removed += 1
+            except OSError:
+                pass
+
+    if removed:
+        mb = freed_bytes / (1024 * 1024)
+        print(f"[Podcast] Cleaned {removed} stale tmp artifacts "
+              f"(freed {mb:.1f} MB)", file=sys.stderr)
+    return removed
 
 
 def _tts_kokoro(text, voice_id, output_path):
@@ -1547,7 +1612,10 @@ def create_podcast(text, config, covered_topics=None):
     print(f"[Podcast] Script has {len(script)} segments, {len(sources)} sources, "
           f"{interrupt_segs} interrupts", file=sys.stderr)
 
-    # Generate TTS for each segment
+    # Generate TTS for each segment.
+    # Sweep stale /tmp artifacts from prior crashed runs before we
+    # start adding more — prevents /tmp from filling up indefinitely.
+    sweep_stale_podcast_tmp()
     tmpdir = tempfile.mkdtemp(prefix="podcast_")
     segment_files = []
 
@@ -1738,7 +1806,12 @@ def generate_srt(script, segment_files, output_path, silence_duration=1.0, host_
 
 
 def finalize_podcast(tmpdir, list_file, output_path):
-    """Concatenate segments into final MP3."""
+    """Concatenate segments into final MP3.
+
+    Caller is responsible for invoking cleanup_podcast_tmpdir(tmpdir)
+    once generate_srt / save_transcript have finished reading the
+    per-segment files.
+    """
     import subprocess
 
     result = subprocess.run(
@@ -1750,3 +1823,24 @@ def finalize_podcast(tmpdir, list_file, output_path):
         raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
     print(f"[Podcast] Saved to {output_path}", file=sys.stderr)
     return output_path
+
+
+def cleanup_podcast_tmpdir(tmpdir):
+    """Remove a /tmp/podcast_* directory after all artifacts are used.
+
+    Must be called by the caller AFTER finalize_podcast, save_transcript,
+    and generate_srt have run — those read per-segment audio files
+    inside tmpdir.  Best-effort: failures are logged and ignored so
+    cleanup never breaks generation.
+    """
+    import shutil
+    if not tmpdir:
+        return
+    if not os.path.isdir(tmpdir):
+        return
+    try:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        print(f"[Podcast] Cleaned tmpdir {tmpdir}", file=sys.stderr)
+    except OSError as exc:
+        print(f"[Podcast] Warning: failed to clean {tmpdir}: {exc}",
+              file=sys.stderr)

@@ -16,7 +16,7 @@ from db import (
     get_today_papers, get_covered_topics, add_covered_topics,
 )
 from draft_revisions import detect_revision, assign_revision
-from elevenlabs_client import create_podcast, finalize_podcast, save_transcript, generate_srt
+from elevenlabs_client import create_podcast, finalize_podcast, save_transcript, generate_srt, cleanup_podcast_tmpdir
 from image_gen import generate_episode_image
 from pdf_utils import download_and_extract
 from rss import generate_feed
@@ -489,27 +489,32 @@ def generate_podcast(config, arxiv_id=None):
     tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
         text, config, covered_topics
     )
-    finalize_podcast(tmpdir, list_file, str(audio_file))
+    try:
+        finalize_podcast(tmpdir, list_file, str(audio_file))
 
-    # Save transcript and SRT subtitles
-    hosts = config.get("podcast", {}).get("hosts", {})
-    host_names = {
-        "A": hosts.get("a", {}).get("name", "Hal Turing"),
-        "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
-    }
-    transcript_file = audio_file.with_suffix(".txt")
-    srt_file = audio_file.with_suffix(".srt")
-    save_transcript(script, str(transcript_file), host_names)
-    generate_srt(script, segments, str(srt_file), host_names=host_names)
+        # Save transcript and SRT subtitles
+        hosts = config.get("podcast", {}).get("hosts", {})
+        host_names = {
+            "A": hosts.get("a", {}).get("name", "Hal Turing"),
+            "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
+        }
+        transcript_file = audio_file.with_suffix(".txt")
+        srt_file = audio_file.with_suffix(".srt")
+        save_transcript(script, str(transcript_file), host_names)
+        generate_srt(script, segments, str(srt_file), host_names=host_names)
 
-    # Save script JSON for future use
-    script_file = audio_file.with_suffix(".json")
-    with open(script_file, "w") as f:
-        json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
+        # Save script JSON for future use
+        script_file = audio_file.with_suffix(".json")
+        with open(script_file, "w") as f:
+            json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
 
-    # Record new topics as covered
-    if topic_names:
-        add_covered_topics(conn, topic_names)
+        # Record new topics as covered
+        if topic_names:
+            add_covered_topics(conn, topic_names)
+    finally:
+        # Always clean up /tmp/podcast_* even if something failed — the
+        # per-segment files are useless once the final MP3 is written.
+        cleanup_podcast_tmpdir(tmpdir)
 
     # Build description with source citations (primary paper + all referenced works)
     authors = paper.get("authors", [])
@@ -804,41 +809,45 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
         source_text, config, covered_topics
     )
-    finalize_podcast(tmpdir, list_file, str(audio_file))
+    try:
+        finalize_podcast(tmpdir, list_file, str(audio_file))
 
-    # Generate real title from the script content
-    print("[Podcast] Generating episode title...", file=sys.stderr)
-    title = _generate_title(script, config)
-    print(f"[Podcast] Title: {title}", file=sys.stderr)
+        # Generate real title from the script content
+        print("[Podcast] Generating episode title...", file=sys.stderr)
+        title = _generate_title(script, config)
+        print(f"[Podcast] Title: {title}", file=sys.stderr)
 
-    # Rename files from temporary stem to title-based stem
-    new_stem = _make_episode_stem(title, date_str, urls=urls)
-    if new_stem != stem:
-        audio_file = _rename_episode_files(audio_file, new_stem)
+        # Rename files from temporary stem to title-based stem
+        new_stem = _make_episode_stem(title, date_str, urls=urls)
+        if new_stem != stem:
+            audio_file = _rename_episode_files(audio_file, new_stem)
 
-    # Save generation inputs with the real title
-    _save_generation_inputs(title, date_str, urls, goal=goal,
-                            description_guidance=description_guidance)
+        # Save generation inputs with the real title
+        _save_generation_inputs(title, date_str, urls, goal=goal,
+                                description_guidance=description_guidance)
 
-    # Save transcript and SRT subtitles
-    hosts = config.get("podcast", {}).get("hosts", {})
-    host_names = {
-        "A": hosts.get("a", {}).get("name", "Hal Turing"),
-        "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
-    }
-    transcript_file = audio_file.with_suffix(".txt")
-    srt_file = audio_file.with_suffix(".srt")
-    save_transcript(script, str(transcript_file), host_names)
-    generate_srt(script, segments, str(srt_file), host_names=host_names)
+        # Save transcript and SRT subtitles
+        hosts = config.get("podcast", {}).get("hosts", {})
+        host_names = {
+            "A": hosts.get("a", {}).get("name", "Hal Turing"),
+            "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
+        }
+        transcript_file = audio_file.with_suffix(".txt")
+        srt_file = audio_file.with_suffix(".srt")
+        save_transcript(script, str(transcript_file), host_names)
+        generate_srt(script, segments, str(srt_file), host_names=host_names)
 
-    # Save script JSON
-    script_file = audio_file.with_suffix(".json")
-    with open(script_file, "w") as f:
-        json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
+        # Save script JSON
+        script_file = audio_file.with_suffix(".json")
+        with open(script_file, "w") as f:
+            json.dump({"script": script, "sources": sources, "topics": topic_names}, f, indent=2)
 
-    # Record new topics
-    if topic_names:
-        add_covered_topics(conn, topic_names)
+        # Record new topics
+        if topic_names:
+            add_covered_topics(conn, topic_names)
+    finally:
+        # Always clean up /tmp/podcast_* even if something failed.
+        cleanup_podcast_tmpdir(tmpdir)
 
     # Generate episode summary from transcript
     print("[Podcast] Generating episode summary...", file=sys.stderr)
