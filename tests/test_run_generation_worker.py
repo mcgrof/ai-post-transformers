@@ -675,3 +675,231 @@ class TestProcessSubmission:
         assert uploads == [("example.mp3", "drafts/2026/03/example.mp3")]
         assert details["draft_artifacts"]["mp3"].endswith("drafts/2026/03/example.mp3")
         assert any("missing optional artifact" in warning for warning in details["draft_upload_warnings"])
+
+
+class TestPrivateSubmissionAutoPublish:
+    """Regression tests for the private submission auto-publish flow.
+
+    Scenario that broke in production: a submission marked
+    visibility=private finishes generation, reaches status=
+    draft_generated, but no publish job is ever created. The
+    drafts page correctly hides it (safety invariant) but
+    /private-podcasts is empty because nothing published it.
+    The episode sits in limbo forever.
+
+    These tests ensure that:
+      - private submissions create a publish job on draft_generated
+      - the publish job carries visibility=private and owner
+      - the submission advances to approved_for_publish
+      - public submissions are NOT affected
+      - auto-publish failures do not break generation
+    """
+
+    def _make_store_with_submission(self, tmp_path, sub_data):
+        """Build an in-memory store seeded with a single submission."""
+        from scripts.queue_store import SQLiteQueueStore
+        store = SQLiteQueueStore(tmp_path / "queue.db")
+        store.save_submission("submissions/priv.json", sub_data)
+        return store
+
+    def test_private_submission_creates_publish_job(self, tmp_path):
+        from scripts.run_generation_worker import process_submission
+
+        store = self._make_store_with_submission(tmp_path, {
+            "urls": ["https://arxiv.org/pdf/2401.99999"],
+            "status": "submitted",
+            "visibility": "private",
+            "owner": "mcgrof",
+            "timestamp": "2026-04-20T10:00:00Z",
+        })
+        # claim_submission populates _key on load
+        sub = {"_key": "submissions/priv.json",
+               **store.load_submission("submissions/priv.json")[0]}
+
+        created_jobs = []
+
+        def fake_create_private(*, draft_stem, sub, owner):
+            created_jobs.append({
+                "draft_stem": draft_stem,
+                "sub": sub,
+                "owner": owner,
+            })
+            return "pub_test_001"
+
+        with patch(
+            "scripts.run_generation_worker._run_generation",
+            return_value=(True, "drafts/2026/04/priv-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {}}),
+        ), patch(
+            "scripts.run_generation_worker._publish_draft_metadata",
+            return_value=None,
+        ), patch(
+            "scripts.run_generation_worker._create_private_publish_job",
+            side_effect=fake_create_private,
+        ):
+            ok = process_submission(sub, "mcgrof", store=store)
+
+        assert ok is True
+        assert len(created_jobs) == 1, (
+            "exactly one private publish job must be created for a "
+            "private submission that finishes generation"
+        )
+        assert created_jobs[0]["owner"] == "mcgrof"
+        assert created_jobs[0]["draft_stem"] == "drafts/2026/04/priv-draft"
+        # Submission advanced past draft_generated so the admin UI
+        # shows it as handed off to the publish lane.
+        final, _ = store.load_submission("submissions/priv.json")
+        assert final["status"] == "approved_for_publish", (
+            f"private submission must advance to approved_for_publish, "
+            f"got {final['status']}"
+        )
+
+    def test_public_submission_does_not_create_publish_job(self, tmp_path):
+        """A submission without visibility=private must NOT trigger the
+        auto-publish path. This prevents spurious publish jobs for
+        regular editorial drafts."""
+        from scripts.run_generation_worker import process_submission
+
+        store = self._make_store_with_submission(tmp_path, {
+            "urls": ["https://arxiv.org/pdf/2401.88888"],
+            "status": "submitted",
+            "timestamp": "2026-04-20T10:00:00Z",
+        })
+        sub = {"_key": "submissions/priv.json",
+               **store.load_submission("submissions/priv.json")[0]}
+
+        called = []
+
+        with patch(
+            "scripts.run_generation_worker._run_generation",
+            return_value=(True, "drafts/2026/04/pub-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {}}),
+        ), patch(
+            "scripts.run_generation_worker._publish_draft_metadata",
+            return_value=None,
+        ), patch(
+            "scripts.run_generation_worker._create_private_publish_job",
+            side_effect=lambda **kw: called.append(kw),
+        ):
+            ok = process_submission(sub, "mcgrof", store=store)
+
+        assert ok is True
+        assert called == [], (
+            "auto-publish must NOT fire for a public (non-private) "
+            "submission"
+        )
+        final, _ = store.load_submission("submissions/priv.json")
+        assert final["status"] == "draft_generated", (
+            "public submission must stay at draft_generated for normal "
+            "editorial review"
+        )
+
+    def test_auto_publish_failure_does_not_break_generation(self, tmp_path):
+        """If creating the publish job fails, generation still succeeds.
+        The submission stays at draft_generated so the operator can
+        manually trigger Move to Private via the admin UI."""
+        from scripts.run_generation_worker import process_submission
+
+        store = self._make_store_with_submission(tmp_path, {
+            "urls": ["https://arxiv.org/pdf/2401.77777"],
+            "status": "submitted",
+            "visibility": "private",
+            "owner": "mcgrof",
+            "timestamp": "2026-04-20T10:00:00Z",
+        })
+        sub = {"_key": "submissions/priv.json",
+               **store.load_submission("submissions/priv.json")[0]}
+
+        def explode(**kw):
+            raise RuntimeError("R2 down")
+
+        with patch(
+            "scripts.run_generation_worker._run_generation",
+            return_value=(True, "drafts/2026/04/priv-draft"),
+        ), patch(
+            "scripts.run_generation_worker._upload_draft_artifacts",
+            return_value=(True, {"draft_artifacts": {}}),
+        ), patch(
+            "scripts.run_generation_worker._publish_draft_metadata",
+            return_value=None,
+        ), patch(
+            "scripts.run_generation_worker._create_private_publish_job",
+            side_effect=explode,
+        ):
+            ok = process_submission(sub, "mcgrof", store=store)
+
+        assert ok is True, (
+            "generation must succeed even if auto-publish creation "
+            "fails — the draft exists, so the operator can retry "
+            "via the admin UI"
+        )
+        final, _ = store.load_submission("submissions/priv.json")
+        # Status stays at draft_generated since we couldn't advance it.
+        assert final["status"] == "draft_generated"
+
+
+class TestCreatePrivatePublishJob:
+    """Tests for the helper that writes the publish job record."""
+
+    def test_job_is_tagged_private_and_owner_is_set(self, monkeypatch):
+        """Fundamental safety check: the job record MUST have
+        visibility=private. If this field is missing the publish
+        worker's dispatch will route to the public flow."""
+        from scripts.run_generation_worker import _create_private_publish_job
+
+        saved_jobs = []
+
+        class FakeStore:
+            def save_job(self, job):
+                saved_jobs.append(job)
+                return job["job_id"]
+
+        monkeypatch.setattr(
+            "scripts.publish_job_store.get_publish_job_store",
+            lambda mode="r2": FakeStore(),
+        )
+
+        job_id = _create_private_publish_job(
+            draft_stem="drafts/2026/04/private-ep",
+            sub={"title": "Private Topic"},
+            owner="user@example.com",
+        )
+
+        assert len(saved_jobs) == 1
+        job = saved_jobs[0]
+        assert job["visibility"] == "private", (
+            "CRITICAL: job MUST be tagged private, otherwise the publish "
+            "worker's dispatch routes it to the public feed"
+        )
+        assert job["owner"] == "user@example.com"
+        assert job["draft_key"] == "drafts/2026/04/private-ep.mp3"
+        assert job["draft_stem"] == "drafts/2026/04/private-ep"
+        assert job["title"] == "Private Topic"
+        assert job_id == job["job_id"]
+
+    def test_title_falls_back_to_stem_basename(self, monkeypatch):
+        from scripts.run_generation_worker import _create_private_publish_job
+
+        saved_jobs = []
+
+        class FakeStore:
+            def save_job(self, job):
+                saved_jobs.append(job)
+                return job["job_id"]
+
+        monkeypatch.setattr(
+            "scripts.publish_job_store.get_publish_job_store",
+            lambda mode="r2": FakeStore(),
+        )
+
+        _create_private_publish_job(
+            draft_stem="drafts/2026/04/untitled-stem",
+            sub={},  # no title
+            owner="someone",
+        )
+
+        assert saved_jobs[0]["title"] == "untitled-stem"
