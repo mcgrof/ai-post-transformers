@@ -95,10 +95,19 @@ def _run_shell_with_heartbeat(
 
 
 def _find_episode(job: dict) -> dict | None:
+    """Resolve the local podcast row for a publish job.
+
+    Must include private episodes — list_podcasts defaults to
+    include_private=False which would hide any episode whose row
+    was already marked visibility=private by the generation
+    pipeline, making the publish job fail with "unable to find
+    episode". This lookup is an internal operation, not a public
+    listing, so private episodes are in scope.
+    """
     conn = get_connection()
     init_db(conn)
     try:
-        for episode in list_podcasts(conn):
+        for episode in list_podcasts(conn, include_private=True):
             if job.get("episode_id") and episode.get("id") == job["episode_id"]:
                 return episode
             audio = episode.get("audio_file") or ""

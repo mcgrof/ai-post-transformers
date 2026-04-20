@@ -641,3 +641,51 @@ def test_process_job_public_visibility_uses_public_path(monkeypatch, tmp_path):
     assert len(private_calls) == 0, (
         "public job must not be routed through the private path"
     )
+
+
+def test_find_episode_returns_private_episodes(monkeypatch, tmp_path):
+    """Regression: _find_episode must include private-visibility
+    podcasts in its lookup. list_podcasts defaults to excluding
+    private rows, which meant a private publish job could never
+    locate its own episode ("unable to find episode for job ...").
+    """
+    from scripts import publish_job_runner
+
+    captured_kwargs = {}
+
+    def fake_list_podcasts(conn, **kwargs):
+        captured_kwargs.update(kwargs)
+        return [{
+            "id": 179,
+            "title": "Memory Traffic Saturation",
+            "audio_file": "/abs/drafts/2026/04/priv-ep.mp3",
+            "visibility": "private",
+            "owner": "mcgrof",
+        }]
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.list_podcasts", fake_list_podcasts
+    )
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.get_connection",
+        lambda: type("C", (), {"close": lambda s: None})(),
+    )
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.init_db", lambda conn: None
+    )
+
+    job = {
+        "job_id": "pub_test",
+        "draft_stem": "drafts/2026/04/priv-ep",
+        "episode_id": None,
+    }
+    episode = publish_job_runner._find_episode(job)
+
+    assert episode is not None, (
+        "_find_episode must return a match for a private episode"
+    )
+    assert episode["id"] == 179
+    assert captured_kwargs.get("include_private") is True, (
+        "list_podcasts must be called with include_private=True — "
+        "otherwise private rows are hidden from the publish runner"
+    )
