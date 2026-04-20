@@ -4450,3 +4450,274 @@ test('Queue page filters generation_failed submissions from editorial sections',
   assert.ok(html.includes('Untouched Paper'),
     'unhandled paper should remain in editorial queue');
 });
+
+
+test('POST /api/submit with visibility private stores visibility and owner', async () => {
+  const env = makeEnv();
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.99999'],
+        instructions: null,
+        visibility: 'private',
+        adminId: 'test-admin',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  const keys = [...env.ADMIN_BUCKET.objects.keys()];
+  const subKey = keys.find(k => k.startsWith('submissions/'));
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get(subKey));
+  assert.equal(stored.visibility, 'private');
+  assert.equal(stored.owner, 'test-admin');
+});
+
+
+test('POST /api/submit without visibility omits private fields', async () => {
+  const env = makeEnv();
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: ['https://arxiv.org/pdf/2401.88888'],
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  const keys = [...env.ADMIN_BUCKET.objects.keys()];
+  const subKey = keys.find(k => k.startsWith('submissions/'));
+  const stored = JSON.parse(env.ADMIN_BUCKET.objects.get(subKey));
+  assert.equal(stored.visibility, undefined);
+  assert.equal(stored.owner, undefined);
+});
+
+
+test('Drafts page hides private submissions (submission-card fallback)', async () => {
+  const env = makeEnv({
+    admin: {
+      'submissions/public.json': {
+        urls: ['https://arxiv.org/pdf/2401.00001'],
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/04/public-ep',
+        timestamp: '2026-04-20T10:00:00.000Z',
+      },
+      'submissions/private.json': {
+        urls: ['https://arxiv.org/pdf/2401.00002'],
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/04/private-ep',
+        timestamp: '2026-04-20T11:00:00.000Z',
+        visibility: 'private',
+        owner: 'test-admin',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('public-ep'),
+    'public submission card should be visible on /drafts');
+  assert.ok(!html.includes('private-ep'),
+    'private submission card must NEVER appear on /drafts');
+});
+
+
+test('Drafts page hides bucket drafts whose submission is private', async () => {
+  const env = makeEnv({
+    podcast: {
+      'drafts/2026/04/priv-ep.mp3': 'audio-data',
+    },
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          draft_key: 'drafts/2026/04/priv-ep.mp3',
+          title: 'Private Episode',
+          description: 'secret',
+          date: '2026-04-20',
+        }],
+      },
+      'submissions/priv.json': {
+        urls: ['https://arxiv.org/pdf/2401.00003'],
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/04/priv-ep',
+        timestamp: '2026-04-20T11:00:00.000Z',
+        visibility: 'private',
+        owner: 'test-admin',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('Private Episode'),
+    'bucket draft with private linked submission must not appear on /drafts');
+});
+
+
+test('POST /api/upload-pdf stores PDF at uploaded-pdfs/ and returns URL', async () => {
+  const env = makeEnv();
+  // Valid PDF magic bytes followed by some dummy content
+  const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25]);
+  // btoa in tests via Buffer
+  const b64 = Buffer.from(pdfBytes).toString('base64');
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/upload-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: 'test paper.pdf',
+        data_b64: b64,
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+  assert.ok(body.url.startsWith('https://podcast.do-not-panic.com/uploaded-pdfs/'));
+  assert.ok(body.key.startsWith('uploaded-pdfs/'));
+  // Filename was sanitized — no spaces
+  assert.ok(!body.key.includes(' '));
+  // PDF stored in podcast bucket
+  const keys = [...env.PODCAST_BUCKET.objects.keys()];
+  assert.ok(keys.some(k => k.startsWith('uploaded-pdfs/')));
+});
+
+
+test('POST /api/upload-pdf rejects non-PDF content', async () => {
+  const env = makeEnv();
+  const notPdf = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);  // ZIP magic
+  const b64 = Buffer.from(notPdf).toString('base64');
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/upload-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'fake.pdf', data_b64: b64 }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.ok(body.error && body.error.includes('PDF'));
+});
+
+
+test('POST /api/review regenerate_version embeds reference episodes in instructions', async () => {
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          draft_key: 'drafts/2026/04/ep.mp3',
+          title: 'Original Episode',
+          episode_key: 'original episode',
+          source_urls: ['https://arxiv.org/pdf/2401.00001'],
+          revision: 1,
+        }],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/04/ep.mp3',
+        action: 'regenerate_version',
+        focus_text: 'Use newer benchmarks',
+        reference_episodes: [
+          'Context Rot: Why a Million Tokens Isn\'t Memory',
+          'Recursive Language Models',
+        ],
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+  assert.equal(body.success, true);
+
+  const keys = [...env.ADMIN_BUCKET.objects.keys()];
+  const newSubKey = keys.find(k => k.startsWith('submissions/') && k.includes('Z.json'));
+  assert.ok(newSubKey, 'new submission was created');
+  const newSub = JSON.parse(env.ADMIN_BUCKET.objects.get(newSubKey));
+  assert.ok(newSub.instructions.includes('Context Rot'),
+    'instructions must embed reference episode title');
+  assert.ok(newSub.instructions.includes('Recursive Language Models'));
+  assert.ok(newSub.instructions.includes('Use newer benchmarks'),
+    'focus text must be preserved');
+  assert.ok(newSub.instructions.includes('never by number'),
+    'instructions must reinforce the title-only rule');
+});
+
+
+test('Drafts page renders Move to Private button on active drafts', async () => {
+  const env = makeEnv({
+    podcast: {
+      'drafts/2026/04/active-ep.mp3': 'audio-data',
+    },
+    admin: {
+      'manifest.json': {
+        drafts: [{
+          draft_key: 'drafts/2026/04/active-ep.mp3',
+          title: 'Active Draft',
+          description: 'ready to review',
+          date: '2026-04-20',
+        }],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('Move to Private'),
+    'Move to Private button must appear on an active draft card');
+  assert.ok(html.includes('moveDraftToPrivate('),
+    'client handler must be wired up');
+});
+
+
+test('Submit page includes private checkbox and PDF upload field', async () => {
+  const env = makeEnv();
+  const response = await worker.fetch(
+    new Request('https://admin.test/submit'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('private-submission'),
+    'private checkbox input must be present');
+  assert.ok(html.includes('pdf-upload'),
+    'PDF file input must be present');
+  assert.ok(html.includes('Private podcast'),
+    'private label copy must be present');
+});

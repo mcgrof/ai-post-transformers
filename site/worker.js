@@ -32,6 +32,7 @@ const ALLOWED_PREFIXES = [
   'drafts/',
   'queue/',
   'archive/',
+  'uploaded-pdfs/',
 ];
 
 // Prefixes that are always denied, even if they somehow match

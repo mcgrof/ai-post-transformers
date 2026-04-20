@@ -1350,6 +1350,13 @@ function renderDraftActionButtons(draft) {
   let buttons = '<button class="btn btn-success" onclick="approveDraft(\'' + draft.key + '\')"' + approveAttrs + '>' + approveLabel + '</button>'
     + '<button class="btn btn-danger" onclick="openRejectModal(\'' + draft.key + '\')">✕ Reject</button>';
 
+  // Move to Private — downgrades the draft to an owner-only episode.
+  // Uses the existing save_private action which creates a publish
+  // job with visibility=private, owner=current admin.
+  if (!locked) {
+    buttons += '<button class="btn btn-secondary" onclick="moveDraftToPrivate(\'' + escapeHtml(draft.key) + '\')" style="font-size:0.75rem;color:var(--purple,#a371f7);border-color:var(--purple,#a371f7)">🔒 Move to Private</button>';
+  }
+
   // Edit button — metadata loaded from draftMetadata JS object, not inline
   buttons += '<button class="btn btn-secondary" onclick="openEditModal(\'' + escapeHtml(draft.key) + '\')" style="font-size:0.75rem">✏️ Edit</button>';
 
@@ -1418,6 +1425,15 @@ function renderRejectModal() {
           <label for="regenerate-focus">Focus / guidance for the new version (optional)</label>
           <textarea id="regenerate-focus" rows="4" placeholder="What should change or improve in this version? E.g.: 'Incorporate the newly published follow-up paper on X' or 'Emphasize the practical applications more'" style="width:100%;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary)"></textarea>
         </div>
+        <div class="form-group" style="margin-top:0.75rem">
+          <label for="regenerate-reference-episodes">Reference published episodes (optional)</label>
+          <textarea id="regenerate-reference-episodes" rows="3" placeholder="One episode title per line. The hosts will be told to reference these prior episodes by title when relevant. Example:&#10;Context Rot: Why a Million Tokens Isn't Memory&#10;Recursive Language Models for Arbitrarily Long Contexts" style="width:100%;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:0.813rem"></textarea>
+          <p style="color:var(--text-muted,#8b949e);font-size:0.75rem;margin-top:4px">
+            Use this when a newly released public episode should inform
+            the new version. Per our rules, prior episodes are referenced
+            by title only — never by number and never if private.
+          </p>
+        </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeRegenerateModal()">Cancel</button>
           <button class="btn btn-success" onclick="confirmRegenerate()">Create New Version</button>
@@ -1450,8 +1466,26 @@ function draftsPageWithData(data, subsData) {
   // still on local disk).  Show them so the operator can review.
   //
   // Exclude submissions with status 'published' — they are done.
-  const draftGeneratedSubs = ((subsData && subsData.submissions) || [])
-    .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish');
+  // SAFETY INVARIANT: Private submissions must NEVER appear on the
+  // public drafts review page. Build a set of private draft stems +
+  // filenames so we can filter them out of both the bucket-listing
+  // path and the submission-card fallback path.
+  const allSubs = ((subsData && subsData.submissions) || []);
+  const privateSubmissionStems = new Set();
+  for (const s of allSubs) {
+    if (s.visibility !== 'private') continue;
+    if (s.draft_stem) {
+      privateSubmissionStems.add(s.draft_stem);
+      privateSubmissionStems.add(`${s.draft_stem}.mp3`);
+      const stemBase = s.draft_stem.split('/').pop();
+      if (stemBase) privateSubmissionStems.add(stemBase);
+    }
+  }
+
+  const draftGeneratedSubs = allSubs
+    .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish')
+    // Hard-filter any private submission from the drafts page.
+    .filter(s => s.visibility !== 'private');
 
   // Build a lookup of completed publish jobs from the bucket drafts
   // (data.all_drafts includes both active and filtered-out drafts
@@ -1501,7 +1535,21 @@ function draftsPageWithData(data, subsData) {
       _submission_status: s.status,
     }));
 
-  const allDrafts = [...drafts, ...submissionCards];
+  // Filter out any bucket-listing draft whose submission was marked
+  // private. This is the belt-and-suspenders half of the safety
+  // invariant — even if generation uploaded the MP3 to drafts/, the
+  // admin drafts page must never render it.
+  const safeDrafts = drafts.filter(d => {
+    if (!d.key) return true;
+    if (privateSubmissionStems.has(d.key)) return false;
+    const stem = d.key.replace(/\.mp3$/, '');
+    if (privateSubmissionStems.has(stem)) return false;
+    const base = stem.split('/').pop();
+    if (base && privateSubmissionStems.has(base)) return false;
+    return true;
+  });
+
+  const allDrafts = [...safeDrafts, ...submissionCards];
 
   if (allDrafts.length === 0) {
     return `<div class="page-header"><h1>Draft Review</h1><p>Review and approve pending episodes</p></div>
@@ -2155,6 +2203,13 @@ https://www.usenix.org/system/files/fast26-example.pdf
 https://example.com/paper.pdf" rows="6"></textarea>
         </div>
         <div class="form-group" style="margin-top: 1rem;">
+          <label for="pdf-upload">Or upload a PDF file (optional)</label>
+          <input type="file" id="pdf-upload" accept="application/pdf" style="display:block;margin-top:0.25rem;color:var(--text-primary)" />
+          <p style="color:var(--text-muted,#8b949e);font-size:0.75rem;margin-top:4px">
+            Max 15 MB. The PDF is uploaded to R2 and its URL is added to the submission.
+          </p>
+        </div>
+        <div class="form-group" style="margin-top: 1rem;">
           <label for="instructions">Special Instructions (optional)</label>
           <textarea id="instructions" placeholder="Example: These papers are from USENIX FAST'26. Use the prefix 'FAST26:' in the episode title. Cover them serially so later episodes can reference earlier ones by title. Create a conference page to track all FAST26 episodes together.
 
@@ -2164,8 +2219,22 @@ Other ideas:
 • Ask for cross-references to prior episodes
 • Specify a conference or workshop theme" rows="6" style="font-size: 0.875rem;"></textarea>
         </div>
+        <div class="form-group" style="margin-top:1rem;padding:0.75rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px">
+          <label style="display:flex;align-items:flex-start;gap:0.5rem;cursor:pointer;margin:0">
+            <input type="checkbox" id="private-submission" style="margin-top:4px" />
+            <span>
+              <strong style="color:var(--purple,#a371f7)">🔒 Private podcast</strong>
+              <span style="display:block;color:var(--text-secondary);font-size:0.813rem;margin-top:2px">
+                Generated draft will NOT appear on the public drafts page.
+                Intended as an owner-only episode — stays under your private
+                namespace. Use when the source material is personal or not
+                ready for public review.
+              </span>
+            </span>
+          </label>
+        </div>
         <p style="color: var(--text-secondary); font-size: 0.813rem; margin-bottom: 1rem;">
-          <strong>Accepts:</strong> arXiv PDFs, arXiv abstract pages, USENIX/ACM/IEEE paper PDFs, direct PDF URLs, HTML paper pages.<br>
+          <strong>Accepts:</strong> arXiv PDFs, arXiv abstract pages, USENIX/ACM/IEEE paper PDFs, direct PDF URLs, HTML paper pages, or a local PDF file.<br>
           <strong>Instructions:</strong> Add context like conference names, series ordering, title prefixes, or analysis focus. Papers from the same submission are processed together.
         </p>
         <button type="submit" class="btn btn-primary">Submit Papers</button>
@@ -2558,6 +2627,33 @@ async function approveDraft(key) {
   }
 }
 
+async function moveDraftToPrivate(key) {
+  if (!confirm('Move this draft to your private podcasts? It will be removed from the public drafts page and only visible to you.')) {
+    return;
+  }
+  try {
+    const res = await adminApiFetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, action: 'save_private' })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Moved to private podcasts');
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to move to private', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading to re-authenticate...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Failed to move to private: ' + err.message, 'error');
+  }
+}
+
 function openRejectModal(key) {
   rejectingDraftKey = key;
   document.getElementById('reject-modal').style.display = 'flex';
@@ -2669,6 +2765,8 @@ function openRegenerateModal(key, episodeKey) {
   regeneratingDraftKey = key;
   regeneratingEpisodeKey = episodeKey;
   document.getElementById('regenerate-focus').value = '';
+  const refField = document.getElementById('regenerate-reference-episodes');
+  if (refField) refField.value = '';
   document.getElementById('regenerate-modal').style.display = 'flex';
 }
 
@@ -2681,6 +2779,11 @@ function closeRegenerateModal() {
 async function confirmRegenerate() {
   try {
     const focusText = document.getElementById('regenerate-focus').value.trim();
+    const refField = document.getElementById('regenerate-reference-episodes');
+    const referenceEpisodes = refField
+      ? refField.value.split('\\n').map(function(l) { return l.trim(); })
+          .filter(function(l) { return l.length > 0; })
+      : [];
     const res = await adminApiFetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2688,6 +2791,7 @@ async function confirmRegenerate() {
         key: regeneratingDraftKey,
         action: 'regenerate_version',
         focus_text: focusText,
+        reference_episodes: referenceEpisodes,
       })
     });
     const data = await res.json();
@@ -2897,11 +3001,15 @@ async function handleSubmit(e) {
   e.preventDefault();
   const urlsField = document.getElementById('urls');
   const instrField = document.getElementById('instructions');
+  const pdfField = document.getElementById('pdf-upload');
+  const privateCheckbox = document.getElementById('private-submission');
   const submitBtn = e.target.querySelector('button[type="submit"]');
   const urls = urlsField.value.trim().split('\\n').filter(u => u.trim());
+  const pdfFile = pdfField && pdfField.files && pdfField.files[0] ? pdfField.files[0] : null;
+  const isPrivate = !!(privateCheckbox && privateCheckbox.checked);
 
-  if (urls.length === 0) {
-    showToast('Please enter at least one URL', 'error');
+  if (urls.length === 0 && !pdfFile) {
+    showToast('Please enter at least one URL or pick a PDF file', 'error');
     return;
   }
 
@@ -2913,6 +3021,13 @@ async function handleSubmit(e) {
     return;
   }
 
+  // PDF size cap — keep well under the Worker 100MB request limit
+  // with headroom for base64 overhead.
+  if (pdfFile && pdfFile.size > 15 * 1024 * 1024) {
+    showToast('PDF is too large (max 15 MB)', 'error');
+    return;
+  }
+
   // Disable button and show progress
   if (submitBtn) {
     submitBtn.disabled = true;
@@ -2921,11 +3036,51 @@ async function handleSubmit(e) {
 
   try {
     const cleanUrls = urls.map(u => u.trim());
+
+    // If the user picked a PDF, upload it first and append its public
+    // URL to the list. The pdf endpoint returns { url: '...' }.
+    if (pdfFile) {
+      if (submitBtn) submitBtn.textContent = 'Uploading PDF...';
+      const buf = await pdfFile.arrayBuffer();
+      // Convert ArrayBuffer -> base64 without blowing the stack on
+      // large files.
+      let b64 = '';
+      const bytes = new Uint8Array(buf);
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        b64 += String.fromCharCode.apply(
+          null, bytes.subarray(i, i + chunk));
+      }
+      b64 = btoa(b64);
+      const uploadRes = await fetch('/api/upload-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: pdfFile.name, data_b64: b64 }),
+      });
+      if (!uploadRes.ok) {
+        let msg = 'PDF upload failed (' + uploadRes.status + ')';
+        try { const d = await uploadRes.json(); if (d.error) msg = d.error; } catch (_) {}
+        showToast(msg, 'error');
+        return;
+      }
+      const uploadData = await uploadRes.json();
+      if (!uploadData.url) {
+        showToast('PDF upload returned no URL', 'error');
+        return;
+      }
+      cleanUrls.push(uploadData.url);
+      if (submitBtn) submitBtn.textContent = 'Submitting...';
+    }
+
     const instrText = instrField.value.trim() || null;
     const res = await fetch('/api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls: cleanUrls, instructions: instrText })
+      body: JSON.stringify({
+        urls: cleanUrls,
+        instructions: instrText,
+        visibility: isPrivate ? 'private' : 'public',
+      })
     });
     if (!res.ok) {
       let msg = 'Server error (' + res.status + ')';
@@ -2938,6 +3093,8 @@ async function handleSubmit(e) {
       showToast('Submitted ' + data.count + ' paper' + (data.count !== 1 ? 's' : '') + ' — pending generation pickup');
       urlsField.value = '';
       instrField.value = '';
+      if (pdfField) pdfField.value = '';
+      if (privateCheckbox) privateCheckbox.checked = false;
       // Optimistically render the new submission instead of re-fetching.
       // This avoids the failure mode where loadSubmissions() hits a CF Access
       // redirect and replaces the list with an error.
@@ -3541,6 +3698,10 @@ async function handleAPI(path, request, env, ctx) {
     case '/api/submit':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
       return await submitPapers(request, env, ctx);
+
+    case '/api/upload-pdf':
+      if (request.method !== 'POST') return { error: 'Method not allowed' };
+      return await uploadPdf(request, env);
 
     case '/api/submissions/enrich':
       if (request.method !== 'POST') return { error: 'Method not allowed' };
@@ -4213,6 +4374,10 @@ async function listSubmissionRecords(env) {
         metadata: sub.metadata || null,
         updated_at: sub.updated_at || sub.timestamp,
         source_identities: submissionSourceIdentities(sub),
+        // Preserve private-scoping fields so downstream filters can
+        // enforce the "never render private on public drafts" invariant.
+        visibility: sub.visibility || null,
+        owner: sub.owner || null,
       });
     } catch {
       // Skip invalid entries
@@ -4237,8 +4402,8 @@ function findBlockingSubmission(submissions, urls) {
   return match;
 }
 
-async function submitPapersPayload(body, env, ctx) {
-  const { urls, instructions } = body || {};
+async function submitPapersPayload(body, env, ctx, adminId) {
+  const { urls, instructions, visibility } = body || {};
 
   if (!urls || !Array.isArray(urls) || urls.length === 0) {
     return { error: 'No URLs provided' };
@@ -4250,6 +4415,14 @@ async function submitPapersPayload(body, env, ctx) {
     if (!validUrlPattern.test(url)) {
       return { error: `Invalid URL: ${url}` };
     }
+  }
+
+  // Private submissions are owner-scoped.  The owner is pinned to
+  // the authenticated admin at submit time and cannot be changed
+  // later — this is what enforces the "never public" invariant.
+  const isPrivate = visibility === 'private';
+  if (isPrivate && !adminId) {
+    return { error: 'Private submissions require authentication' };
   }
 
   const submissions = await listSubmissionRecords(env);
@@ -4274,7 +4447,7 @@ async function submitPapersPayload(body, env, ctx) {
 
   const sourceIdentities = deriveSourceIdentities(urls);
 
-  await env.ADMIN_BUCKET.put(key, JSON.stringify({
+  const submissionRecord = {
     urls,
     instructions: instructions || null,
     timestamp,
@@ -4282,7 +4455,13 @@ async function submitPapersPayload(body, env, ctx) {
     metadata,
     source_identities: sourceIdentities,
     status_history: [{ status: 'submitted', at: timestamp }],
-  }));
+  };
+  if (isPrivate) {
+    submissionRecord.visibility = 'private';
+    submissionRecord.owner = adminId;
+  }
+
+  await env.ADMIN_BUCKET.put(key, JSON.stringify(submissionRecord));
 
   // Fire-and-forget metadata enrichment via arXiv API
   if (ctx && ctx.waitUntil) {
@@ -4301,7 +4480,60 @@ async function submitPapersPayload(body, env, ctx) {
 async function submitPapers(request, env, ctx) {
   try {
     const body = await request.json();
-    return await submitPapersPayload(body, env, ctx);
+    const identity = getAdminIdentity(request);
+    // When CF Access is present we have a verified identity; otherwise
+    // fall back to body.adminId (useful for dev hosts and tests).
+    const adminId = identity.email ? identity.id : (body.adminId || 'admin');
+    return await submitPapersPayload(body, env, ctx, adminId);
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+
+// Upload a PDF file and return its public R2 URL. The body is
+// { filename, data_b64 } — base64-encoded PDF content, capped at
+// ~15 MB to stay well within the Worker request limit.
+async function uploadPdf(request, env) {
+  try {
+    const body = await request.json();
+    const filename = body.filename || 'uploaded.pdf';
+    const b64 = body.data_b64 || '';
+    if (!b64) return { error: 'No PDF data provided' };
+
+    // Decode base64. Atob is available in Workers.
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    if (bytes.length > 15 * 1024 * 1024) {
+      return { error: 'PDF exceeds 15 MB limit' };
+    }
+
+    // Validate PDF magic bytes (%PDF-)
+    if (bytes.length < 5 ||
+        bytes[0] !== 0x25 || bytes[1] !== 0x50 ||
+        bytes[2] !== 0x44 || bytes[3] !== 0x46 ||
+        bytes[4] !== 0x2d) {
+      return { error: 'File does not look like a PDF' };
+    }
+
+    // Sanitize filename: keep only alphanumerics, dash, underscore, dot.
+    const safeName = (filename.replace(/[^A-Za-z0-9._-]/g, '_'))
+      .replace(/_+/g, '_')
+      .substring(0, 80) || 'upload.pdf';
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const key = `uploaded-pdfs/${ts}-${safeName}`;
+    await env.PODCAST_BUCKET.put(key, bytes, {
+      httpMetadata: { contentType: 'application/pdf' },
+    });
+
+    return {
+      success: true,
+      url: `${PODCAST_DOMAIN}/${key}`,
+      key,
+      size: bytes.length,
+    };
   } catch (error) {
     return { error: error.message };
   }
@@ -4545,11 +4777,22 @@ async function reviewDraft(request, env) {
       const episodeTitle = episode?.title || '';
       const focusText = body.focus_text || '';
       const currentRevision = episode?.revision || 1;
+      const referenceEpisodes = Array.isArray(body.reference_episodes)
+        ? body.reference_episodes
+            .map(t => typeof t === 'string' ? t.trim() : '')
+            .filter(t => t.length > 0)
+        : [];
 
       // Build regeneration instructions
       let instructions = `Regenerate as revision ${currentRevision + 1} of: ${episodeTitle}`;
       if (focusText) {
         instructions += `\n\nOperator focus: ${focusText}`;
+      }
+      if (referenceEpisodes.length > 0) {
+        instructions += `\n\nReference these prior episodes by title when they add useful context (never by number, never private content):`;
+        for (const title of referenceEpisodes) {
+          instructions += `\n- "${title}"`;
+        }
       }
       instructions += '\n\nContext rule: only reference publicly published episodes, never private drafts or unreleased content.';
 
