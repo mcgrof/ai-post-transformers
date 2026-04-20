@@ -340,6 +340,20 @@ def process_job(
             f"job {job['job_id']} is claimed by {job.get('claimed_by_admin_id')}"
         )
 
+    # Route private jobs to the private publish path. Without this
+    # dispatch, jobs marked visibility=private would be published to
+    # the public feed — a hard violation of the private invariant.
+    if job.get("visibility") == "private":
+        owner = job.get("owner") or job.get("approved_by_admin_id") or admin_id
+        return process_private_job(
+            job_path,
+            admin_id=admin_id,
+            admin_name=admin_name,
+            owner=owner,
+            lease_seconds=lease_seconds,
+            store=store,
+        )
+
     active_step = _running_step(job)
     if job.get("state") == "publish_running" and active_step:
         print(

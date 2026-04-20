@@ -568,3 +568,76 @@ def test_private_publish_sets_visibility_and_owner(monkeypatch, tmp_path):
     assert finished["state"] == "publish_completed"
     assert len(update_calls) == 1
     assert update_calls[0] == (42, {"visibility": "private", "owner": "user@example.com"})
+
+
+def test_process_job_routes_private_visibility_to_private_path(monkeypatch, tmp_path):
+    """A job with visibility=private MUST be dispatched to process_private_job.
+
+    Without this dispatch, a private-marked job would be published to
+    the public feed — a safety-critical invariant violation.
+    """
+    store = LocalPublishJobStore(root=tmp_path)
+    job = make_job_record(
+        draft_key="drafts/2026/04/private-ep.mp3",
+        title="Private Episode",
+        episode_id=99,
+    )
+    job["visibility"] = "private"
+    job["owner"] = "user@example.com"
+    claim_job(job, admin_id="admin-1", admin_name="mcgrof")
+    path = save_job(job, store=store)
+
+    captured = {}
+
+    def fake_process_private(job_path, **kwargs):
+        captured["called"] = True
+        captured["kwargs"] = kwargs
+        return {"state": "publish_completed"}
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.process_private_job",
+        fake_process_private,
+    )
+
+    result = process_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        store=store,
+    )
+
+    assert captured.get("called") is True, (
+        "process_private_job must be called for a visibility=private job"
+    )
+    assert captured["kwargs"]["owner"] == "user@example.com"
+    assert result == {"state": "publish_completed"}
+
+
+def test_process_job_public_visibility_uses_public_path(monkeypatch, tmp_path):
+    """A job without visibility=private stays on the public publish flow."""
+    store, path, _ = _seed_job(tmp_path)
+
+    private_calls = []
+    monkeypatch.setattr(
+        "scripts.publish_job_runner.process_private_job",
+        lambda *a, **k: private_calls.append(1),
+    )
+    # Prevent the public publish pipeline from running for real
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._episode_artifacts",
+        lambda job: {"audio_file": "x.mp3"},
+    )
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._verify_local_artifacts",
+        lambda artifacts: {"ok": True},
+    )
+
+    process_job(path, admin_id="admin-1", store=store)
+
+    assert len(private_calls) == 0, (
+        "public job must not be routed through the private path"
+    )

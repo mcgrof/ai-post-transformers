@@ -454,6 +454,39 @@ def _verify_claim_token(bucket, client, key, expected_token):
     return fresh.get("claim_token") == expected_token
 
 
+def _create_private_publish_job(*, draft_stem: str, sub: dict,
+                                owner: str) -> str:
+    """Create a visibility=private publish job in R2.
+
+    Called by the generation worker when a private submission finishes
+    generation.  The publish worker will pick this up and route it via
+    process_private_job → gen-podcast.py publish --private, uploading
+    the episode under private-episodes/{token}/ in the admin bucket.
+    """
+    from scripts.publish_jobs import make_job_record
+    from scripts.publish_job_store import get_publish_job_store
+
+    _local_stem, remote_stem = _draft_stem_local_and_remote(draft_stem)
+    draft_key = f"{remote_stem}.mp3"
+    title = sub.get("title") or Path(remote_stem).name
+
+    job = make_job_record(
+        draft_key=draft_key,
+        draft_stem=remote_stem,
+        title=title,
+        approved_by_admin_id=owner,
+        approved_by_name=owner,
+    )
+    # Mark the job private + owner-scoped BEFORE saving. The runner's
+    # dispatch checks job.visibility to route to process_private_job.
+    job["visibility"] = "private"
+    job["owner"] = owner
+
+    r2_store = get_publish_job_store(mode="r2")
+    r2_store.save_job(job)
+    return job["job_id"]
+
+
 def _draft_stem_local_and_remote(draft_stem: str) -> tuple[Path, str]:
     stem_path = Path(draft_stem)
     local_stem = stem_path if stem_path.is_absolute() else ROOT / stem_path
@@ -648,6 +681,35 @@ def _process_submission_store(sub, admin_id, *, store):
         _publish_draft_metadata(result)
         store.update_submission(key, updates)
         print(f"[gen-worker] Draft generated for {key}")
+
+        # Auto-route private submissions to the private publish flow.
+        # Without this, private drafts get stuck: they're filtered out
+        # of the public /drafts review page (safety) but nothing creates
+        # a publish job, so the episode never reaches /private-podcasts.
+        try:
+            if sub.get("visibility") == "private":
+                owner = sub.get("owner") or "admin"
+                _create_private_publish_job(
+                    draft_stem=result,
+                    sub=sub,
+                    owner=owner,
+                )
+                # Advance submission state so the admin UI shows that
+                # it's been sent to the private publish lane.
+                store.update_submission(key, {
+                    "status": "approved_for_publish",
+                })
+                print(
+                    f"[gen-worker] Private publish job created for {key} "
+                    f"(owner={owner})"
+                )
+        except Exception as exc:
+            # Auto-publish is best-effort. If it fails the operator can
+            # retry via the admin UI's "Move to Private" button.
+            print(
+                f"[gen-worker] WARNING: failed to auto-create private "
+                f"publish job for {key}: {exc}"
+            )
         return True
     else:
         store.update_submission(key, {
