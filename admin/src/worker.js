@@ -4481,9 +4481,13 @@ async function submitPapers(request, env, ctx) {
   try {
     const body = await request.json();
     const identity = getAdminIdentity(request);
-    // When CF Access is present we have a verified identity; otherwise
-    // fall back to body.adminId (useful for dev hosts and tests).
-    const adminId = identity.email ? identity.id : (body.adminId || 'admin');
+    // Owner MUST be the full email when available — the private
+    // storage token is derived from the email via ownerToken(),
+    // and the admin UI's private-podcasts page looks up episodes
+    // under `private-episodes/{ownerToken(email)}/`. Passing the
+    // local part would produce a mismatched token and hide the
+    // episode from its own owner.
+    const adminId = identity.email || body.adminId || 'admin';
     return await submitPapersPayload(body, env, ctx, adminId);
   } catch (error) {
     return { error: error.message };
@@ -4625,7 +4629,14 @@ async function reviewDraft(request, env) {
     const serverIdentity = getAdminIdentity(request);
     const effectiveAdminId = serverIdentity.email ? serverIdentity.id : (body.adminId || 'admin');
     const effectiveAdminName = body.adminName || effectiveAdminId;
-    
+    // Use the full email as the owner for private-scoped records.
+    // ownerToken() hashes the email into the R2 storage prefix
+    // (private-episodes/{token}/...). If we hash the local part
+    // instead, the token will not match what /private-podcasts
+    // derives from CF Access identity, making the episode invisible
+    // to its own owner.
+    const effectiveAdminEmail = serverIdentity.email || body.adminEmail || effectiveAdminId;
+
     // Write review (append-only, race-free)
     const reviewTarget = key || jobId || 'unknown';
     const reviewKey = `reviews/${reviewTarget.replace(/\//g, '_')}/${ts}.json`;
@@ -4704,9 +4715,11 @@ async function reviewDraft(request, env) {
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
-      // Tag the publish job as private — owner is always the authenticated admin
+      // Tag the publish job as private. owner MUST be the full email
+      // so gen-podcast's owner_token() derives the same storage prefix
+      // that the /private-podcasts page uses to list episodes.
       job.visibility = 'private';
-      job.owner = effectiveAdminId;
+      job.owner = effectiveAdminEmail;
       await savePublishJob(env, job);
       // Advance linked submissions to private_saved
       await advanceLinkedSubmissions(env, key, 'private_saved', {

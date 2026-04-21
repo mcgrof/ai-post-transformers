@@ -40,7 +40,24 @@ def download_pdf(url, timeout=60):
         print(f"[PDF] Normalized {url} -> {resolved_url}", file=sys.stderr)
 
     print(f"[PDF] Downloading {resolved_url}...", file=sys.stderr)
-    resp = requests.get(resolved_url, timeout=timeout, stream=True)
+    try:
+        resp = requests.get(resolved_url, timeout=timeout, stream=True)
+    except requests.exceptions.SSLError as exc:
+        # Many academic servers (university personal pages, preprint
+        # mirrors) ship incomplete TLS chains that Python's certifi
+        # bundle doesn't trust. These are not MITM signals — they're
+        # configuration gaps on hosts like www2.math.uu.se. Fall back
+        # once with verification disabled after logging loudly.
+        print(
+            f"[PDF] TLS verification failed for {resolved_url}: {exc}. "
+            "Retrying with verify=False (academic-server fallback).",
+            file=sys.stderr,
+        )
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        resp = requests.get(
+            resolved_url, timeout=timeout, stream=True, verify=False,
+        )
     resp.raise_for_status()
 
     content_type = (resp.headers.get("content-type") or "").lower()
