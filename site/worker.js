@@ -18,6 +18,7 @@ const ALLOWED_EXACT_FILES = new Set([
   'queue.html',
   'queue.xml',
   'sponsor.html',
+  'sister-podcasts.html',
   'robots.txt',
   'favicon.ico',
 ]);

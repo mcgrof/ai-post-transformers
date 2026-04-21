@@ -315,3 +315,38 @@ test('isAllowedPath accepts year-month archive paths', () => {
   assert.ok(!isAllowedPath('20266/04/index.html'));       // 5-digit year
   assert.ok(!isAllowedPath('2026/04/sub/index.html'));    // nested
 });
+
+
+test('sister-podcasts.html is served', async () => {
+  const env = makeEnv({
+    'sister-podcasts.html': '<html>Sister Podcasts</html>',
+  });
+  const req = makeRequest('/sister-podcasts.html');
+  const resp = await worker.fetch(req, env);
+  assert.equal(resp.status, 200);
+  const body = await resp.text();
+  assert.ok(body.includes('Sister Podcasts'));
+});
+
+
+test('all root-level HTML files uploaded by publish-site are allowlisted', () => {
+  // gen-podcast.py _publish_site uploads these four HTML files at
+  // the root. Each must be in ALLOWED_EXACT_FILES or the site worker
+  // will 404 them even after a successful publish-site run. This is
+  // the class of regression that hit us with sister-podcasts.html
+  // (which the publisher uploaded but the worker rejected).
+  const rootHtmlUploadedByPublishSite = [
+    'index.html',
+    'sister-podcasts.html',
+    'sponsor.html',
+    'queue.html',
+    'feed.xml',
+    'queue.xml',
+  ];
+  for (const name of rootHtmlUploadedByPublishSite) {
+    assert.ok(
+      isAllowedPath(name),
+      `${name} is uploaded by publish-site but not in the site worker allowlist`
+    );
+  }
+});
