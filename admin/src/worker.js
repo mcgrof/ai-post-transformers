@@ -2367,6 +2367,31 @@ function seekAudio(btn, delta) {
   a.currentTime = t;
 }
 
+async function deletePrivatePodcastUI(key) {
+  if (!confirm('Delete this private podcast? This cannot be undone.')) return;
+  try {
+    const res = await adminApiFetch('/api/private-podcasts', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Private podcast deleted');
+      window.location.reload();
+    } else {
+      showToast(data.error || 'Failed to delete', 'error');
+    }
+  } catch (err) {
+    if (err.message === 'ACCESS_SESSION_EXPIRED') {
+      showToast('Session expired — reloading...', 'error');
+      setTimeout(function() { window.location.reload(); }, 1500);
+      return;
+    }
+    showToast('Failed to delete: ' + err.message, 'error');
+  }
+}
+
 // Toast notifications
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
@@ -3446,11 +3471,19 @@ function privatePodcastsPage(episodes) {
           <div style="color:var(--text-secondary);font-size:0.75rem">${escapeHtml(ep.date || '')}</div>
         </div>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px" onclick="playPrivatePodcast('${escapeHtml(ep.audio_url || '')}')">Play</button>
           <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;color:var(--danger)" onclick="deletePrivatePodcastUI('${escapeHtml(ep.key)}')">Delete</button>
         </div>
       </div>
       <div style="color:var(--text-secondary);font-size:0.875rem;margin-top:0.5rem">${escapeHtml((ep.description || '').substring(0, 300))}${(ep.description || '').length > 300 ? '...' : ''}</div>
+      ${ep.audio_url ? `<div style="display:flex;align-items:center;gap:4px;margin-top:0.75rem">
+        <button onclick="seekAudio(this,-60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 1 min">⏪1m</button>
+        <button onclick="seekAudio(this,-15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Rewind 15s">⏪15s</button>
+        <audio controls preload="none" style="flex:1;height:40px">
+          <source src="${escapeHtml(ep.audio_url)}" type="audio/mpeg">
+        </audio>
+        <button onclick="seekAudio(this,15)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 15s">15s⏩</button>
+        <button onclick="seekAudio(this,60)" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text-primary);font-size:0.75rem" title="Forward 1 min">1m⏩</button>
+      </div>` : ''}
     </div>
   `).join('');
 
