@@ -113,7 +113,12 @@ podcast:
   intro: >-
     Alrighty! Thanks for tuning in! Hello AI world! I am your host,
     Hal Turing, and my co-host is Dr. Ada Shannon.
-  llm_backend: openai   # Codex/OpenAI default; switch to claude-cli or anthropic only when explicitly wanted
+  # codex = use Codex CLI (flat-rate subscription, NO per-token charges).
+  # openai = use OpenAI Python SDK directly (charges OPENAI_API_KEY per token!).
+  # claude-cli, anthropic = Claude CLI (subscription) or Anthropic API.
+  # WARNING: do NOT set this to "openai" unless you intend to spend
+  # API credits — gpt-5.4 reasoning calls can cost $15-30 per episode.
+  llm_backend: codex
   llm_model: gpt-5.4
   analysis_model: gpt-5.4
   hosts:

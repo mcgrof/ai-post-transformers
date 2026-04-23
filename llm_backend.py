@@ -54,7 +54,18 @@ def get_llm_backend(config):
                 pass
         if not api_key:
             raise RuntimeError("Set OPENAI_API_KEY for openai backend")
-        print("[LLM] openai backend: using OpenAI SDK/API", file=sys.stderr)
+        # LOUD warning — this path spends real money on every call.
+        # Reasoning models (gpt-5, o-series) with our auto-escalation
+        # can burn $15-30 per podcast episode in API credits.
+        # If Codex CLI is installed, prefer "llm_backend: codex" in
+        # config.yaml to use the flat-rate subscription instead.
+        import shutil
+        codex_present = " (Codex CLI is available — consider llm_backend: codex)" if shutil.which("codex") else ""
+        print(
+            "[LLM] *** WARNING *** openai backend SPENDS REAL API "
+            "CREDITS per call. " + codex_present,
+            file=sys.stderr,
+        )
         return {"type": "openai", "client": openai.OpenAI(api_key=api_key)}
 
     if backend_type == "anthropic":
