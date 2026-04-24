@@ -32,6 +32,25 @@ def test_normalize_pdf_url_converts_arxiv_abs_and_html_urls():
     )
 
 
+def test_normalize_pdf_url_converts_openreview_forum_to_pdf():
+    # openreview.net/forum?id=X returns HTML, /pdf?id=X returns the PDF
+    assert _normalize_pdf_url("https://openreview.net/forum?id=kgzBkyqg6Z") == (
+        "https://openreview.net/pdf?id=kgzBkyqg6Z"
+    )
+    # Trailing query parameters after id should be dropped
+    assert _normalize_pdf_url(
+        "https://openreview.net/forum?id=abc123&noteId=xyz"
+    ) == "https://openreview.net/pdf?id=abc123"
+    # id not first in query string still works
+    assert _normalize_pdf_url(
+        "https://openreview.net/forum?noteId=xyz&id=abc123"
+    ) == "https://openreview.net/pdf?id=abc123"
+    # Direct pdf URL left alone
+    assert _normalize_pdf_url("https://openreview.net/pdf?id=abc123") == (
+        "https://openreview.net/pdf?id=abc123"
+    )
+
+
 def test_download_pdf_normalizes_arxiv_abs_before_request(monkeypatch):
     seen = {}
 

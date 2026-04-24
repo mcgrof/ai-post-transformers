@@ -16,13 +16,22 @@ _ARXIV_ABS_RE = re.compile(
     r"(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?(?:[?#].*)?$"
 )
 
+_OPENREVIEW_FORUM_RE = re.compile(
+    r"https?://openreview\.net/forum\?(.*&)?id=([A-Za-z0-9_-]+)(?:&.*)?$"
+)
+
 
 def _normalize_pdf_url(url):
     """Normalize common paper URLs into direct PDF URLs when possible."""
-    match = _ARXIV_ABS_RE.match(url or "")
-    if not match:
-        return url
-    return f"https://arxiv.org/pdf/{match.group(1)}.pdf"
+    raw = url or ""
+    match = _ARXIV_ABS_RE.match(raw)
+    if match:
+        return f"https://arxiv.org/pdf/{match.group(1)}.pdf"
+    # OpenReview: /forum?id=X returns HTML, but /pdf?id=X returns PDF.
+    match = _OPENREVIEW_FORUM_RE.match(raw)
+    if match:
+        return f"https://openreview.net/pdf?id={match.group(2)}"
+    return raw
 
 
 def download_pdf(url, timeout=60):
