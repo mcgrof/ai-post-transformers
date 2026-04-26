@@ -479,7 +479,7 @@ def generate_podcast(config, arxiv_id=None):
     # Output path
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     output_dir = _get_output_dir(date_str)
-    stem = _make_episode_stem(f"Episode: {paper['title']}", date_str)
+    stem = _make_episode_stem(paper['title'], date_str)
     audio_file = output_dir / f"{stem}.mp3"
 
     # Get previously covered topics for context
@@ -562,8 +562,13 @@ def generate_podcast(config, arxiv_id=None):
         config, paper["title"], summary, str(audio_file)
     )
 
-    # Record in database
-    title = f"Episode: {paper['title']}"
+    # Record in database — store the bare title. The "Episode: "
+    # prefix used to be applied here but it polluted the manifest
+    # ("Episode: Speculative Speculative Decoding") and the public
+    # feed. _generate_title() in the URL-based path explicitly
+    # strips this prefix; the legacy --paper path should never
+    # have added it.
+    title = paper['title']
     podcast_id = insert_podcast(
         conn,
         title=title,
