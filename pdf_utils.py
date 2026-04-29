@@ -34,6 +34,16 @@ def _normalize_pdf_url(url):
     return raw
 
 
+# Many publisher and academic servers reject Python's default
+# User-Agent (e.g. werbos.com returns 465, others return 403/451).
+# Sending a real browser UA fixes the majority of these without
+# affecting servers that don't care.
+_BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
 def download_pdf(url, timeout=60):
     """Download a PDF from a URL to a temporary file.
 
@@ -49,8 +59,11 @@ def download_pdf(url, timeout=60):
         print(f"[PDF] Normalized {url} -> {resolved_url}", file=sys.stderr)
 
     print(f"[PDF] Downloading {resolved_url}...", file=sys.stderr)
+    headers = {"User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*"}
     try:
-        resp = requests.get(resolved_url, timeout=timeout, stream=True)
+        resp = requests.get(
+            resolved_url, timeout=timeout, stream=True, headers=headers,
+        )
     except requests.exceptions.SSLError as exc:
         # Many academic servers (university personal pages, preprint
         # mirrors) ship incomplete TLS chains that Python's certifi
@@ -66,6 +79,7 @@ def download_pdf(url, timeout=60):
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         resp = requests.get(
             resolved_url, timeout=timeout, stream=True, verify=False,
+            headers=headers,
         )
     resp.raise_for_status()
 

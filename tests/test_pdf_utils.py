@@ -54,8 +54,9 @@ def test_normalize_pdf_url_converts_openreview_forum_to_pdf():
 def test_download_pdf_normalizes_arxiv_abs_before_request(monkeypatch):
     seen = {}
 
-    def fake_get(url, timeout=60, stream=True):
+    def fake_get(url, **kwargs):
         seen["url"] = url
+        seen["headers"] = kwargs.get("headers") or {}
         return DummyResponse(url, b"%PDF-1.5\n1 0 obj\n")
 
     monkeypatch.setattr("pdf_utils.requests.get", fake_get)
@@ -69,13 +70,40 @@ def test_download_pdf_normalizes_arxiv_abs_before_request(monkeypatch):
 
 
 def test_download_pdf_rejects_non_pdf_response(monkeypatch):
-    def fake_get(url, timeout=60, stream=True):
+    def fake_get(url, **kwargs):
         return DummyResponse(url, b"<!DOCTYPE html>", "text/html; charset=utf-8")
 
     monkeypatch.setattr("pdf_utils.requests.get", fake_get)
 
     with pytest.raises(ValueError, match="did not return a PDF"):
         download_pdf("https://example.com/not-a-pdf")
+
+
+def test_download_pdf_sends_browser_user_agent(monkeypatch):
+    """Many publisher servers (werbos.com 465, others 403) reject
+    Python's default urllib UA. We must send a real browser UA on
+    every PDF fetch — not just when retrying after an error.
+    """
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen["headers"] = kwargs.get("headers") or {}
+        return DummyResponse(url, b"%PDF-1.5\nbody")
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    path = download_pdf("https://example.com/paper.pdf")
+    try:
+        ua = seen["headers"].get("User-Agent", "")
+        assert "Mozilla" in ua, (
+            f"download_pdf must send a browser User-Agent; got {ua!r}"
+        )
+        # Servers that 403 without an Accept header for PDFs are also
+        # common; we send Accept: application/pdf as a hint.
+        accept = seen["headers"].get("Accept", "")
+        assert "application/pdf" in accept
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def test_download_and_extract_reads_local_text_sources(tmp_path):
