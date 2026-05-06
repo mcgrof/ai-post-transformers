@@ -4723,16 +4723,17 @@ test('Submit page includes private checkbox and PDF upload field', async () => {
 });
 
 
-test('Drafts page filters bucket drafts that already exist under public/', async () => {
+test('Drafts page filters bucket drafts that already exist under episodes/', async () => {
   // Old drafts published via the legacy path leave their MP3 in
-  // drafts/ AND a copy in public/YYYY/MM/. Without cross-checking
-  // public/, those orphans render as fake "pending" drafts and
-  // inflate the count.
+  // drafts/ AND a copy in episodes/. Without cross-checking
+  // episodes/, those orphans render as fake "pending" drafts
+  // and inflate the count (observed: 91 cards from 21 real
+  // drafts + 70 stale orphans).
   const env = makeEnv({
     podcast: {
       'drafts/2026/04/published-ep.mp3': 'audio',
       'drafts/2026/04/genuinely-pending.mp3': 'audio',
-      'public/2026/04/published-ep.mp3': 'audio',  // already live
+      'episodes/published-ep.mp3': 'audio',  // already live
     },
     admin: {
       'manifest.json': {
@@ -4764,6 +4765,6 @@ test('Drafts page filters bucket drafts that already exist under public/', async
   assert.ok(html.includes('Genuinely Pending'),
     'truly pending draft should appear');
   assert.ok(!html.includes('Published Episode'),
-    'draft whose MP3 also exists under public/ must be filtered ' +
+    'draft whose MP3 also exists under episodes/ must be filtered ' +
     '(stale leftover from legacy publish)');
 });
