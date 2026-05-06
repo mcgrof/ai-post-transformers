@@ -1526,6 +1526,7 @@ function draftsPageWithData(data, subsData) {
   // card and the visible count stays the same.
   const publishedBasenames = new Set(data.published_basenames || []);
 
+
   // Build a set of draft keys already shown via the bucket listing
   // so we don't duplicate entries.
   const existingKeys = new Set(drafts.map(d => d.key));
@@ -4023,14 +4024,10 @@ async function getDrafts(env) {
     }
 
     // Filter out superseded and rejected revisions from default view.
-    // Also filter already-published episodes still lingering as drafts
-    // (either via revision_state, a completed publish job, OR — the
-    // big one — a same-named file already living under episodes/. Old
-    // drafts published via the legacy path leave hundreds of orphan
-    // MP3s in drafts/ that have no manifest entry and no publish job.
-    // Without the episodes/ cross-check those orphans render as fake
-    // "pending" drafts and the count balloons way over reality —
-    // observed: 91 cards from 21 real drafts + 70 stale orphans.)
+    // Also filter already-published episodes still lingering as drafts.
+    // Bucket drafts without a manifest entry pass through here; the
+    // submission-card fallback path catches new generations that
+    // haven't been added to the manifest yet.
     const activeDrafts = drafts.filter(d => {
       const rs = d.revision_state;
       if (rs === 'superseded' || rs === 'rejected') return false;
