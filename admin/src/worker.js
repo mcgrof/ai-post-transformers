@@ -3915,20 +3915,37 @@ async function getDrafts(env) {
     // Note: published episodes live at episodes/{filename}.mp3 in
     // the public R2 bucket, NOT at public/. The public/ prefix is
     // empty for MP3s — episode audio always uses episodes/.
-    const [list, publishJobs, episodesList] = await Promise.all([
+    // R2 list() returns a maximum of 1000 objects per call. Our
+    // episodes/ prefix has 2600+ objects, so a single list() call
+    // misses most of them. We paginate via the `cursor` returned
+    // when the result is truncated. This is essential for the
+    // stale-draft filter to work correctly — without it, drafts
+    // whose published episode was uploaded later in the bucket
+    // listing get missed and render as fake pending drafts.
+    async function listAllMp3Basenames(prefix) {
+      const out = new Set();
+      let cursor = undefined;
+      // Cap iterations so a misbehaving listing can't loop forever.
+      for (let i = 0; i < 20; i++) {
+        const opts = cursor ? { prefix, cursor } : { prefix };
+        const page = await env.PODCAST_BUCKET.list(opts);
+        for (const obj of page.objects || []) {
+          if (!obj.key.endsWith('.mp3')) continue;
+          const base = obj.key.split('/').pop().replace(/\.mp3$/, '');
+          if (base) out.add(base);
+        }
+        if (!page.truncated) break;
+        cursor = page.cursor;
+        if (!cursor) break;
+      }
+      return out;
+    }
+
+    const [list, publishJobs, publishedBasenames] = await Promise.all([
       env.PODCAST_BUCKET.list({ prefix: 'drafts/' }),
       listPublishJobs(env),
-      env.PODCAST_BUCKET.list({ prefix: 'episodes/' }),
+      listAllMp3Basenames('episodes/'),
     ]);
-    // Build a set of basenames that already exist under episodes/.
-    // If a drafts/ MP3 has the same basename as an episodes/ file,
-    // the episode is already live and the draft is stale.
-    const publishedBasenames = new Set();
-    for (const obj of (episodesList.objects || [])) {
-      if (!obj.key.endsWith('.mp3')) continue;
-      const base = obj.key.split('/').pop().replace(/\.mp3$/, '');
-      if (base) publishedBasenames.add(base);
-    }
     const latestPublishJobByDraft = new Map();
     for (const job of publishJobs) {
       if (!job?.draft_key) continue;

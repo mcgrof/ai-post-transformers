@@ -1,1 +1,1 @@
-export const ADMIN_RELEASE_TAG = 'admin-v2026.05.05.4';
+export const ADMIN_RELEASE_TAG = 'admin-v2026.05.05.5';
