@@ -1504,6 +1504,20 @@ function draftsPageWithData(data, subsData) {
     }
   }
 
+  // Build a lookup from stemBase -> bucket draft (any state) so
+  // submission cards can borrow the rich title + description from
+  // the manifest if the bucket draft was filtered out for some
+  // unrelated reason. Without this, a submission whose bucket
+  // draft got dropped renders as just "Sources: <URL>" with no
+  // title or description — exactly the "fucked up" rendering
+  // the user reported for the LightGBM draft.
+  const bucketDraftByStem = new Map();
+  for (const d of (data.all_drafts || data.drafts || [])) {
+    if (!d.key) continue;
+    const stem = d.key.replace(/\.mp3$/, '').split('/').pop();
+    if (stem) bucketDraftByStem.set(stem, d);
+  }
+
   // Build a set of draft keys already shown via the bucket listing
   // so we don't duplicate entries.
   const existingKeys = new Set(drafts.map(d => d.key));
@@ -1519,21 +1533,31 @@ function draftsPageWithData(data, subsData) {
       }
       return !drafts.some(d => d.key && d.key.includes(stemBase));
     })
-    .map(s => ({
-      key: s.key || s.draft_stem,
-      title: displayTitle(s),
-      date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
-      duration: 'Unknown',
-      description: buildSubmissionDraftDescription(s),
-      audioUrl: s.draft_stem
-        ? `${PODCAST_DOMAIN}/${s.draft_stem}.mp3`
-        : null,
-      episodeId: null,
-      publish_job: null,
-      revision: null,
-      _from_submission: true,
-      _submission_status: s.status,
-    }));
+    .map(s => {
+      // If a manifest-backed bucket draft exists for this stem, use
+      // its title/description even though the submission card is
+      // rendering. The card path is the fallback layout, but the
+      // METADATA should still come from the canonical source.
+      const stemBase = s.draft_stem ? s.draft_stem.split('/').pop() : null;
+      const bucketDraft = stemBase ? bucketDraftByStem.get(stemBase) : null;
+      const manifestTitle = bucketDraft && bucketDraft.title;
+      const manifestDescription = bucketDraft && bucketDraft.description;
+      return {
+        key: s.key || s.draft_stem,
+        title: manifestTitle || displayTitle(s),
+        date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
+        duration: 'Unknown',
+        description: manifestDescription || buildSubmissionDraftDescription(s),
+        audioUrl: s.draft_stem
+          ? `${PODCAST_DOMAIN}/${s.draft_stem}.mp3`
+          : null,
+        episodeId: bucketDraft ? bucketDraft.episodeId : null,
+        publish_job: null,
+        revision: bucketDraft ? bucketDraft.revision : null,
+        _from_submission: true,
+        _submission_status: s.status,
+      };
+    });
 
   // Filter out any bucket-listing draft whose submission was marked
   // private. This is the belt-and-suspenders half of the safety
