@@ -1518,6 +1518,14 @@ function draftsPageWithData(data, subsData) {
     if (stem) bucketDraftByStem.set(stem, d);
   }
 
+  // Set of basenames that already exist as published episodes
+  // (episodes/{basename}.mp3). A submission whose draft_stem points
+  // at one of these is for an already-published episode and must
+  // not render as a "pending" card. Without this, removing the
+  // orphan bucket draft just lets the submission render as a fallback
+  // card and the visible count stays the same.
+  const publishedBasenames = new Set(data.published_basenames || []);
+
   // Build a set of draft keys already shown via the bucket listing
   // so we don't duplicate entries.
   const existingKeys = new Set(drafts.map(d => d.key));
@@ -1529,6 +1537,12 @@ function draftsPageWithData(data, subsData) {
       const stemBase = s.draft_stem.split('/').pop();
       // Suppress submissions whose draft has a completed publish job.
       if (completedDraftStems.has(`${s.draft_stem}.mp3`) || completedDraftStems.has(stemBase)) {
+        return false;
+      }
+      // Suppress submissions whose draft is already published as an
+      // episodes/{basename}.mp3. These are orphan submission records
+      // for old episodes that completed via the legacy publish path.
+      if (stemBase && publishedBasenames.has(stemBase)) {
         return false;
       }
       return !drafts.some(d => d.key && d.key.includes(stemBase));
@@ -4015,7 +4029,16 @@ async function getDrafts(env) {
       return true;
     });
 
-    return { drafts: activeDrafts, all_drafts: drafts };
+    // Expose publishedBasenames so the submission-card fallback can
+    // also filter orphan submissions whose draft_stem points at an
+    // already-published episode. Without this, removing the bucket
+    // draft from activeDrafts just lets the submission render as a
+    // fallback card — net no change in count.
+    return {
+      drafts: activeDrafts,
+      all_drafts: drafts,
+      published_basenames: Array.from(publishedBasenames),
+    };
   } catch (error) {
     return { error: error.message, drafts: [] };
   }

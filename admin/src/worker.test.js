@@ -4768,3 +4768,46 @@ test('Drafts page filters bucket drafts that already exist under episodes/', asy
     'draft whose MP3 also exists under episodes/ must be filtered ' +
     '(stale leftover from legacy publish)');
 });
+
+
+test('Drafts page filters submission cards whose draft is already published', async () => {
+  // Mirror of the bucket-draft filter, but for the submission-card
+  // fallback path. If we only filter bucket drafts that have a
+  // sibling under episodes/, the submission for that same draft
+  // will just render as a fallback card and the visible count stays
+  // the same. We must also filter submissions whose draft_stem
+  // basename matches an episodes/ basename.
+  const env = makeEnv({
+    podcast: {
+      'episodes/published-orphan.mp3': 'audio',
+      // No drafts/ entry — the bucket draft was cleaned up but the
+      // submission record lingered with an orphan draft_stem
+    },
+    admin: {
+      'submissions/orphan.json': {
+        urls: ['https://arxiv.org/pdf/2401.99999'],
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/03/published-orphan',
+        timestamp: '2026-03-01T00:00:00.000Z',
+      },
+      'submissions/real.json': {
+        urls: ['https://arxiv.org/pdf/2401.88888'],
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/05/real-pending',
+        timestamp: '2026-05-05T00:00:00.000Z',
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/drafts'),
+    env,
+    {},
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes('published-orphan'),
+    'submission whose draft_stem matches a published episode must be filtered');
+  assert.ok(html.includes('real-pending'),
+    'genuinely pending submission must still appear');
+});
