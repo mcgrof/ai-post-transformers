@@ -3960,11 +3960,48 @@ async function getDrafts(env) {
       return out;
     }
 
-    const [list, publishJobs, publishedBasenames] = await Promise.all([
-      env.PODCAST_BUCKET.list({ prefix: 'drafts/' }),
-      listPublishJobs(env),
-      listAllMp3Basenames('episodes/'),
-    ]);
+    // CF Workers free tier caps subrequests per invocation at 50.
+    // Each per-job R2 GET in listPublishJobs costs one — with 100+
+    // jobs that alone blows the budget. Cap the publish-jobs read
+    // to a small recent window since old completed jobs aren't
+    // needed for the drafts page filter.
+    const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    let publishJobs = [];
+    let publishedBasenames = new Set();
+    try {
+      // Single list() of episodes/ — first 1000 items only.
+      // Pagination across 2600+ objects costs 3 subrequests but
+      // the recent episodes (newest = relevant for orphan check)
+      // sit alphabetically across pages. Trust manifest as the
+      // primary authority below; this is a belt-and-suspenders.
+      const episodesList = await env.PODCAST_BUCKET.list({ prefix: 'episodes/' });
+      for (const obj of (episodesList.objects || [])) {
+        if (!obj.key.endsWith('.mp3')) continue;
+        const base = obj.key.split('/').pop().replace(/\.mp3$/, '');
+        if (base) publishedBasenames.add(base);
+      }
+    } catch (_) { /* non-fatal */ }
+    try {
+      // Cap publish_jobs read to a small recent window. Older
+      // completed jobs are filtered via the publishedBasenames
+      // episodes/ check. Sort by key DESC since job ids encode
+      // timestamps (pub_YYYY_MM_DD_HHMMSS).
+      const PUBLISH_JOB_READ_CAP = 8;
+      const jobsList = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
+      const recentKeys = (jobsList.objects || [])
+        .map(o => o.key)
+        .sort((a, b) => b.localeCompare(a))
+        .slice(0, PUBLISH_JOB_READ_CAP);
+      const jobReads = await batchedMap(recentKeys, async key => {
+        try {
+          const r = await env.ADMIN_BUCKET.get(key);
+          return r ? await r.json() : null;
+        } catch (_) {
+          return null;
+        }
+      });
+      publishJobs = jobReads.filter(Boolean).map(summarizePublishJob);
+    } catch (_) { /* non-fatal */ }
     const latestPublishJobByDraft = new Map();
     for (const job of publishJobs) {
       if (!job?.draft_key) continue;
@@ -4038,18 +4075,16 @@ async function getDrafts(env) {
     }
 
     // Filter out superseded and rejected revisions from default view.
-    // Also filter already-published episodes still lingering as drafts.
-    // Bucket drafts without a manifest entry pass through here; the
-    // submission-card fallback path catches new generations that
-    // haven't been added to the manifest yet.
+    // Cross-reference episodes/ — same-basename MP3 there means the
+    // episode is already published and this drafts/ MP3 is a stale
+    // leftover. Pagination is capped to 1000 (first page only) due
+    // to subrequest budget; manifest revision_state is the primary
+    // authority.
     const activeDrafts = drafts.filter(d => {
       const rs = d.revision_state;
       if (rs === 'superseded' || rs === 'rejected') return false;
       if (rs === 'published') return false;
       if (d.publish_job && d.publish_job.state === 'publish_completed') return false;
-      // Cross-reference episodes/ — a same-basename file there means
-      // the episode was already published and this drafts/ MP3 is
-      // a stale leftover.
       if (d.key) {
         const base = d.key.split('/').pop().replace(/\.mp3$/, '');
         if (base && publishedBasenames.has(base)) return false;
@@ -4514,18 +4549,29 @@ function summarizeExistingSubmission(sub) {
 async function listSubmissionRecords(env) {
   const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
 
-  // Batched parallel fetch (6 at a time) — hot path called on every
-  // dashboard / drafts / queue / submit page render. Unlimited
-  // Promise.all over 80+ R2 GETs blew past the Worker
-  // simultaneous-connections cap (6 per request) and most fetches
-  // failed with "Response closed due to connection limit".
-  const reads = await batchedMap(list.objects, async obj => {
+  // CF Workers free tier caps subrequests per invocation at 50.
+  // Reading all submissions individually (~125 GETs) blows that
+  // budget by itself, then publish_jobs + episodes pagination put
+  // it way over and fetches start failing mid-render.
+  // Cap the read at the most-recent N submissions — the active
+  // (draft_generated / approved_for_publish) ones are always
+  // near the top by timestamp, and old/published/rejected entries
+  // are not needed for any render path that uses this list.
+  // submission keys encode the timestamp so sorted-by-key DESC
+  // = newest-first.
+  const SUBMISSION_READ_CAP = 30;
+  const sortedKeys = (list.objects || [])
+    .map(o => o.key)
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, SUBMISSION_READ_CAP);
+
+  const reads = await batchedMap(sortedKeys, async key => {
     try {
-      const data = await env.ADMIN_BUCKET.get(obj.key);
+      const data = await env.ADMIN_BUCKET.get(key);
       if (!data) return null;
       const sub = await data.json();
       if (!sub.urls) return null;
-      return [obj.key, sub];
+      return [key, sub];
     } catch (_) {
       return null;
     }
