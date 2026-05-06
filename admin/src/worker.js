@@ -19,6 +19,25 @@ const WORKERS_DEV_SUFFIX = '.workers.dev';
 const DEV_HOSTS = new Set(['admin.test', 'localhost', '127.0.0.1']);
 const PUBLISH_JOB_PROGRESS_STEPS = ['publish', 'viz', 'cover', 'site', 'verify'];
 
+// Cloudflare Workers caps simultaneous open connections at 6 per
+// request. Promise.all over 80+ R2 GETs blew past this limit and
+// most fetches failed with "Response closed due to connection
+// limit", which made getDrafts() error out and the page render
+// with zero bucket drafts. Batching keeps concurrency under the cap.
+const R2_PARALLEL_BATCH = 6;
+
+async function batchedMap(items, fn, batchSize = R2_PARALLEL_BATCH) {
+  const results = new Array(items.length);
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(fn));
+    for (let j = 0; j < batchResults.length; j++) {
+      results[i + j] = batchResults[j];
+    }
+  }
+  return results;
+}
+
 // ============================================================================
 // STYLES - Dark theme matching dash.do-not-panic.com
 // ============================================================================
@@ -3337,18 +3356,18 @@ async function listPrivateDrafts(env, adminId) {
   const list = await env.ADMIN_BUCKET.list({
     prefix: `private-drafts/${adminId}/`,
   });
-  // Parallel fetch — sequential awaits in the loop made the
-  // private-drafts page slow as the count grew.
-  const reads = await Promise.all(
-    list.objects.map(async obj => {
-      try {
-        const data = await env.ADMIN_BUCKET.get(obj.key);
-        return data ? await data.json() : null;
-      } catch (_) {
-        return null;
-      }
-    })
-  );
+  // Batched parallel fetch (6 at a time) — workers cap simultaneous
+  // open connections at 6 per request, so unlimited Promise.all
+  // over many objects fails with "Response closed due to connection
+  // limit". batchedMap stays under the cap.
+  const reads = await batchedMap(list.objects, async obj => {
+    try {
+      const data = await env.ADMIN_BUCKET.get(obj.key);
+      return data ? await data.json() : null;
+    } catch (_) {
+      return null;
+    }
+  });
   const drafts = reads.filter(Boolean);
   drafts.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   return drafts;
@@ -3461,9 +3480,9 @@ async function listPrivatePodcasts(env, ownerId, ownerEmail) {
   const listed = await env.ADMIN_BUCKET.list({ prefix });
   const mp3s = listed.objects.filter(o => o.key.endsWith('.mp3'));
 
-  // Parallel sidecar JSON fetch — was sequential per episode.
-  const episodes = await Promise.all(
-    mp3s.map(async obj => {
+  // Batched parallel sidecar JSON fetch (6 at a time) to stay
+  // under the Worker simultaneous-connections cap.
+  const episodes = await batchedMap(mp3s, async obj => {
       const stem = obj.key.replace(/\.mp3$/, '');
       const jsonKey = stem + '.json';
       const meta = {
@@ -3483,8 +3502,7 @@ async function listPrivatePodcasts(env, ownerId, ownerEmail) {
         }
       } catch (_) { /* ignore parse errors */ }
       return meta;
-    })
-  );
+    });
   return { episodes };
 }
 
@@ -3979,22 +3997,18 @@ async function getDrafts(env) {
       }
     }
 
-    // Parallel sidecar fetch — previously this was serial inside the
-    // for-loop and was the dominant page-load cost when many drafts
-    // had no manifest entry. With ~30 drafts that's ~30 R2 GETs going
-    // from sequential (~1.5s) to parallel (~150ms).
+    // Batched sidecar fetch (6 at a time) to stay under the Worker
+    // simultaneous-connections cap (6 per request).
     const sidecarMap = new Map();
-    const sidecarReads = await Promise.all(
-      needsSidecar.map(async key => {
-        try {
-          const r = await env.PODCAST_BUCKET.get(
-            key.replace(/\.mp3$/, '.json'));
-          return [key, r ? await r.json() : null];
-        } catch (_) {
-          return [key, null];
-        }
-      })
-    );
+    const sidecarReads = await batchedMap(needsSidecar, async key => {
+      try {
+        const r = await env.PODCAST_BUCKET.get(
+          key.replace(/\.mp3$/, '.json'));
+        return [key, r ? await r.json() : null];
+      } catch (_) {
+        return [key, null];
+      }
+    });
     for (const [key, sidecar] of sidecarReads) {
       if (sidecar) sidecarMap.set(key, sidecar);
     }
@@ -4500,22 +4514,22 @@ function summarizeExistingSubmission(sub) {
 async function listSubmissionRecords(env) {
   const list = await env.ADMIN_BUCKET.list({ prefix: 'submissions/' });
 
-  // Parallel fetch — hot path called on every dashboard / drafts /
-  // queue / submit page render. With 80+ submissions this dropped
-  // page load from ~5s to ~150ms.
-  const reads = await Promise.all(
-    list.objects.map(async obj => {
-      try {
-        const data = await env.ADMIN_BUCKET.get(obj.key);
-        if (!data) return null;
-        const sub = await data.json();
-        if (!sub.urls) return null;
-        return [obj.key, sub];
-      } catch (_) {
-        return null;
-      }
-    })
-  );
+  // Batched parallel fetch (6 at a time) — hot path called on every
+  // dashboard / drafts / queue / submit page render. Unlimited
+  // Promise.all over 80+ R2 GETs blew past the Worker
+  // simultaneous-connections cap (6 per request) and most fetches
+  // failed with "Response closed due to connection limit".
+  const reads = await batchedMap(list.objects, async obj => {
+    try {
+      const data = await env.ADMIN_BUCKET.get(obj.key);
+      if (!data) return null;
+      const sub = await data.json();
+      if (!sub.urls) return null;
+      return [obj.key, sub];
+    } catch (_) {
+      return null;
+    }
+  });
 
   const submissions = reads
     .filter(Boolean)
@@ -5240,15 +5254,13 @@ async function loadPublishJobById(env, jobId, { summarize = true } = {}) {
 
 async function listPublishJobs(env) {
   const listed = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
-  // Parallelize the per-object reads. Sequential awaits across 70+
-  // jobs add up to several seconds of latency on every page load.
-  const reads = await Promise.all(
-    listed.objects.map(obj => env.ADMIN_BUCKET.get(obj.key))
-  );
-  const parsed = await Promise.all(
-    reads.filter(Boolean).map(r => r.json())
-  );
-  return parsed.map(summarizePublishJob);
+  // Batched parallel reads (6 at a time) to stay under the Worker
+  // simultaneous-connections cap.
+  const parsed = await batchedMap(listed.objects, async obj => {
+    const r = await env.ADMIN_BUCKET.get(obj.key);
+    return r ? await r.json() : null;
+  });
+  return parsed.filter(Boolean).map(summarizePublishJob);
 }
 
 async function findLatestPublishJobForDraft(env, draftKey, { summarize = true } = {}) {
@@ -5256,13 +5268,11 @@ async function findLatestPublishJobForDraft(env, draftKey, { summarize = true } 
     return null;
   }
   const listed = await env.ADMIN_BUCKET.list({ prefix: 'publish-jobs/' });
-  // Parallel fetch then filter — same perf concern as listPublishJobs.
-  const reads = await Promise.all(
-    listed.objects.map(obj => env.ADMIN_BUCKET.get(obj.key))
-  );
-  const jobs = await Promise.all(
-    reads.filter(Boolean).map(r => r.json())
-  );
+  const jobsAll = await batchedMap(listed.objects, async obj => {
+    const r = await env.ADMIN_BUCKET.get(obj.key);
+    return r ? await r.json() : null;
+  });
+  const jobs = jobsAll.filter(Boolean);
   let latest = null;
   for (const job of jobs) {
     if (job.draft_key !== draftKey) continue;
