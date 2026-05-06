@@ -3892,11 +3892,26 @@ async function getDrafts(env) {
     }
 
     // Get list of draft MP3s from PODCAST_BUCKET — parallel with
-    // publish job fetch since both are independent reads.
-    const [list, publishJobs] = await Promise.all([
+    // publish job fetch and the public/ listing.  We need the
+    // public/ listing because old drafts that were already
+    // published months ago via the legacy path don't get any
+    // publish_job record AND don't get cleaned up from drafts/,
+    // so without this filter they pile up as fake "pending"
+    // drafts (over 100 of them, which made the admin look broken).
+    const [list, publishJobs, publicList] = await Promise.all([
       env.PODCAST_BUCKET.list({ prefix: 'drafts/' }),
       listPublishJobs(env),
+      env.PODCAST_BUCKET.list({ prefix: 'public/' }),
     ]);
+    // Build a set of basenames that already exist under public/.
+    // If a drafts/ MP3 has the same basename as a public/ file,
+    // the episode is already live and the draft is stale.
+    const publishedBasenames = new Set();
+    for (const obj of (publicList.objects || [])) {
+      if (!obj.key.endsWith('.mp3')) continue;
+      const base = obj.key.split('/').pop().replace(/\.mp3$/, '');
+      if (base) publishedBasenames.add(base);
+    }
     const latestPublishJobByDraft = new Map();
     for (const job of publishJobs) {
       if (!job?.draft_key) continue;
@@ -3975,13 +3990,24 @@ async function getDrafts(env) {
 
     // Filter out superseded and rejected revisions from default view.
     // Also filter already-published episodes still lingering as drafts
-    // (either via revision_state or a completed publish job whose R2
-    // cleanup failed, leaving the MP3 orphaned on the bucket).
+    // (either via revision_state, a completed publish job, OR — the
+    // big one — a same-named file already living under public/. Old
+    // drafts published via the legacy path leave hundreds of orphan
+    // MP3s in drafts/ that have no manifest entry and no publish job.
+    // Without the public/ cross-check those orphans render as fake
+    // "pending" drafts and the count balloons way over reality.)
     const activeDrafts = drafts.filter(d => {
       const rs = d.revision_state;
       if (rs === 'superseded' || rs === 'rejected') return false;
       if (rs === 'published') return false;
       if (d.publish_job && d.publish_job.state === 'publish_completed') return false;
+      // Cross-reference public/ — a same-basename file there means
+      // the episode was already published and this drafts/ MP3 is
+      // a stale leftover.
+      if (d.key) {
+        const base = d.key.split('/').pop().replace(/\.mp3$/, '');
+        if (base && publishedBasenames.has(base)) return false;
+      }
       return true;
     });
 
