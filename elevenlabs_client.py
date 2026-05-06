@@ -28,6 +28,58 @@ def get_api_key():
 _tts_config = None  # Module-level config for TTS backend selection
 
 
+# Pronunciation fixes applied to text BEFORE it reaches the TTS engine.
+# The on-disk transcript and SRT keep the original spelling so listeners
+# reading along see "arXiv". TTS engines pronounce "arXiv" as "ar-zive"
+# or "ar-X-eye-V" — none of those are right. The community pronunciation
+# is "archive" (Paul Ginsparg's original intent: X is the Greek letter
+# chi, so arXiv = archive).
+#
+# Each entry uses a regex with word boundaries so we don't accidentally
+# rewrite substrings (e.g. "LLM" should not match "LLMs" wholesale —
+# we want "L L M's" → handle both forms explicitly).
+import re as _re
+
+_PRONUNCIATION_FIXES = [
+    # (compiled regex, replacement) — applied in order
+    (_re.compile(r"\barXiv\b", _re.IGNORECASE), "archive"),
+    # Acronyms: spell out so TTS pronounces letter-by-letter rather
+    # than mangling them as syllables.
+    (_re.compile(r"\bLLMs\b"), "L L Ms"),
+    (_re.compile(r"\bLLM\b"), "L L M"),
+    (_re.compile(r"\bvLLM\b"), "v L L M"),
+    (_re.compile(r"\bGPUs\b"), "G P Us"),
+    (_re.compile(r"\bGPU\b"), "G P U"),
+    (_re.compile(r"\bTPUs\b"), "T P Us"),
+    (_re.compile(r"\bTPU\b"), "T P U"),
+    (_re.compile(r"\bHBM\b"), "H B M"),
+    (_re.compile(r"\bSRAM\b"), "S RAM"),
+    (_re.compile(r"\bDRAM\b"), "D RAM"),
+    (_re.compile(r"\bKV cache\b", _re.IGNORECASE), "K V cache"),
+    (_re.compile(r"\bCUDA\b"), "Cooda"),
+    (_re.compile(r"\bMoE\b"), "M o E"),
+    (_re.compile(r"\bRoPE\b"), "Rope"),
+    (_re.compile(r"\bMLP\b"), "M L P"),
+    (_re.compile(r"\bRLHF\b"), "R L H F"),
+    (_re.compile(r"\bSGD\b"), "S G D"),
+]
+
+
+def _pronounce_for_tts(text: str) -> str:
+    """Apply pronunciation fixes for technical terms TTS engines mangle.
+
+    The original text is preserved on disk in the script JSON, transcript
+    .txt, and SRT subtitles — we only rewrite at the TTS boundary so the
+    listener hears the right thing while a reader sees the right thing.
+    """
+    if not text:
+        return text
+    out = text
+    for pat, repl in _PRONUNCIATION_FIXES:
+        out = pat.sub(repl, out)
+    return out
+
+
 def tts_segment(text, voice_id, output_path, config=None):
     """Generate speech using configured TTS backend with fallback chain.
 
@@ -40,6 +92,11 @@ def tts_segment(text, voice_id, output_path, config=None):
     global _tts_config
     if config is not None:
         _tts_config = config
+
+    # Apply pronunciation fixes for arXiv, LLM, GPU, etc. before the
+    # text hits any TTS engine. Transcript files written separately
+    # keep the original spelling.
+    text = _pronounce_for_tts(text)
 
     backend = os.environ.get("PODCAST_TTS_BACKEND", "auto")
     if backend == "auto" and _tts_config:
