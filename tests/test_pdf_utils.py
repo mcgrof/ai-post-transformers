@@ -134,3 +134,81 @@ def test_generate_podcast_from_urls_reports_extract_failures_cleanly(
     assert "Failed to extract text" in err
     assert "URL did not return a PDF" in err
     assert "Traceback" not in err
+
+
+def test_extract_text_falls_back_to_ocr_when_pypdf_returns_empty(monkeypatch, tmp_path):
+    """Older scanned PDFs (e.g. pre-2000 IEEE preprints) yield nothing
+    via pypdf because pages are images. extract_text() must invoke
+    the pdftoppm + tesseract OCR fallback for these cases. Without
+    this, image-based PDF submissions fail with "No text could be
+    extracted".
+    """
+    import subprocess
+    from pdf_utils import extract_text
+
+    # Stub pypdf to return zero text per page
+    class _Page:
+        def extract_text(self):
+            return ""
+
+    class _Reader:
+        pages = [_Page(), _Page()]
+
+    monkeypatch.setattr("pdf_utils.PdfReader", lambda p: _Reader())
+    monkeypatch.setattr("pdf_utils.shutil.which",
+                        lambda x: f"/usr/bin/{x}")
+
+    captured_cmds = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        # First call is pdftoppm — write fake page PNGs
+        if cmd[0] == "pdftoppm":
+            prefix = cmd[-1]
+            Path(prefix + "-1.png").write_bytes(b"fake-png")
+            Path(prefix + "-2.png").write_bytes(b"fake-png")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+        # Subsequent calls are tesseract — return OCR text
+        if cmd[0] == "tesseract":
+            page_num = "1" if "-1" in cmd[1] else "2"
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                f"OCR text from page {page_num}\n",
+                ""
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr("pdf_utils.subprocess.run", fake_run)
+
+    # Provide a real path so tempfile.mkdtemp succeeds
+    fake_pdf = tmp_path / "scan.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4")
+
+    text = extract_text(fake_pdf)
+
+    assert "OCR text from page 1" in text
+    assert "OCR text from page 2" in text
+    # First call must be pdftoppm; subsequent calls tesseract
+    assert captured_cmds[0][0] == "pdftoppm"
+    assert any(c[0] == "tesseract" for c in captured_cmds[1:])
+
+
+def test_extract_text_returns_empty_when_ocr_tools_missing(monkeypatch, tmp_path):
+    """If pdftoppm or tesseract aren't on PATH, fall through cleanly
+    so the caller sees an empty string instead of a crash."""
+    from pdf_utils import extract_text
+
+    class _Page:
+        def extract_text(self): return ""
+
+    class _Reader:
+        pages = [_Page()]
+
+    monkeypatch.setattr("pdf_utils.PdfReader", lambda p: _Reader())
+    monkeypatch.setattr("pdf_utils.shutil.which", lambda x: None)
+
+    fake_pdf = tmp_path / "scan.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4")
+
+    text = extract_text(fake_pdf)
+    assert text == ""

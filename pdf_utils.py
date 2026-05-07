@@ -1,6 +1,8 @@
 """PDF download and text extraction utilities."""
 
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -109,7 +111,13 @@ def download_pdf(url, timeout=60):
 
 
 def extract_text(pdf_path):
-    """Extract text from a PDF file using pypdf.
+    """Extract text from a PDF file using pypdf, with OCR fallback.
+
+    Older scanned papers (e.g. pre-2000 IEEE / academic preprints)
+    are image-based — pypdf returns an empty string. When that
+    happens we fall back to rasterizing each page and running
+    tesseract OCR. The fallback only kicks in when pypdf can't
+    extract anything meaningful, so the fast path stays fast.
 
     Args:
         pdf_path: Path to the PDF file.
@@ -125,13 +133,99 @@ def extract_text(pdf_path):
             pages_text.append(text)
 
     full_text = "\n\n".join(pages_text)
-    if not full_text.strip():
-        print(f"[PDF] Warning: No text extracted from {pdf_path} "
-              f"(may be image-based)", file=sys.stderr)
-    else:
-        print(f"[PDF] Extracted {len(full_text)} chars from {len(reader.pages)} pages",
+    if full_text.strip():
+        print(
+            f"[PDF] Extracted {len(full_text)} chars from "
+            f"{len(reader.pages)} pages", file=sys.stderr,
+        )
+        return full_text
+
+    print(
+        f"[PDF] No text via pypdf ({len(reader.pages)} pages) — "
+        f"trying OCR fallback (image-based PDF)", file=sys.stderr,
+    )
+    ocr_text = _extract_via_ocr(pdf_path, page_count=len(reader.pages))
+    if ocr_text.strip():
+        print(
+            f"[PDF] OCR extracted {len(ocr_text)} chars", file=sys.stderr,
+        )
+        return ocr_text
+
+    print(
+        f"[PDF] Warning: OCR also returned no text for {pdf_path}",
+        file=sys.stderr,
+    )
+    return ""
+
+
+def _extract_via_ocr(pdf_path, page_count=None):
+    """Rasterize each page of an image-based PDF and run tesseract.
+
+    Requires pdftoppm (poppler-utils) and tesseract on $PATH. Both
+    are packaged on the worker host.  Best-effort: if either binary
+    is missing or fails, returns "" so the caller can surface a
+    clean error.
+
+    Page renders go to a per-PDF tempdir that is unconditionally
+    removed on exit so we don't leak hundreds of MB into /tmp.
+    """
+    if not shutil.which("pdftoppm"):
+        print("[PDF] OCR fallback unavailable: pdftoppm not on PATH",
               file=sys.stderr)
-    return full_text
+        return ""
+    if not shutil.which("tesseract"):
+        print("[PDF] OCR fallback unavailable: tesseract not on PATH",
+              file=sys.stderr)
+        return ""
+
+    workdir = Path(tempfile.mkdtemp(prefix="pdf_ocr_"))
+    try:
+        # 200 DPI is the typical tesseract sweet spot — readable but
+        # not so huge that runtime explodes for long papers.
+        prefix = str(workdir / "page")
+        try:
+            subprocess.run(
+                ["pdftoppm", "-r", "200", "-png", str(pdf_path), prefix],
+                check=True, capture_output=True, timeout=300,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"[PDF] pdftoppm failed: {exc.stderr[:200]!r}",
+                  file=sys.stderr)
+            return ""
+        except subprocess.TimeoutExpired:
+            print("[PDF] pdftoppm timed out", file=sys.stderr)
+            return ""
+
+        page_pngs = sorted(workdir.glob("page*.png"))
+        if not page_pngs:
+            print("[PDF] pdftoppm produced no pages", file=sys.stderr)
+            return ""
+
+        page_texts = []
+        for png in page_pngs:
+            try:
+                proc = subprocess.run(
+                    ["tesseract", str(png), "-", "-l", "eng"],
+                    check=True, capture_output=True, text=True,
+                    timeout=120,
+                )
+                if proc.stdout.strip():
+                    page_texts.append(proc.stdout)
+            except subprocess.CalledProcessError as exc:
+                print(
+                    f"[PDF] tesseract failed for {png.name}: "
+                    f"{exc.stderr[:200]!r}", file=sys.stderr,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"[PDF] tesseract timed out for {png.name}",
+                      file=sys.stderr)
+
+        return "\n\n".join(page_texts)
+    finally:
+        try:
+            shutil.rmtree(workdir, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def download_and_extract(url):
