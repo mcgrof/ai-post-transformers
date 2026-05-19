@@ -37,8 +37,23 @@ def _truncate_sentence(text, max_len):
 
 
 def _slug_from_title(title):
-    """Create a URL-friendly slug from an episode title."""
-    slug = title.lower().strip()
+    """Create a URL-friendly slug from an episode title.
+
+    Decodes HTML entities first so that a title fed in as
+    "Findings &amp; Status" — which would otherwise survive the
+    [^a-z0-9\\s-] strip as "findings amp status" and produce a
+    spurious "amp" word in the slug — collapses to "findings status"
+    as if the title had contained a literal "&". Also handles
+    accidentally double-encoded titles like "&amp;amp;" by
+    iterating html.unescape until a fixed point.
+    """
+    decoded = title
+    for _ in range(4):
+        again = html.unescape(decoded)
+        if again == decoded:
+            break
+        decoded = again
+    slug = decoded.lower().strip()
     slug = re.sub(r'[^a-z0-9\s-]', '', slug)
     slug = re.sub(r'[\s-]+', '-', slug)
     slug = slug.strip('-')

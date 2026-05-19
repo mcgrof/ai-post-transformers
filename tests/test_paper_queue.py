@@ -223,3 +223,42 @@ def test_generate_queue_html_v2_emits_valid_js_string_escapes(tmp_path):
     # Find the abstract's surrounding context and verify only the
     # doubled form is present.
     assert '3\\%' not in rendered.replace('3\\\\%', 'OK')
+
+
+# Regression for the episode-page slug bug where titles entered the
+# slugifier with HTML entities still encoded ("&amp;") — the regex
+# strip kept "amp" as a word, producing URLs like
+# /episodes/long-context-dichotomy-of-findings-amp-status-of-research/
+# that don't match the canonical anchor-feed slug. The user's
+# complaint that subject + URLs were "fucked up" came from these
+# stale pages on R2.
+
+def test_slug_from_title_decodes_html_entities():
+    """The legacy episode-page slug helper in rss._slug_from_title
+    must decode HTML entities before stripping non-slug characters,
+    so titles like 'Findings &amp; Status' don't leak 'amp' into
+    the URL as a literal word.
+    """
+    from rss import _slug_from_title
+
+    # Plain (no entities)
+    assert _slug_from_title(
+        "Long context: Dichotomy of Findings & Status of Research"
+    ) == "long-context-dichotomy-of-findings-status-of-research"
+
+    # Single-encoded entity — the production case that produced the
+    # stale R2 URLs.
+    assert _slug_from_title(
+        "Long context: Dichotomy of Findings &amp; Status of Research"
+    ) == "long-context-dichotomy-of-findings-status-of-research"
+
+    # Accidentally double-encoded entity should also resolve via
+    # the iterated unescape, NOT leave a stray "amp" word.
+    assert _slug_from_title(
+        "Findings &amp;amp; Status"
+    ) == "findings-status"
+
+    # Common HTML entities in legacy titles must not bleed words
+    # into the slug.
+    assert _slug_from_title('What &quot;BERT&quot; said') == "what-bert-said"
+    assert _slug_from_title("A &mdash; B") == "a-b"
