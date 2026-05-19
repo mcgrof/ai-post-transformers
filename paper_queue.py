@@ -1507,9 +1507,16 @@ def generate_queue_html_v2(sections, config):
     }
     queue_json = json.dumps(slim_sections, ensure_ascii=False)
 
+    # NB: pass replacement as a lambda. re.subn treats backslashes in
+    # a string replacement as backreferences (\1, \2, ...) and silently
+    # halves runs of literal backslashes — which mangles JSON-escaped
+    # LaTeX like "\\%" or "\\textbf" down to "\%" / "\textbf", producing
+    # invalid JS string escapes that abort the <script> block and leave
+    # the page rendering empty.
+    replacement = f"const QUEUE = {queue_json};\n\nconst CATEGORY_META ="
     page, n = re.subn(
         r"const QUEUE = .*?;\n\nconst CATEGORY_META =",
-        f"const QUEUE = {queue_json};\n\nconst CATEGORY_META =",
+        lambda _m: replacement,
         page,
         count=1,
         flags=re.S,
