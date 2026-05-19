@@ -1,4 +1,4 @@
-"""PDF download and text extraction utilities."""
+"""PDF (and HTML) download and text extraction utilities."""
 
 import re
 import shutil
@@ -8,9 +8,11 @@ import tempfile
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 _TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".text"}
+_HTML_BLOCK_TAGS = ("h1", "h2", "h3", "h4", "p", "li", "blockquote", "pre")
 
 
 _ARXIV_ABS_RE = re.compile(
@@ -228,13 +230,68 @@ def _extract_via_ocr(pdf_path, page_count=None):
             pass
 
 
-def download_and_extract(url):
-    """Download a PDF from a URL (or read a local path) and extract its text.
+def _extract_html_main_text(html_bytes, *, source_url=""):
+    """Pull the main article text out of an HTML page using bs4.
 
-    Local `.txt` / `.md` files are treated as already-extracted source text.
+    Drops script/style/nav/header/footer/aside/noscript/iframe/form,
+    then prefers <article>, <main>, or <body> as the content root.
+    Concatenates heading and block-level text only, so we skip
+    navigation links and sidebar boilerplate.
+    """
+    soup = BeautifulSoup(html_bytes, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer",
+                     "aside", "noscript", "iframe", "form"]):
+        tag.decompose()
+    root = soup.find("article") or soup.find("main") or soup.body or soup
+    blocks = []
+    title = soup.find("title")
+    if title and title.get_text(strip=True):
+        blocks.append(title.get_text(strip=True))
+    for el in root.find_all(_HTML_BLOCK_TAGS):
+        text = el.get_text(" ", strip=True)
+        if text:
+            blocks.append(text)
+    extracted = "\n\n".join(blocks)
+    print(
+        f"[HTML] Extracted {len(extracted)} chars from {source_url}",
+        file=sys.stderr,
+    )
+    return extracted
+
+
+def download_html_text(url, timeout=60):
+    """Download an HTML page and return its main article text.
+
+    Used as a fallback when a submission URL points at an article
+    landing page (e.g. a research blog post) rather than a PDF.
+    """
+    resolved_url = _normalize_pdf_url(url)
+    print(f"[HTML] Downloading {resolved_url}...", file=sys.stderr)
+    headers = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,*/*",
+    }
+    resp = requests.get(resolved_url, timeout=timeout, headers=headers)
+    resp.raise_for_status()
+    content_type = (resp.headers.get("content-type") or "").lower()
+    if "html" not in content_type and "xml" not in content_type:
+        raise ValueError(
+            f"URL did not return HTML: {resolved_url} "
+            f"(content-type: {content_type})"
+        )
+    return _extract_html_main_text(resp.content, source_url=resolved_url)
+
+
+def download_and_extract(url):
+    """Download a PDF (or HTML page) and extract its text.
+
+    Local `.txt` / `.md` files are treated as already-extracted source
+    text. Remote URLs are tried as PDFs first; if the server returns
+    HTML instead, the main article text is extracted via bs4.
 
     Args:
-        url: URL pointing to a PDF file, or a local filesystem path.
+        url: URL pointing to a PDF or HTML article, or a local
+            filesystem path.
 
     Returns:
         Extracted text as a string.
@@ -249,7 +306,17 @@ def download_and_extract(url):
             )
             return text
         return extract_text(local)
-    pdf_path = download_pdf(url)
+    try:
+        pdf_path = download_pdf(url)
+    except ValueError as exc:
+        if "did not return a PDF" not in str(exc):
+            raise
+        text = download_html_text(url)
+        if not text.strip():
+            raise ValueError(
+                f"URL returned HTML but no extractable article text: {url}"
+            ) from exc
+        return text
     try:
         return extract_text(pdf_path)
     finally:

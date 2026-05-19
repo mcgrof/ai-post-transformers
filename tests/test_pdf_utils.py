@@ -10,6 +10,7 @@ class DummyResponse:
     def __init__(self, url, body, content_type="application/pdf"):
         self.url = url
         self._body = body
+        self.content = body
         self.headers = {"content-type": content_type}
 
     def raise_for_status(self):
@@ -113,6 +114,65 @@ def test_download_and_extract_reads_local_text_sources(tmp_path):
     text = download_and_extract(str(src))
 
     assert text == "Recovered fallback source text.\n"
+
+
+def test_download_and_extract_falls_back_to_html_when_url_is_not_pdf(
+    monkeypatch,
+):
+    """Some submissions point at HTML article pages (e.g. research
+    blog posts) rather than PDFs. download_and_extract must catch the
+    "did not return a PDF" failure, refetch the URL as HTML, and
+    return the main article text.
+    """
+    html_body = (
+        b"<html><head><title>Two scenarios for global AI leadership</title>"
+        b"</head><body>"
+        b"<nav>skip this</nav>"
+        b"<article>"
+        b"<h1>Two scenarios for global AI leadership</h1>"
+        b"<p>First paragraph of the article.</p>"
+        b"<script>tracker();</script>"
+        b"<p>Second paragraph with detail.</p>"
+        b"</article>"
+        b"<footer>skip this footer</footer>"
+        b"</body></html>"
+    )
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append({"url": url, "headers": kwargs.get("headers") or {}})
+        return DummyResponse(url, html_body, "text/html; charset=utf-8")
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    text = download_and_extract("https://www.example.com/research/post")
+
+    # First call is download_pdf (raises), second is download_html_text
+    assert len(calls) == 2
+    assert "Mozilla" in calls[1]["headers"].get("User-Agent", "")
+    assert "Two scenarios for global AI leadership" in text
+    assert "First paragraph of the article." in text
+    assert "Second paragraph with detail." in text
+    # nav/script/footer must be stripped
+    assert "skip this" not in text
+    assert "tracker" not in text
+
+
+def test_download_and_extract_raises_on_html_with_no_extractable_text(
+    monkeypatch,
+):
+    """An HTML response that contains no <article>/<main>/block content
+    should produce a clear error rather than an empty silent success."""
+    html_body = b"<html><body><script>only()</script></body></html>"
+
+    def fake_get(url, **kwargs):
+        return DummyResponse(url, html_body, "text/html; charset=utf-8")
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    with pytest.raises(ValueError, match="no extractable article text"):
+        download_and_extract("https://www.example.com/empty")
 
 
 def test_generate_podcast_from_urls_reports_extract_failures_cleanly(
