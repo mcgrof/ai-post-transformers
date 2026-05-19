@@ -25,8 +25,9 @@ from rss import generate_feed
 def _make_episode_stem(title, date_str, urls=None):
     """Build unique filename stem: {date}-{slug}-{hash6}."""
     slug = unicodedata.normalize("NFKD", title)
-    slug = re.sub(r"[^\w\s-]", "", slug).strip().lower()
-    slug = re.sub(r"[-\s]+", "-", slug)[:40].rstrip("-")
+    slug = slug.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^\w\s-]", "", slug, flags=re.ASCII).strip().lower()
+    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
     slug = re.sub(r"^episode-", "", slug)
     hash_input = f"{title}|{date_str}|{','.join(sorted(urls or []))}"
     hash6 = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
@@ -85,8 +86,9 @@ def _save_generation_inputs(title, date_str, urls, goal=None,
 
     # Build slug (same logic as _make_episode_stem but shorter for dir name)
     slug = unicodedata.normalize("NFKD", title)
-    slug = re.sub(r"[^\w\s-]", "", slug).strip().lower()
-    slug = re.sub(r"[-\s]+", "-", slug)[:30].rstrip("-")
+    slug = slug.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^\w\s-]", "", slug, flags=re.ASCII).strip().lower()
+    slug = re.sub(r"[-\s]+", "-", slug)[:30].strip("-")
     slug = re.sub(r"^episode-", "", slug)
 
     hash_input = f"{title}|{date_str}|{','.join(sorted(urls or []))}"
