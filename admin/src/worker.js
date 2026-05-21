@@ -3597,9 +3597,13 @@ function adminsPage(admins, currentIdentity, cfAccessOk) {
     </tr>`;
   }).join('');
 
+  // Default-check the capabilities a typical co-admin should have.
+  // `admin` and `queue_refresh` stay opt-in to avoid accidental
+  // privilege escalation.
+  const defaultChecked = new Set(['manage_admins', 'submit', 'publish']);
   const capabilityCheckboxes = CAPABILITIES.map(c => `
     <label style="display:inline-flex;align-items:center;gap:4px;margin:4px 12px 4px 0;font-size:0.85rem">
-      <input type="checkbox" name="cap" value="${escapeHtml(c)}"${c === 'manage_admins' || c === 'publish' ? ' checked' : ''}> ${escapeHtml(c)}
+      <input type="checkbox" name="cap" value="${escapeHtml(c)}"${defaultChecked.has(c) ? ' checked' : ''}> ${escapeHtml(c)}
     </label>`).join('');
 
   const cfBanner = cfAccessOk

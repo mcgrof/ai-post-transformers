@@ -33,6 +33,28 @@ function mockBucket(initial = new Map()) {
   };
 }
 
+// ---------------------------------------------------------------- capabilities
+
+test('CAPABILITIES vocabulary pins the known capability set', () => {
+  // Adding a capability should be a deliberate code change with a
+  // matching test update — never silent. This guards against
+  // accidental renames or drops.
+  assert.deepEqual(
+    [...CAPABILITIES].sort(),
+    ['admin', 'manage_admins', 'publish', 'queue_refresh', 'submit'].sort()
+  );
+});
+
+test('validateAdminInput accepts the submit capability', () => {
+  const out = validateAdminInput('co@host.com', ['submit']);
+  assert.deepEqual(out.capabilities, ['submit']);
+});
+
+test('admin capability implies submit', () => {
+  const admins = [{ email: 'boss@x.com', capabilities: ['admin'] }];
+  assert.ok(hasCapability({ email: 'boss@x.com' }, 'submit', admins));
+});
+
 // ---------------------------------------------------------------- allowlist
 
 test('loadAdmins returns empty doc when admins.json missing', async () => {

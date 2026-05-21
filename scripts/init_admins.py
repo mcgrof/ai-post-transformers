@@ -28,7 +28,9 @@ import boto3
 
 ADMIN_BUCKET = "podcast-admin"
 ADMINS_KEY = "admins.json"
-CAPABILITIES = ("admin", "manage_admins", "publish", "queue_refresh")
+CAPABILITIES = (
+    "admin", "manage_admins", "submit", "publish", "queue_refresh",
+)
 
 
 def _r2_client():

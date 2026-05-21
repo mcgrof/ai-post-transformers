@@ -34,9 +34,17 @@ const ADMINS_KEY = 'admins.json';
 
 // Capabilities the system understands. `admin` implies all the
 // others; `manage_admins` is required to use this module's CRUD
-// endpoints; the others are reserved for future capability gates.
+// endpoints; the others gate matching feature areas:
+//   submit          — can submit new podcast generations via the
+//                     /submit page (POST /api/submit + helpers)
+//   publish         — can approve a draft for publish
+//   queue_refresh   — can trigger or own the queue-refresh lane
+//
+// Capability gating at the respective route handlers is a separate
+// concern; this list is the canonical vocabulary the UI + storage
+// agree on.
 export const CAPABILITIES = Object.freeze(
-  ['admin', 'manage_admins', 'publish', 'queue_refresh']
+  ['admin', 'manage_admins', 'submit', 'publish', 'queue_refresh']
 );
 
 /**
