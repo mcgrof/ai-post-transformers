@@ -10,6 +10,19 @@ import {
   generateEnvFile,
   generateInstallCommands,
 } from './systemd.js';
+import {
+  CAPABILITIES,
+  loadAdmins,
+  saveAdmins,
+  capabilitiesFor,
+  hasCapability,
+  validateAdminInput,
+  upsertAdmin,
+  removeAdmin,
+  cfAccessConfigured,
+  addToCFAccess,
+  removeFromCFAccess,
+} from './admins.js';
 
 const GITHUB_REPO = 'mcgrof/ai-post-transformers';
 const PODCAST_DOMAIN = 'https://podcast.do-not-panic.com';
@@ -1040,6 +1053,7 @@ function baseHTML(title, content, activePage, navContext = {}) {
           <a href="/automation"${activePage === 'automation' ? ' class="active"' : ''}>Automation</a>
           ${navContext.hasPrivateDrafts ? `<a href="/private-drafts"${activePage === 'private-drafts' ? ' class="active"' : ''}>Private Drafts</a>` : ''}
           <a href="/private-podcasts"${activePage === 'private-podcasts' ? ' class="active"' : ''}>Private Podcasts</a>
+          ${navContext.canManageAdmins ? `<a href="/admins"${activePage === 'admins' ? ' class="active"' : ''}>Admins</a>` : ''}
         </nav>
       </div>
     </div>
@@ -1576,12 +1590,13 @@ function draftsPageWithData(data, subsData) {
       const bucketDraft = stemBase ? bucketDraftByStem.get(stemBase) : null;
       const manifestTitle = bucketDraft && bucketDraft.title;
       const manifestDescription = bucketDraft && bucketDraft.description;
+      const _diagBase = `[card-diag stem=${stemBase} bucketDraft=${bucketDraft ? 'found' : 'MISSING'} manifestTitle=${manifestTitle ? 'set' : 'MISSING'} bucketByStemSize=${bucketDraftByStem.size} all_drafts=${(data.all_drafts||[]).length} drafts=${(data.drafts||[]).length} err=${data.error ? data.error.slice(0,80) : 'none'}]`;
       return {
         key: s.key || s.draft_stem,
         title: manifestTitle || displayTitle(s),
         date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
         duration: 'Unknown',
-        description: manifestDescription || buildSubmissionDraftDescription(s),
+        description: (manifestDescription || buildSubmissionDraftDescription(s)) + '\n\n' + _diagBase,
         audioUrl: s.draft_stem
           ? `${PODCAST_DOMAIN}/${s.draft_stem}.mp3`
           : null,
@@ -1650,7 +1665,9 @@ function draftsPageWithData(data, subsData) {
     </div>
   `}).join('');
 
-  return `<div class="page-header"><h1>Draft Review</h1><p>${allDrafts.length} episodes pending review</p></div>${cards}${renderRejectModal()}`;
+  const _gd = data._diag || {};
+  const _pageDiag = `[page-diag list=${_gd.list_objects_count||0} mp3=${_gd.mp3_count||0} manifest=${_gd.manifest_drafts_count||0} sidecar=${_gd.sidecar_reads||0} pub=${_gd.published_basenames_count||0} active=${(data.drafts||[]).length} all=${(data.all_drafts||[]).length} err=${data.error || 'none'}]`;
+  return `<div class="page-header"><h1>Draft Review</h1><p>${allDrafts.length} episodes pending review</p><p style="font-size:0.65rem;color:#888;font-family:monospace">${escapeHtml(_pageDiag)}</p></div>${cards}${renderRejectModal()}`;
 }
 
 function draftsPage() {
@@ -3556,6 +3573,135 @@ function privatePodcastsPage(episodes) {
   ${cards}`;
 }
 
+function adminsPage(admins, currentIdentity, cfAccessOk) {
+  const rows = admins.map(a => {
+    const caps = (a.capabilities || []).map(c =>
+      `<span style="display:inline-block;padding:2px 6px;margin:1px 2px 1px 0;border-radius:4px;background:var(--bg-tertiary);font-size:0.7rem;border:1px solid var(--border-color)">${escapeHtml(c)}</span>`
+    ).join('');
+    const isSelf = (a.email || '').toLowerCase() === (currentIdentity.email || '').toLowerCase();
+    return `<tr>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border-color);font-family:monospace;font-size:0.85rem">
+        ${escapeHtml(a.email || '')}
+        ${isSelf ? '<span style="color:var(--accent);font-size:0.7rem;margin-left:8px">(you)</span>' : ''}
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border-color)">${caps}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border-color);font-size:0.75rem;color:var(--text-secondary)">
+        ${escapeHtml(a.added_by || '')}<br>
+        <span style="color:var(--text-muted);font-size:0.7rem">${escapeHtml((a.added_at || '').substring(0,19).replace('T',' '))}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border-color);font-size:0.75rem;color:var(--text-secondary)">${escapeHtml(a.notes || '')}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border-color);text-align:right">
+        ${isSelf ? '<span style="color:var(--text-muted);font-size:0.75rem">protected</span>' :
+          `<button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;color:var(--danger)" onclick="removeAdminUI('${escapeHtml(a.email)}')">Remove</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const capabilityCheckboxes = CAPABILITIES.map(c => `
+    <label style="display:inline-flex;align-items:center;gap:4px;margin:4px 12px 4px 0;font-size:0.85rem">
+      <input type="checkbox" name="cap" value="${escapeHtml(c)}"${c === 'manage_admins' || c === 'publish' ? ' checked' : ''}> ${escapeHtml(c)}
+    </label>`).join('');
+
+  const cfBanner = cfAccessOk
+    ? `<div style="background:rgba(0,168,84,0.08);border:1px solid rgba(0,168,84,0.3);color:#7ee;padding:10px 14px;border-radius:6px;margin-bottom:1rem;font-size:0.85rem">
+        <strong>Cloudflare Access integration: active.</strong>
+        Adding an admin here will also add their email to the CF Access
+        policy so they can log in.
+      </div>`
+    : `<div style="background:rgba(229,9,20,0.08);border:1px solid rgba(229,9,20,0.3);color:#fdb;padding:10px 14px;border-radius:6px;margin-bottom:1rem;font-size:0.85rem">
+        <strong>Cloudflare Access integration: not configured.</strong>
+        Adding an admin here records their capability set in the worker,
+        but you must <em>also</em> add their email to the CF Access policy
+        in the Cloudflare dashboard for them to be able to log in.
+        Configure <code>CF_API_TOKEN</code>, <code>CF_ACCOUNT_ID</code>,
+        <code>CF_ACCESS_APP_UUID</code>, <code>CF_ACCESS_POLICY_UUID</code>
+        on the worker to enable end-to-end management.
+      </div>`;
+
+  return `<div class="page-header"><h1>Admins</h1>
+    <p>Who can log in to <code>admin.podcast.do-not-panic.com</code>
+    and what they can do.</p></div>
+
+  ${cfBanner}
+
+  <div class="card" style="margin-bottom:1.5rem;padding:1rem">
+    <h3 style="margin:0 0 0.75rem;font-size:1rem">Add admin</h3>
+    <form id="add-admin-form" onsubmit="addAdminUI(event)">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          <label style="display:block;font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">Gmail (or any email)</label>
+          <input id="add-admin-email" type="email" required placeholder="user@gmail.com"
+            style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-family:monospace">
+        </div>
+        <div style="flex:2;min-width:280px">
+          <label style="display:block;font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">Capabilities</label>
+          <div>${capabilityCheckboxes}</div>
+        </div>
+      </div>
+      <div style="margin-top:0.75rem">
+        <label style="display:block;font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">Notes (optional)</label>
+        <input id="add-admin-notes" type="text"
+          placeholder="e.g. co-host, intern, contractor for X project"
+          style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:0.85rem">
+      </div>
+      <div style="margin-top:0.75rem;display:flex;align-items:center;gap:8px">
+        <button type="submit" class="btn btn-primary">Add admin</button>
+        <span id="add-admin-status" style="font-size:0.8rem;color:var(--text-secondary)"></span>
+      </div>
+    </form>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr style="text-align:left;font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase">
+      <th style="padding:8px 10px;border-bottom:1px solid var(--border-color)">Email</th>
+      <th style="padding:8px 10px;border-bottom:1px solid var(--border-color)">Capabilities</th>
+      <th style="padding:8px 10px;border-bottom:1px solid var(--border-color)">Added</th>
+      <th style="padding:8px 10px;border-bottom:1px solid var(--border-color)">Notes</th>
+      <th style="padding:8px 10px;border-bottom:1px solid var(--border-color);text-align:right">Action</th>
+    </tr></thead>
+    <tbody>${rows || '<tr><td colspan="5" style="padding:14px;color:var(--text-secondary)">No admins yet — first authenticated user is treated as full admin.</td></tr>'}</tbody>
+  </table>
+
+  <script>
+  async function addAdminUI(ev) {
+    ev.preventDefault();
+    const email = document.getElementById('add-admin-email').value.trim();
+    const caps = [...document.querySelectorAll('input[name="cap"]:checked')]
+      .map(el => el.value);
+    const notes = document.getElementById('add-admin-notes').value.trim();
+    const status = document.getElementById('add-admin-status');
+    status.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, capabilities: caps, notes }),
+      });
+      const j = await r.json();
+      if (j.error) { status.textContent = 'Error: ' + j.error; return; }
+      const cf = j.cf_access || {};
+      if (cf.reason === 'not_configured') {
+        status.textContent = 'Added to worker allowlist. Remember to add to CF Access manually.';
+      } else if (cf.error) {
+        status.textContent = 'Added to allowlist, but CF Access update failed: ' + cf.error;
+      } else if (cf.already) {
+        status.textContent = 'Added to allowlist (already in CF Access).';
+      } else {
+        status.textContent = 'Added.';
+      }
+      setTimeout(() => location.reload(), 1200);
+    } catch (e) { status.textContent = 'Error: ' + e.message; }
+  }
+  async function removeAdminUI(email) {
+    if (!confirm('Remove ' + email + ' from admins?')) return;
+    const r = await fetch('/api/admins?email=' + encodeURIComponent(email), { method: 'DELETE' });
+    const j = await r.json();
+    if (j.error) { alert('Error: ' + j.error); return; }
+    location.reload();
+  }
+  </script>`;
+}
+
 // ============================================================================
 // Authenticated private media route
 // Streams private podcast assets from ADMIN_BUCKET with owner-scoping.
@@ -3694,7 +3840,14 @@ export default {
       let html;
       const adminIdentity = getAdminIdentity(request);
       const adminHasPrivateDrafts = await hasPrivateDrafts(env, adminIdentity.id);
-      const navCtx = { hasPrivateDrafts: adminHasPrivateDrafts };
+      const adminsDoc = await loadAdmins(env);
+      const canManageAdmins = hasCapability(
+        adminIdentity, 'manage_admins', adminsDoc.admins
+      );
+      const navCtx = {
+        hasPrivateDrafts: adminHasPrivateDrafts,
+        canManageAdmins,
+      };
 
       // Handle dynamic conference routes
       const confMatch = path.match(/^\/conference\/([a-z0-9]+)$/);
@@ -3744,6 +3897,21 @@ export default {
         case '/private-podcasts': {
           const ppData = await listPrivatePodcasts(env, adminIdentity.id, adminIdentity.email);
           html = baseHTML('Private Podcasts', privatePodcastsPage(ppData.episodes || []), 'private-podcasts', navCtx);
+          break;
+        }
+        case '/admins': {
+          if (!canManageAdmins) {
+            html = baseHTML('Forbidden',
+              `<div class="empty-state"><div class="empty-state-icon">🔒</div>
+                <h3>Forbidden</h3>
+                <p>You need the <code>manage_admins</code> capability to view
+                this page. Ask an existing admin to grant it.</p></div>`,
+              '', navCtx);
+            break;
+          }
+          html = baseHTML('Admins',
+            adminsPage(adminsDoc.admins || [], adminIdentity, cfAccessConfigured(env)),
+            'admins', navCtx);
           break;
         }
         default:
@@ -3862,6 +4030,66 @@ async function handleAPI(path, request, env, ctx) {
       return await getRevisions(env, episodeKey);
     }
 
+    case '/api/admins': {
+      // Manage the in-worker capability allowlist + (optionally) the
+      // Cloudflare Access policy. All mutations require
+      // manage_admins; the GET is also gated so listing membership
+      // doesn't leak to anyone who happens to be past CF Access.
+      const adminIdent = getAdminIdentity(request);
+      const doc = await loadAdmins(env);
+      if (!hasCapability(adminIdent, 'manage_admins', doc.admins)) {
+        return { error: 'Forbidden: manage_admins capability required' };
+      }
+      const url = new URL(request.url);
+      if (request.method === 'GET') {
+        return {
+          admins: doc.admins || [],
+          capabilities: CAPABILITIES,
+          cf_access_configured: cfAccessConfigured(env),
+        };
+      }
+      if (request.method === 'POST') {
+        let body;
+        try { body = await request.json(); }
+        catch (_) { return { error: 'Invalid JSON' }; }
+        let normalized;
+        try {
+          normalized = validateAdminInput(body.email, body.capabilities);
+        } catch (e) {
+          return { error: e.message };
+        }
+        const updated = upsertAdmin(
+          doc, normalized, adminIdent.email, body.notes || ''
+        );
+        await saveAdmins(env, updated);
+        const cfResult = await addToCFAccess(env, normalized.email)
+          .catch(e => ({ ok: false, error: e.message }));
+        return {
+          ok: true,
+          admin: updated.admins.find(
+            a => a.email === normalized.email
+          ),
+          cf_access: cfResult,
+        };
+      }
+      if (request.method === 'DELETE') {
+        const email = url.searchParams.get('email')
+          || (await request.json().catch(() => ({}))).email;
+        if (!email) return { error: 'Missing email' };
+        // Refuse to remove yourself — recovery is annoying.
+        if (email.toLowerCase() === (adminIdent.email || '').toLowerCase()) {
+          return { error: 'Cannot remove your own admin entry' };
+        }
+        const { doc: updated, removed } = removeAdmin(doc, email);
+        if (!removed) return { error: 'Admin not found', email };
+        await saveAdmins(env, updated);
+        const cfResult = await removeFromCFAccess(env, email)
+          .catch(e => ({ ok: false, error: e.message }));
+        return { ok: true, removed_email: email, cf_access: cfResult };
+      }
+      return { error: 'Method not allowed' };
+    }
+
     default:
       return { error: 'Not found' };
   }
@@ -3965,7 +4193,24 @@ async function getDrafts(env) {
     // jobs that alone blows the budget. Cap the publish-jobs read
     // to a small recent window since old completed jobs aren't
     // needed for the drafts page filter.
-    const list = await env.PODCAST_BUCKET.list({ prefix: 'drafts/' });
+    //
+    // Paginate drafts/ list — R2 returns up to 1000 per call, and
+    // drafts/ has more total objects (mp3 + companion files at ~5x
+    // the MP3 count). Without pagination the listing is truncated
+    // and recent drafts get cut off, surfacing as orphans in the
+    // submission-card fallback path.
+    let list = { objects: [] };
+    {
+      let cursor = undefined;
+      for (let i = 0; i < 5; i++) {
+        const opts = cursor ? { prefix: 'drafts/', cursor } : { prefix: 'drafts/' };
+        const page = await env.PODCAST_BUCKET.list(opts);
+        list.objects = list.objects.concat(page.objects || []);
+        if (!page.truncated) break;
+        if (!page.cursor) break;
+        cursor = page.cursor;
+      }
+    }
     let publishJobs = [];
     let publishedBasenames = new Set();
     try {
@@ -4101,6 +4346,13 @@ async function getDrafts(env) {
       drafts: activeDrafts,
       all_drafts: drafts,
       published_basenames: Array.from(publishedBasenames),
+      _diag: {
+        list_objects_count: (list.objects || []).length,
+        mp3_count: mp3s.length,
+        manifest_drafts_count: (manifest.drafts || []).length,
+        sidecar_reads: needsSidecar.length,
+        published_basenames_count: publishedBasenames.size,
+      },
     };
   } catch (error) {
     return { error: error.message, drafts: [] };
