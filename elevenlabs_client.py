@@ -48,10 +48,18 @@ _PRONUNCIATION_FIXES = [
     (_re.compile(r"\bLLMs\b"), "L L Ms"),
     (_re.compile(r"\bLLM\b"), "L L M"),
     (_re.compile(r"\bvLLM\b"), "v L L M"),
-    (_re.compile(r"\bGPUs\b"), "G P Us"),
-    (_re.compile(r"\bGPU\b"), "G P U"),
-    (_re.compile(r"\bTPUs\b"), "T P Us"),
-    (_re.compile(r"\bTPU\b"), "T P U"),
+    # GPU / GPUs: "G P Us" gets read as "gee pee us" (uhs) by some TTS
+    # engines because they treat trailing "Us" as the word "us". Use
+    # the phonetic word "yous" / "you" so the audio is "gee pee
+    # yooz" / "gee pee yoo" regardless of engine. The transcript on
+    # disk keeps the original "GPU" / "GPUs" spelling — this rewrite
+    # only happens at the TTS boundary.
+    (_re.compile(r"\bGPUs\b"), "G P yous"),
+    (_re.compile(r"\bGPU's\b"), "G P yous"),
+    (_re.compile(r"\bGPU\b"), "G P you"),
+    (_re.compile(r"\bTPUs\b"), "T P yous"),
+    (_re.compile(r"\bTPU's\b"), "T P yous"),
+    (_re.compile(r"\bTPU\b"), "T P you"),
     (_re.compile(r"\bHBM\b"), "H B M"),
     (_re.compile(r"\bSRAM\b"), "S RAM"),
     (_re.compile(r"\bDRAM\b"), "D RAM"),
