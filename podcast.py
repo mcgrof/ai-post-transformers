@@ -438,8 +438,25 @@ def _generate_episode_image(config, episode_title, abstract_or_summary,
     image_path = audio_path.with_suffix(".png")
 
     try:
-        generate_episode_image(prompt, str(image_path), model=model,
-                               size=size, quality=quality, config=config)
+        # generate_episode_image returns None on any failure that it
+        # caught and surfaced cleanly (missing OPENAI_API_KEY, billing
+        # cap reached, empty response). It only raises on truly
+        # unexpected exceptions. Propagating the None here is the
+        # whole point: if no PNG was actually written, the DB must
+        # NOT later record image_file pointing at a phantom path that
+        # makes the publish pipeline upload nothing and renders broken
+        # <img> tags on the public front page.
+        result = generate_episode_image(
+            prompt, str(image_path), model=model,
+            size=size, quality=quality, config=config,
+        )
+        if not result or not Path(image_path).exists():
+            print(
+                "[Podcast] Image generation produced no file — "
+                "episode will be saved without a cover image.",
+                file=sys.stderr,
+            )
+            return None
         return str(image_path)
     except Exception as e:
         print(f"[Podcast] Warning: Image generation failed: {e}",

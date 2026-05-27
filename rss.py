@@ -1007,9 +1007,21 @@ def generate_index(config, feed_path=None):
         # Search keywords
         search_terms = title.lower()
 
+        # If image generation failed (e.g. OpenAI billing cap),
+        # thumb_url is empty. Render the CSS placeholder div instead
+        # of an <img src=""> tag, which Chrome/Safari render as a
+        # broken-image icon. Matches the fallback in _render_card.
+        if thumb_url:
+            card_img_html = (
+                f'<img class="card-img" '
+                f'src="{html.escape(thumb_url)}" '
+                f'alt="" loading="lazy">'
+            )
+        else:
+            card_img_html = '<div class="card-img card-img-placeholder"></div>'
         card = f'''
   <a class="card" href="episodes/{slug}/" data-t="{html.escape(search_terms)}" data-desc="{html.escape(desc_plain)}">
-    <img class="card-img" src="{html.escape(thumb_url)}" alt="" loading="lazy">
+    {card_img_html}
     <div class="card-meta"><div class="card-title">{html.escape(title)}</div><div class="card-date">{html.escape(date)}</div></div>
   </a>'''
         cards_html_parts.append(card)
