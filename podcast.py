@@ -18,6 +18,7 @@ from db import (
 from draft_revisions import detect_revision, assign_revision
 from elevenlabs_client import create_podcast, finalize_podcast, save_transcript, generate_srt, cleanup_podcast_tmpdir
 from image_gen import generate_episode_image
+from local_cover import render_title_cover
 from pdf_utils import download_and_extract
 from rss import generate_feed
 
@@ -443,24 +444,43 @@ def _generate_episode_image(config, episode_title, abstract_or_summary,
         # cap reached, empty response). It only raises on truly
         # unexpected exceptions. Propagating the None here is the
         # whole point: if no PNG was actually written, the DB must
-        # NOT later record image_file pointing at a phantom path that
-        # makes the publish pipeline upload nothing and renders broken
-        # <img> tags on the public front page.
+        # NOT later record image_file pointing at a phantom path
+        # — otherwise the publish pipeline uploads nothing and the
+        # front page renders broken <img> tags.
         result = generate_episode_image(
             prompt, str(image_path), model=model,
             size=size, quality=quality, config=config,
         )
-        if not result or not Path(image_path).exists():
-            print(
-                "[Podcast] Image generation produced no file — "
-                "episode will be saved without a cover image.",
-                file=sys.stderr,
-            )
-            return None
-        return str(image_path)
+        if result and Path(image_path).exists():
+            return str(image_path)
     except Exception as e:
-        print(f"[Podcast] Warning: Image generation failed: {e}",
+        print(f"[Podcast] Warning: external image gen failed: {e}",
               file=sys.stderr)
+
+    # External image generation failed (returned None, threw, or
+    # didn't write the file). Fall back to the local PIL renderer
+    # so the episode at least ships with a coherent title-card
+    # cover instead of a blank placeholder div on the front page.
+    try:
+        print(
+            f"[Podcast] Falling back to local title-card cover for "
+            f"{episode_title!r}",
+            file=sys.stderr,
+        )
+        fb = render_title_cover(episode_title, str(image_path))
+        if fb and Path(image_path).exists():
+            return str(image_path)
+        print(
+            "[Podcast] Local cover fallback produced no file — "
+            "episode will be saved without a cover image.",
+            file=sys.stderr,
+        )
+        return None
+    except Exception as fe:
+        print(
+            f"[Podcast] Warning: local cover fallback failed: {fe}",
+            file=sys.stderr,
+        )
         return None
 
 

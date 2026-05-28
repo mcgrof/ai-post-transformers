@@ -27,15 +27,18 @@ if str(ROOT) not in sys.path:
 
 # ---------------------------------------------------------------- podcast.py
 
-def test_generate_episode_image_returns_none_when_inner_returns_none(tmp_path):
+def test_generate_episode_image_falls_back_when_external_returns_none(tmp_path):
     """When image_gen.generate_episode_image returns None (e.g.
-    OpenAI billing cap hit), the caller must propagate the None so
-    callers don't record a phantom image_file path.
+    OpenAI billing cap hit), the caller must NOT record a phantom
+    image_file path — but it MAY fall back to the local PIL
+    renderer to produce a coherent title card. Either way, the
+    returned path must correspond to a real file on disk.
     """
     from podcast import _generate_episode_image
 
     audio_path = tmp_path / "ep.mp3"
     audio_path.write_bytes(b"\x00")
+    image_path = tmp_path / "ep.png"
 
     config = {"image_generation": {"enabled": True, "model": "gpt-image-1"}}
 
@@ -43,20 +46,23 @@ def test_generate_episode_image_returns_none_when_inner_returns_none(tmp_path):
         result = _generate_episode_image(
             config, "Episode Title", "abstract text", str(audio_path),
         )
-    assert result is None, (
-        "if image_gen returned None, _generate_episode_image must "
-        "return None — not the (nonexistent) image_path string"
-    )
+    # New contract: external failure triggers local fallback. The
+    # returned path is the image_path AND that file exists on disk.
+    assert result == str(image_path)
+    assert image_path.exists()
 
 
-def test_generate_episode_image_returns_none_when_file_not_written(tmp_path):
-    """Even if image_gen returned a path-shaped value but didn't
-    actually write the file, the caller must NOT report success.
+def test_generate_episode_image_falls_back_when_external_lies_about_file(tmp_path):
+    """If image_gen returned a path-shaped value but didn't
+    actually write the file, the caller must NOT report success
+    with that phantom path — it must fall through to the local
+    fallback (or return None if that also fails).
     """
     from podcast import _generate_episode_image
 
     audio_path = tmp_path / "ep.mp3"
     audio_path.write_bytes(b"\x00")
+    image_path = tmp_path / "ep.png"
 
     config = {"image_generation": {"enabled": True}}
 
@@ -67,7 +73,11 @@ def test_generate_episode_image_returns_none_when_file_not_written(tmp_path):
         result = _generate_episode_image(
             config, "T", "a", str(audio_path),
         )
-    assert result is None
+    # The local fallback wrote a real PNG at image_path; verify both.
+    assert result == str(image_path)
+    assert image_path.exists()
+    with image_path.open("rb") as fh:
+        assert fh.read(4) == b"\x89PNG"
 
 
 def test_generate_episode_image_returns_path_when_file_written(tmp_path):
@@ -92,6 +102,82 @@ def test_generate_episode_image_returns_path_when_file_written(tmp_path):
         )
     assert result == str(image_path)
     assert image_path.exists()
+
+
+def test_generate_episode_image_falls_back_to_local_renderer(tmp_path):
+    """When OpenAI image gen returns None (e.g. billing cap), the
+    pipeline must fall back to the local PIL title-card renderer
+    so episodes still ship with a cover instead of a blank
+    placeholder.
+    """
+    from podcast import _generate_episode_image
+
+    audio_path = tmp_path / "ep.mp3"
+    audio_path.write_bytes(b"\x00")
+    image_path = tmp_path / "ep.png"
+
+    config = {"image_generation": {"enabled": True}}
+
+    # OpenAI path "fails" (returns None, no file written).
+    with patch("podcast.generate_episode_image", return_value=None):
+        result = _generate_episode_image(
+            config, "Fallback Title", "abstract", str(audio_path),
+        )
+
+    # Pipeline must have rendered the local cover via render_title_cover
+    assert result == str(image_path)
+    assert image_path.exists()
+    # And it must be a real PNG, not a stub.
+    with image_path.open("rb") as fh:
+        assert fh.read(4) == b"\x89PNG"
+    # 1024x1024 is the local-cover default
+    from PIL import Image
+    with Image.open(image_path) as img:
+        assert img.size == (1024, 1024)
+
+
+def test_generate_episode_image_falls_back_when_openai_raises(tmp_path):
+    """Same fallback contract when the external path raises an
+    exception rather than returning None — the local cover should
+    still be produced and image_file should still be set."""
+    from podcast import _generate_episode_image
+
+    audio_path = tmp_path / "ep.mp3"
+    audio_path.write_bytes(b"\x00")
+    image_path = tmp_path / "ep.png"
+
+    config = {"image_generation": {"enabled": True}}
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated openai 500")
+
+    with patch("podcast.generate_episode_image", side_effect=_boom):
+        result = _generate_episode_image(
+            config, "Exception Path Test", "abstract", str(audio_path),
+        )
+
+    assert result == str(image_path)
+    assert image_path.exists()
+
+
+def test_generate_episode_image_returns_none_when_both_paths_fail(tmp_path):
+    """If both external AND local fallback fail (e.g. PIL missing),
+    the function must still return None so the DB doesn't lie
+    about image_file."""
+    from podcast import _generate_episode_image
+
+    audio_path = tmp_path / "ep.mp3"
+    audio_path.write_bytes(b"\x00")
+
+    config = {"image_generation": {"enabled": True}}
+
+    with patch("podcast.generate_episode_image", return_value=None), \
+         patch("podcast.render_title_cover", return_value=None):
+        result = _generate_episode_image(
+            config, "Both Paths Fail", "abstract", str(audio_path),
+        )
+
+    assert result is None
 
 
 # ---------------------------------------------------------------- rss.py

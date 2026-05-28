@@ -26,6 +26,7 @@ import yaml
 
 from db import get_connection, init_db, list_podcasts, update_podcast
 from image_gen import generate_episode_image
+from local_cover import render_title_cover
 from r2_upload import get_r2_client, upload_file
 
 ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
@@ -194,11 +195,29 @@ def _generate_one(ep, config, r2_client, dry_run=False):
         result = generate_episode_image(
             prompt, str(local_path), model=model,
             size=size, quality=quality, config=config)
-        if not result:
-            return (ep, None)
     except Exception as e:
         _log("Error", f"Generation failed for '{title[:50]}': {e}")
-        return (ep, None)
+        result = None
+
+    # External image gen failed (None return, exception, or no
+    # file written). Fall back to the local PIL title-card cover
+    # so backfill still produces SOMETHING usable when OpenAI is
+    # at its billing cap. The fallback writes a deterministic
+    # title-on-gradient PNG that backfill_images.py treats as a
+    # real cover for upload + DB update.
+    if not result or not local_path.exists():
+        try:
+            _log("Local",
+                 f"OpenAI unavailable; rendering local cover for "
+                 f"'{title[:50]}'")
+            fb = render_title_cover(title, str(local_path))
+            if not fb or not local_path.exists():
+                return (ep, None)
+        except Exception as fe:
+            _log("Error",
+                 f"Local cover fallback failed for "
+                 f"'{title[:50]}': {fe}")
+            return (ep, None)
 
     # Upload to R2
     r2_key = f"episodes/{filename}"
