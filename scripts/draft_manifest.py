@@ -180,9 +180,15 @@ def enrich_sidecar_json(sidecar_path, *, title=None, description=None,
 
 
 def _get_draft_episodes(conn):
-    """Return podcast rows whose audio_file points to a drafts/ path."""
+    """Return podcast rows whose audio_file points to a drafts/ path.
+
+    Excludes published episodes (those with published_at set) as a
+    safety net to prevent published content from appearing in the
+    draft list even if DB paths are stale.
+    """
     rows = conn.execute(
         "SELECT * FROM podcasts WHERE audio_file LIKE '%drafts/%' "
+        "AND published_at IS NULL "
         "ORDER BY id"
     ).fetchall()
     return [dict(r) for r in rows]

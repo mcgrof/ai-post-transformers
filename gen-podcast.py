@@ -681,9 +681,24 @@ def _publish_episode(config, draft=None, private=False, owner=None):
                 print(f"[Publish] Already at {dst}", file=sys.stderr)
 
         # Update DB so audio/image point to public/ (needed for feed)
+        # Always update paths from drafts/ to public/ if they were copied.
+        # This is critical for preventing published episodes from showing
+        # up as drafts in the admin UI.
+        needs_db_update = False
+        new_audio = audio
+        new_image = image
+
         if "/drafts/" in audio:
             new_audio = audio.replace("/drafts/", "/public/")
             new_image = image.replace("/drafts/", "/public/") if image and "/drafts/" in image else image
+            needs_db_update = True
+        elif Path(audio).parent != public_dir and os.path.exists(os.path.join(public_dir, os.path.basename(audio))):
+            # Audio was already in public/ but DB still references drafts
+            new_audio = os.path.join(public_dir, os.path.basename(audio))
+            if os.path.exists(new_audio):
+                needs_db_update = True
+
+        if needs_db_update:
             conn = get_connection()
             init_db(conn)
             cur = conn.cursor()
