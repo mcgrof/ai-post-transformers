@@ -732,7 +732,7 @@ def _publish_episode(config, draft=None, private=False, owner=None):
     print(f"[Publish] Feed: {feed_url}", file=sys.stderr)
     _publish_site(config)
 
-    # Remove from admin drafts + delete R2 draft mp3 now that publish succeeded
+    # Remove from admin drafts + delete R2 draft files now that publish succeeded
     try:
         import boto3, json, os as _os
         s3 = boto3.client(
@@ -748,10 +748,27 @@ def _publish_episode(config, draft=None, private=False, owner=None):
         before = len(manifest.get("drafts", []))
         manifest["drafts"] = [d for d in manifest.get("drafts", []) if d.get("id") != draft_id]
         s3.put_object(Bucket="podcast-admin", Key="manifest.json", Body=json.dumps(manifest, indent=2), ContentType="application/json")
-        try:
-            s3.delete_object(Bucket="ai-post-transformers", Key=f"drafts/ep{draft_id}.mp3")
-        except Exception:
-            pass
+
+        # Delete draft MP3 and companion files from R2.
+        # Use the basename from the audio file (same as local cleanup).
+        if audio:
+            # Get the full filename (without directory): e.g., "2026-05-20-lpu-...mp3"
+            filename = _os.path.basename(audio)
+            basename = _os.path.splitext(filename)[0]
+            # List all files in drafts/ and delete matches
+            try:
+                paginator = s3.get_paginator('list_objects_v2')
+                pages = paginator.paginate(Bucket="ai-post-transformers", Prefix="drafts/")
+                for page in pages:
+                    for obj in (page.get('Contents') or []):
+                        key = obj['Key']
+                        # Match files with the same basename (any extension)
+                        if key.split('/')[-1].startswith(basename + '.') or key.split('/')[-1] == filename:
+                            s3.delete_object(Bucket="ai-post-transformers", Key=key)
+                            print(f"[Publish] Deleted R2 draft: {key}", file=sys.stderr)
+            except Exception:
+                pass
+
         print(f"[Publish] Admin manifest cleaned: {before} -> {len(manifest.get('drafts', []))}", file=sys.stderr)
     except Exception as e:
         print(f"[Publish] Admin cleanup skipped: {e}", file=sys.stderr)
