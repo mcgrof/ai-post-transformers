@@ -152,12 +152,41 @@ def sync_submissions_to_r2(
 ) -> dict:
     bucket = bucket or DEFAULT_ADMIN_BUCKET
     client = client or get_r2_client()
-    counts = {"scanned": 0, "exported": 0, "skipped": 0}
+    counts = {"scanned": 0, "exported": 0, "skipped": 0, "orphaned": 0}
+
+    # Cache draft MP3 basenames to avoid orphaned submissions from re-syncing
+    draft_mp3_basenames = set()
+    try:
+        podcast_bucket = os.environ.get("BUCKET_NAME") or os.environ.get(
+            "PODCAST_BUCKET_NAME"
+        ) or "ai-post-transformers"
+        list_resp = client.list_objects_v2(
+            Bucket=podcast_bucket, Prefix="drafts/", MaxKeys=1000
+        )
+        for obj in list_resp.get("Contents", []):
+            if obj["Key"].endswith(".mp3"):
+                basename = obj["Key"].split("/")[-1].replace(".mp3", "")
+                draft_mp3_basenames.add(basename)
+    except Exception:
+        pass  # If this fails, continue without validation
 
     for submission in store.list_submissions():
         counts["scanned"] += 1
         key = submission["_key"]
         local = _normalize_submission_for_r2(submission)
+
+        # Skip orphaned submissions (draft_generated/approved_for_publish
+        # without corresponding MP3 files) to prevent them from
+        # accumulating on R2
+        status = local.get("status")
+        draft_stem = local.get("draft_stem", "")
+        basename = draft_stem.split("/")[-1] if draft_stem else ""
+
+        if status in ("draft_generated", "approved_for_publish"):
+            if not basename or basename not in draft_mp3_basenames:
+                counts["orphaned"] += 1
+                continue
+
         try:
             remote = _read_submission(bucket=bucket, client=client, key=key)
         except Exception as exc:

@@ -489,10 +489,13 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
     draft_key = job.get("draft_key", "")
     draft_stem = _normalize_draft_stem(draft_key)
     if not draft_stem:
+        print(f"warning: cannot advance submissions for job {job.get('id')} "
+              f"— invalid draft_key: {draft_key}")
         return []
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     advanced = []
+    found_matching = False
     try:
         paginator = store.client.get_paginator("list_objects_v2")
         for page in paginator.paginate(
@@ -510,7 +513,9 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
                 sub_stem = _normalize_draft_stem(sub.get("draft_stem", ""))
                 if not sub_stem or sub_stem != draft_stem:
                     continue
+                found_matching = True
                 if sub.get("status") == "published":
+                    print(f"[publish] submission {key} already published")
                     continue
                 sub["status"] = "published"
                 sub["updated_at"] = now
@@ -524,8 +529,14 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
                     ContentType="application/json",
                 )
                 advanced.append(key)
+                print(f"[publish] advanced submission {key} to published")
+        if not found_matching:
+            print(f"warning: no matching submissions found for draft_stem "
+                  f"{draft_stem} (job {job.get('id')})")
     except Exception as exc:
-        print(f"warning: failed to advance submissions: {exc}")
+        print(f"error: failed to advance submissions for job {job.get('id')}: {exc}")
+        import traceback
+        traceback.print_exc()
     return advanced
 
 
