@@ -6,15 +6,30 @@ Removes submissions that:
 - Are older than 30 days and still in draft status
 - Have draft_stem pointing to a published episode (in episodes/)
 
+This script uses file locking to prevent concurrent execution with the
+podcast worker. It's safe to run on a timer (e.g., daily via systemd).
+
 Usage:
-    python scripts/cleanup_stale_submissions.py [--dry-run] [--old-days 30]
+    # Dry run (default - shows what would be deleted)
+    python scripts/cleanup_stale_submissions.py
+
+    # Actually delete (requires --execute flag)
+    python scripts/cleanup_stale_submissions.py --execute
+
+    # Skip if another worker is running (for cron/systemd)
+    python scripts/cleanup_stale_submissions.py --execute --skip-if-locked
+
+    # Adjust cutoff
+    python scripts/cleanup_stale_submissions.py --execute --old-days 60
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,11 +38,55 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def cleanup_submissions(*, dry_run=False, old_days=30):
+def _acquire_lock(skip_if_locked=False, timeout=1):
+    """Acquire exclusive lock to prevent concurrent execution.
+
+    Args:
+        skip_if_locked: If True, return None instead of blocking if lock
+                       can't be acquired immediately.
+        timeout: Seconds to wait for lock before giving up.
+
+    Returns:
+        Lock file handle if acquired, None if skip_if_locked=True and
+        lock couldn't be acquired.
+    """
+    import fcntl
+    import atexit
+
+    lock_path = Path.home() / ".run/submission-cleanup.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lock_file = open(lock_path, "w")
+
+    try:
+        if skip_if_locked:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        atexit.register(lambda: fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN))
+        return lock_file
+    except IOError:
+        if skip_if_locked:
+            lock_file.close()
+            return None
+        print("error: cleanup already running (locked by another process)")
+        sys.exit(1)
+
+
+def cleanup_submissions(*, dry_run=True, old_days=30, skip_if_locked=False):
     """Remove stale submissions from both SQLite and R2."""
     import sqlite3
     from pathlib import Path
     from r2_upload import get_r2_client
+
+    # Acquire lock if needed
+    if skip_if_locked:
+        lock = _acquire_lock(skip_if_locked=True)
+        if lock is None:
+            print("Cleanup already running, skipping")
+            return
+    else:
+        lock = _acquire_lock(skip_if_locked=False)
 
     # Connect to queue.db where submissions live
     queue_db = Path.home() / '.local/state/ai-post-transformers/queue.db'
@@ -171,8 +230,12 @@ def main():
         description="Clean up stale submission records from SQLite and R2"
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Show what would be deleted without actually deleting"
+        "--execute", action="store_true",
+        help="Actually delete stale submissions (default: dry-run only)"
+    )
+    parser.add_argument(
+        "--skip-if-locked", action="store_true",
+        help="Exit silently if cleanup is already running (for systemd timer)"
     )
     parser.add_argument(
         "--old-days", type=int, default=30,
@@ -180,7 +243,11 @@ def main():
     )
     args = parser.parse_args()
 
-    cleanup_submissions(dry_run=args.dry_run, old_days=args.old_days)
+    cleanup_submissions(
+        dry_run=not args.execute,
+        old_days=args.old_days,
+        skip_if_locked=args.skip_if_locked
+    )
     return 0
 
 
