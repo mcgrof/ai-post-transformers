@@ -803,6 +803,17 @@ class TestWorkerBridgeOrchestration:
             "scripts.run_podcast_worker._bridge_import",
             fake_import,
         )
+        # Stub the real generation/publish phases: otherwise run_once
+        # runs them for real, and on a host with AWS creds that reaches
+        # live R2 and can spawn a real gen-podcast.py generation.
+        monkeypatch.setattr(
+            "scripts.run_podcast_worker._run_generation_phase",
+            lambda admin_id, *, store=None: 0,
+        )
+        monkeypatch.setattr(
+            "scripts.run_podcast_worker._run_publish_phase",
+            lambda *args, **kwargs: 0,
+        )
 
         from scripts.run_podcast_worker import run_once
 

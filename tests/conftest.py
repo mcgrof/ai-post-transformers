@@ -78,6 +78,44 @@ class FakeSentenceTransformer:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def isolate_from_real_r2():
+    """Hard-isolate the whole test session from the real R2 admin bucket.
+
+    On a developer/live host the shell sources real AWS_* creds, so
+    ``get_publish_job_store()`` returns a REAL ``R2PublishJobStore``
+    against the production ``podcast-admin`` bucket. A worker test that
+    runs a real cycle then mutates production — it once claimed a live
+    submission and spawned a real ``gen-podcast.py`` generation run.
+
+    Strip the creds for the session (forcing the local/fallback path)
+    and make ``get_r2_client`` fail closed, so no test can silently reach
+    production. Tests that exercise R2 logic pass an explicit fake client
+    or monkeypatch this themselves.
+    """
+    mp = pytest.MonkeyPatch()
+    for var in (
+        "AWS_ENDPOINT_URL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+    ):
+        mp.delenv(var, raising=False)
+    try:
+        import r2_upload
+
+        def _blocked(*_args, **_kwargs):
+            raise RuntimeError(
+                "get_r2_client() is disabled in tests; pass a fake "
+                "client or monkeypatch it explicitly"
+            )
+
+        mp.setattr(r2_upload, "get_r2_client", _blocked)
+    except Exception:
+        pass
+    yield
+    mp.undo()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def patch_sentence_transformer():
     import editorial_scorer
 
