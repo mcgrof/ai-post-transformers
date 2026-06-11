@@ -462,6 +462,63 @@ def test_advance_linked_submissions_noop_without_r2_store():
     assert advanced == []
 
 
+def test_advance_linked_submissions_bridged_sqlite_store(tmp_path):
+    """The systemd worker runs in bridged SQLite mode: the publish store
+    is a SQLiteQueueStore with no R2 client. The advance must still flip
+    the linked submission to 'published' via the queue store — otherwise
+    it stays approved_for_publish and resurfaces as a phantom draft card.
+    """
+    from scripts.publish_job_runner import _advance_linked_submissions
+    from scripts.queue_store import get_queue_store
+
+    store = get_queue_store(mode="sqlite", path=tmp_path / "queue.db")
+    store.save_submission("submissions/x.json", {
+        "status": "approved_for_publish",
+        "draft_stem": "drafts/2026/06/2026-06-06-emo-9551c4",
+        "urls": ["https://allenai.org/papers/emo"],
+        "updated_at": "2026-06-06T00:00:00+00:00",
+    })
+    job = {
+        "id": "pub_x",
+        "draft_key": "drafts/2026/06/2026-06-06-emo-9551c4.mp3",
+    }
+
+    advanced = _advance_linked_submissions(job, store)
+
+    assert advanced == ["submissions/x.json"]
+    data, _ = store.load_submission("submissions/x.json")
+    assert data["status"] == "published"
+    assert any(h["status"] == "published" for h in data["status_history"])
+
+
+def test_advance_linked_submissions_bridged_idempotent_and_terminal(tmp_path):
+    """Bridged path is idempotent on 'published' and never resurrects a
+    terminal status (rejected/generation_failed)."""
+    from scripts.publish_job_runner import _advance_linked_submissions
+    from scripts.queue_store import get_queue_store
+
+    store = get_queue_store(mode="sqlite", path=tmp_path / "queue.db")
+    store.save_submission("submissions/pub.json", {
+        "status": "published",
+        "draft_stem": "drafts/2026/06/already-1234ab",
+        "updated_at": "2026-06-06T00:00:00+00:00",
+    })
+    store.save_submission("submissions/rej.json", {
+        "status": "rejected",
+        "draft_stem": "drafts/2026/06/rejected-5678cd",
+        "updated_at": "2026-06-06T00:00:00+00:00",
+    })
+
+    assert _advance_linked_submissions(
+        {"id": "j1", "draft_key": "drafts/2026/06/already-1234ab.mp3"}, store
+    ) == []
+    assert _advance_linked_submissions(
+        {"id": "j2", "draft_key": "drafts/2026/06/rejected-5678cd.mp3"}, store
+    ) == []
+    rej, _ = store.load_submission("submissions/rej.json")
+    assert rej["status"] == "rejected"
+
+
 def test_private_publish_uses_private_r2_prefix(monkeypatch, tmp_path):
     """Verify private publish passes --private --owner flags to gen-podcast.py."""
     from scripts.publish_job_runner import process_private_job

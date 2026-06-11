@@ -39,7 +39,7 @@ def _normalize_draft_stem(value: str | None) -> str:
     stem = str(value or "").strip().rstrip("/")
     if not stem:
         return ""
-    if stem.endswith(".mp3") or stem.endswith(".txt"):
+    if stem.endswith((".mp3", ".txt", ".json", ".srt", ".png", ".webp")):
         stem = os.path.splitext(stem)[0]
     root_prefix = str(ROOT) + os.sep
     if stem.startswith(root_prefix):
@@ -477,24 +477,106 @@ def process_job(
         raise
 
 
-def _advance_linked_submissions(job: dict, store) -> list[str]:
-    """Advance R2 submissions matching this job's draft to 'published'.
+_ADVANCEABLE_SUBMISSION_STATUSES = ("draft_generated", "approved_for_publish")
 
-    When the publish runner completes a job, the linked submission
-    record in the admin bucket must be advanced to 'published' so it
-    stops resurfacing as a draft card on the Drafts page.
+
+def _job_draft_stems(job: dict) -> set[str]:
+    """Normalized candidate draft stems for a job.
+
+    Matched against both ``draft_key`` and ``draft_stem`` so a job whose
+    key shifted (e.g. ``public/...`` vs ``drafts/...``) still links up.
     """
-    if not hasattr(store, "client") or not hasattr(store, "bucket"):
-        return []
-    draft_key = job.get("draft_key", "")
-    draft_stem = _normalize_draft_stem(draft_key)
-    if not draft_stem:
+    stems = set()
+    for field in ("draft_key", "draft_stem"):
+        normalized = _normalize_draft_stem(job.get(field, ""))
+        if normalized:
+            stems.add(normalized)
+    return stems
+
+
+def _submission_should_advance(sub: dict, job: dict) -> bool:
+    """Whether a matched submission may be advanced to 'published'.
+
+    Only a live draft status advances; terminal statuses (rejected,
+    generation_failed, ...) are never resurrected. Public and private
+    records are kept strictly disjoint, and private records only advance
+    for a matching owner.
+    """
+    if sub.get("status") not in _ADVANCEABLE_SUBMISSION_STATUSES:
+        return False
+    job_private = job.get("visibility") == "private"
+    sub_private = sub.get("visibility") == "private"
+    if job_private != sub_private:
+        return False
+    if job_private and sub_private:
+        job_owner = job.get("owner") or job.get("owner_token")
+        sub_owner = sub.get("owner") or sub.get("owner_token")
+        if job_owner and sub_owner and job_owner != sub_owner:
+            return False
+    return True
+
+
+def _advance_linked_submissions(job: dict, store) -> list[str]:
+    """Advance the submission(s) linked to a completed job to 'published'.
+
+    Works for BOTH the R2-backed store and the bridged SQLite QueueStore
+    (the mode the systemd worker runs in). Without the SQLite path the
+    submission stays 'approved_for_publish' forever and resurfaces as a
+    phantom draft card on the Drafts page.
+    """
+    stems = _job_draft_stems(job)
+    if not stems:
         print(f"warning: cannot advance submissions for job {job.get('id')} "
-              f"— invalid draft_key: {draft_key}")
+              f"— invalid draft_key: {job.get('draft_key')}")
         return []
+    # Bridged SQLite mode: the publish store is a SQLiteQueueStore with no
+    # R2 client/bucket. Advance the submission directly in the queue DB;
+    # queue_bridge then exports the new 'published' status to R2 on sync.
+    if not (hasattr(store, "client") and hasattr(store, "bucket")):
+        if (hasattr(store, "list_submissions")
+                and hasattr(store, "update_submission")):
+            return _advance_submissions_via_queue_store(stems, job, store)
+        return []
+    return _advance_submissions_via_r2(stems, job, store)
+
+
+def _advance_submissions_via_queue_store(
+    stems: set[str], job: dict, store
+) -> list[str]:
+    """Advance matching submissions to 'published' in a QueueStore."""
+    advanced: list[str] = []
+    found_matching = False
+    try:
+        for sub in store.list_submissions():
+            if _normalize_draft_stem(sub.get("draft_stem", "")) not in stems:
+                continue
+            found_matching = True
+            if sub.get("status") == "published":
+                continue
+            if not _submission_should_advance(sub, job):
+                continue
+            key = sub.get("_key")
+            store.update_submission(key, {"status": "published"})
+            advanced.append(key)
+            print(f"[publish] advanced submission {key} to published")
+        if not found_matching:
+            print(f"warning: no matching submissions found for stems "
+                  f"{sorted(stems)} (job {job.get('id')})")
+    except Exception as exc:
+        print(f"error: failed to advance submissions (queue store) for job "
+              f"{job.get('id')}: {exc}")
+        import traceback
+        traceback.print_exc()
+    return advanced
+
+
+def _advance_submissions_via_r2(
+    stems: set[str], job: dict, store
+) -> list[str]:
+    """Advance matching submissions to 'published' in an R2 store."""
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    advanced = []
+    advanced: list[str] = []
     found_matching = False
     try:
         paginator = store.client.get_paginator("list_objects_v2")
@@ -510,12 +592,15 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
                 if isinstance(body, bytes):
                     body = body.decode("utf-8")
                 sub = json.loads(body)
-                sub_stem = _normalize_draft_stem(sub.get("draft_stem", ""))
-                if not sub_stem or sub_stem != draft_stem:
+                if _normalize_draft_stem(
+                    sub.get("draft_stem", "")
+                ) not in stems:
                     continue
                 found_matching = True
                 if sub.get("status") == "published":
                     print(f"[publish] submission {key} already published")
+                    continue
+                if not _submission_should_advance(sub, job):
                     continue
                 sub["status"] = "published"
                 sub["updated_at"] = now
@@ -531,8 +616,8 @@ def _advance_linked_submissions(job: dict, store) -> list[str]:
                 advanced.append(key)
                 print(f"[publish] advanced submission {key} to published")
         if not found_matching:
-            print(f"warning: no matching submissions found for draft_stem "
-                  f"{draft_stem} (job {job.get('id')})")
+            print(f"warning: no matching submissions found for stems "
+                  f"{sorted(stems)} (job {job.get('id')})")
     except Exception as exc:
         print(f"error: failed to advance submissions for job {job.get('id')}: {exc}")
         import traceback

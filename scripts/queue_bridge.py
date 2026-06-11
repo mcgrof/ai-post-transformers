@@ -135,6 +135,14 @@ def sync_submissions_from_r2(
         local_record = store.load_submission(key)
         if local_record is not None:
             local, _ = local_record
+            # 'published' is terminal for the draft lifecycle: never let a
+            # stale/older remote record regress a locally-published
+            # submission back to a draft status — it would resurface as a
+            # phantom draft card on the next sync.
+            if (local.get("status") == "published"
+                    and remote.get("status") != "published"):
+                counts["skipped"] += 1
+                continue
             if _record_updated_at(remote) <= _record_updated_at(local):
                 counts["skipped"] += 1
                 continue
@@ -154,19 +162,28 @@ def sync_submissions_to_r2(
     client = client or get_r2_client()
     counts = {"scanned": 0, "exported": 0, "skipped": 0, "orphaned": 0}
 
-    # Cache draft MP3 basenames to avoid orphaned submissions from re-syncing
+    # Cache draft + published episode basenames so we only skip *truly*
+    # orphaned submissions. An approved_for_publish/draft_generated record
+    # whose MP3 has moved drafts/ -> episodes/ (during/after publish) must
+    # NOT be treated as an orphan, or its status never reaches R2.
     draft_mp3_basenames = set()
+    published_basenames = set()
     try:
         podcast_bucket = os.environ.get("BUCKET_NAME") or os.environ.get(
             "PODCAST_BUCKET_NAME"
         ) or "ai-post-transformers"
-        list_resp = client.list_objects_v2(
-            Bucket=podcast_bucket, Prefix="drafts/", MaxKeys=1000
-        )
-        for obj in list_resp.get("Contents", []):
-            if obj["Key"].endswith(".mp3"):
-                basename = obj["Key"].split("/")[-1].replace(".mp3", "")
-                draft_mp3_basenames.add(basename)
+        for prefix, dest in (
+            ("drafts/", draft_mp3_basenames),
+            ("episodes/", published_basenames),
+        ):
+            list_resp = client.list_objects_v2(
+                Bucket=podcast_bucket, Prefix=prefix, MaxKeys=2000
+            )
+            for obj in list_resp.get("Contents", []):
+                if obj["Key"].endswith(".mp3"):
+                    dest.add(
+                        obj["Key"].split("/")[-1].replace(".mp3", "")
+                    )
     except Exception:
         pass  # If this fails, continue without validation
 
@@ -183,7 +200,13 @@ def sync_submissions_to_r2(
         basename = draft_stem.split("/")[-1] if draft_stem else ""
 
         if status in ("draft_generated", "approved_for_publish"):
-            if not basename or basename not in draft_mp3_basenames:
+            # Only skip a *truly* orphaned record: one that names a draft
+            # whose MP3 is neither a current draft nor a published episode.
+            # No draft_stem, or an MP3 that moved drafts/ -> episodes/, is
+            # NOT an orphan.
+            if (basename
+                    and basename not in draft_mp3_basenames
+                    and basename not in published_basenames):
                 counts["orphaned"] += 1
                 continue
 
