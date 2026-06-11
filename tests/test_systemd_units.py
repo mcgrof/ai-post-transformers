@@ -101,9 +101,18 @@ def test_service_passes_queue_db(service_unit: str):
     assert ".local/state/ai-post-transformers/queue.db" in service_unit
 
 
-def test_timer_uses_on_unit_inactive(timer_unit: str):
-    assert "OnUnitInactiveSec=" in timer_unit
-    assert "OnUnitActiveSec=" not in timer_unit
+def test_timer_uses_on_calendar(timer_unit: str):
+    # OnCalendar always has a next elapse; OnUnitInactiveSec could leave
+    # the timer un-armed after a daemon-reload or a hung run (the
+    # 2026-06-08 footgun). See podcast-worker-systemd-fixes.
+    assert "OnCalendar=" in timer_unit
+    assert "OnUnitInactiveSec=" not in timer_unit
+
+
+def test_service_caps_run_duration(service_unit: str):
+    # Oneshot start-timeout defaults to infinity, so a hung run would
+    # wedge the whole pickup loop without this backstop.
+    assert "TimeoutStartSec=" in service_unit
 
 
 # ---- systemd-analyze verify (skip if unavailable) ----

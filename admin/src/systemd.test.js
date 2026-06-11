@@ -102,6 +102,13 @@ test('service unit runs combined worker not publish-only', () => {
   assert.ok(!unit.includes('run_publish_worker.py'));
 });
 
+test('service unit caps run duration so a hung run cannot wedge the loop', () => {
+  const unit = generateSystemdService('u');
+  // Oneshot start-timeout defaults to infinity; without a cap a single
+  // hung generation wedges the whole pickup loop (the 2026-06-08 stall).
+  assert.ok(unit.includes('TimeoutStartSec='));
+});
+
 
 // ---------------------------------------------------------------------------
 // generateSystemdTimer
@@ -114,10 +121,13 @@ test('timer unit has required sections', () => {
   assert.ok(unit.includes('[Install]'));
 });
 
-test('timer unit has OnUnitInactiveSec for periodic firing', () => {
+test('timer unit uses OnCalendar for robust periodic firing', () => {
   const unit = generateSystemdTimer();
-  assert.ok(unit.includes('OnUnitInactiveSec='));
-  assert.ok(!unit.includes('OnUnitActiveSec='));
+  // OnCalendar always has a next elapse; OnUnitInactiveSec could leave
+  // the timer un-armed after a daemon-reload or a hung run (the footgun
+  // that silently killed submission pickup on 2026-06-08).
+  assert.ok(unit.includes('OnCalendar='));
+  assert.ok(!unit.includes('OnUnitInactiveSec='));
 });
 
 test('timer unit targets timers.target', () => {

@@ -56,6 +56,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Backstop: kill a genuinely-hung run so it cannot wedge the loop.
+# A oneshot start-timeout defaults to infinity, which is what let the
+# 2026-06-08 hang stall submission pickup. Kept VERY generous: one run
+# does generation AND publish, and publish runs a codex viz step, so a
+# heavy episode can legitimately exceed an hour. 2h avoids false-killing
+# real work; OnCalendar + flock handle scheduling recovery.
+TimeoutStartSec=7200
 EnvironmentFile=%h/.config/podcast-worker/env
 WorkingDirectory=%h/devel/ai-post-transformers
 ExecStart=/usr/bin/flock -n -E 0 %t/podcast-worker.lock /bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && QUEUE_DB_PATH="$QUEUE_DB" && if [ -z "$QUEUE_DB_PATH" ]; then QUEUE_DB_PATH="$HOME/.local/state/ai-post-transformers/queue.db"; fi && mkdir -p "$(dirname "$QUEUE_DB_PATH")" && exec .venv/bin/python scripts/run_podcast_worker.py --admin-id ${adminId} --admin-name "$ADMIN_NAME" --once --verify-remote --queue-db "$QUEUE_DB_PATH"'
@@ -76,8 +83,12 @@ export function generateSystemdTimer() {
 Description=Periodic trigger for podcast-worker
 
 [Timer]
+# Wall-clock cadence. Unlike OnUnitInactiveSec, OnCalendar always has a
+# next elapse, so a daemon-reload or a single hung run cannot leave the
+# timer un-armed (Trigger: n/a) — that silently killed submission pickup
+# on 2026-06-08. flock in the service prevents overlap if a run is slow.
 OnBootSec=1min
-OnUnitInactiveSec=2min
+OnCalendar=*:0/2
 AccuracySec=15s
 Persistent=true
 
