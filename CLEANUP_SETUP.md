@@ -15,6 +15,38 @@ All infrastructure for safe automated cleanup is in place.
 - `~/.config/systemd/user/cleanup-stale-submissions.service` — executes the cleanup script
 - `~/.config/systemd/user/cleanup-stale-submissions.timer` — triggers daily at 02:00 UTC
 
+The service is hand-installed (there is no JS/Python generator for it,
+unlike the podcast-worker units in `admin/src/systemd.js`). Install the
+service with this exact content — note the `bash -lc 'source
+~/.enhance-bash …'` wrapper, which is **required**: without it the run
+crashes immediately with `KeyError: 'AWS_ENDPOINT_URL'` because the R2
+credentials never load (this was broken on the timer until 2026-06-10).
+
+```ini
+# ~/.config/systemd/user/cleanup-stale-submissions.service
+[Unit]
+Description=Clean up stale podcast submissions
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/devel/ai-post-transformers
+ExecStart=/bin/bash -lc 'source ~/.enhance-bash >/dev/null 2>&1 && exec .venv/bin/python scripts/cleanup_stale_submissions.py --execute --skip-if-locked'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cleanup-submissions
+
+# Security: run with restricted permissions
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/ai-post-transformers %h/.run
+
+[Install]
+WantedBy=default.target
+```
+
 ### 3. Execution results
 - Dry-run test: Would delete 0 from SQLite, 48+ from R2
 - Actual execution: Deleted 154 stale submissions from R2
@@ -63,7 +95,10 @@ journalctl --user -u cleanup-stale-submissions.service -n 50
 
 ## Safety Guarantees
 
-✓ File locking ensures cleanup never runs concurrently with podcast worker  
+✓ File locking prevents two cleanup runs from overlapping (note: the
+  lock is `~/.run/submission-cleanup.lock`, which is NOT the worker's
+  `%t/podcast-worker.lock` — `--skip-if-locked` guards against a second
+  cleanup, not against a concurrent worker)  
 ✓ Default is dry-run (must use `--execute` to delete)  
 ✓ `--skip-if-locked` allows safe automated execution  
 ✓ Only deletes clearly stale, orphaned submissions  
