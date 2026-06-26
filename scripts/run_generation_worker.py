@@ -178,6 +178,110 @@ def _active_generation_for_admin(bucket, client, admin_id):
 # Generation logic
 # ---------------------------------------------------------------------------
 
+def _is_verbatim_submission(sub):
+    """Detect if submission is a verbatim script vs paper URLs.
+
+    Returns True if the submission has fallback_source_text that looks
+    like a pre-written script (contains speaker markers).
+    """
+    import re
+
+    urls = sub.get("urls", [])
+    for url in urls:
+        source_text = _submission_source_text(sub, url)
+        if not source_text:
+            continue
+
+        # Check for script markers
+        sample = source_text[:2000]
+        patterns = [
+            r'^[AB]:\s+',  # A: or B:
+            r'^\*\*[AB]\*\*:\s+',  # **A**: or **B**:
+            r'^(Hal|Ada|VERA):\s+',  # Named speakers
+            r'^\[(.*?)\]\s*:',  # [Speaker]:
+        ]
+
+        lines = sample.split('\n')
+        marker_count = 0
+        for line in lines:
+            for pattern in patterns:
+                if re.match(pattern, line.strip()):
+                    marker_count += 1
+                    break
+
+        # If >10% of lines are speaker markers, it's a script
+        if marker_count > len(lines) * 0.1:
+            return True
+
+    return False
+
+
+def _run_verbatim_generation(sub, *, bucket=None, client=None, claim_token=None,
+                             key=None, store=None):
+    """Run verbatim_podcast.py for a script submission.
+
+    Returns (success, draft_stem_or_error).
+    """
+    import yaml
+
+    urls = sub.get("urls", [])
+    if not urls:
+        return False, "No URLs in submission"
+
+    # Get the script text
+    source_text = _submission_source_text(sub, urls[0])
+    if not source_text:
+        return False, "No script text found in submission"
+
+    # Write script to temp file
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".txt",
+        prefix="verbatim-script-",
+        delete=False,
+    )
+    tmp.write(source_text)
+    tmp.close()
+    temp_path = Path(tmp.name)
+
+    # Load config
+    config_path = ROOT / "config.yaml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    title = sub.get("title") or ""
+
+    cmd = [
+        str(ROOT / ".venv" / "bin" / "python"),
+        str(ROOT / "verbatim_podcast.py"),
+        tmp.name,
+        title,
+    ]
+
+    print(f"[gen-worker] Running verbatim: {' '.join(cmd[:4])}...")
+
+    can_heartbeat_r2 = all((bucket, client, claim_token, key))
+    can_heartbeat_store = all((store, claim_token, key))
+
+    try:
+        if can_heartbeat_store:
+            return _run_generation_with_heartbeat_store(
+                cmd, store=store, claim_token=claim_token, key=key,
+            )
+
+        if can_heartbeat_r2:
+            return _run_generation_with_heartbeat(
+                cmd, bucket=bucket, client=client,
+                claim_token=claim_token, key=key,
+            )
+
+        # Fallback: simple blocking run
+        return _run_generation_simple(cmd)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def _submission_source_text(sub, url):
     metadata = (sub.get("metadata") or {}).get(url) or {}
     for key in ("fallback_source_text", "manual_source_text", "summary_text"):
@@ -270,6 +374,13 @@ def _run_generation(sub, *, bucket=None, client=None, claim_token=None,
     urls = sub.get("urls", [])
     if not urls:
         return False, "No URLs in submission"
+
+    # Check if this is a verbatim script submission
+    is_verbatim = _is_verbatim_submission(sub)
+
+    if is_verbatim:
+        return _run_verbatim_generation(sub, bucket=bucket, client=client,
+                                       claim_token=claim_token, key=key, store=store)
 
     prepared_inputs, temp_paths = _prepare_generation_inputs(sub)
 
