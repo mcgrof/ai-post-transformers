@@ -341,11 +341,56 @@ print(f"Wrote {{len(full_audio)}} samples to {{output_path}}")
 # Pass 0: Topic Classification
 # ---------------------------------------------------------------------------
 
+def _infer_source_metadata(text):
+    """Infer publication source and metadata from paper text.
+
+    Checks for known sources:
+    - transformer-circuits.pub → Anthropic Interpretability Research
+    - arxiv.org → Preprint server (standard)
+    - lesswrong.com → LessWrong blog post
+
+    Returns dict with inferred source info (affiliation, source_type, etc).
+    """
+    source_meta = {}
+
+    # Check for transformer-circuits.pub
+    if "transformer-circuits.pub" in text.lower() or "circuits.pub" in text.lower():
+        source_meta = {
+            "source_type": "Anthropic Interpretability Research",
+            "affiliation": "Anthropic",
+            "likely_authors_affiliation": "Anthropic",
+            "pub_venue": "Transformer Circuits",
+            "is_anthropic": True
+        }
+    # Check for LessWrong
+    elif "lesswrong.com" in text.lower():
+        source_meta = {
+            "source_type": "LessWrong blog post",
+            "pub_venue": "LessWrong",
+        }
+    # Standard arXiv
+    elif "arxiv.org" in text.lower():
+        source_meta = {
+            "source_type": "Preprint server",
+            "pub_venue": "arXiv",
+        }
+
+    return source_meta
+
+
 def _topic_classification_pass(text, covered_topics, config, backend):
     """Identify key topics in the paper and flag which are new to the podcast."""
     model = config.get("podcast", {}).get("analysis_model", "sonnet")
 
     covered_list = ", ".join(sorted(covered_topics)) if covered_topics else "(none yet)"
+
+    # Infer source metadata early
+    source_meta = _infer_source_metadata(text)
+    source_hint = ""
+    if source_meta.get("source_type"):
+        source_hint = f"\n\nNOTE: This appears to be from {source_meta['source_type']}. "
+        if source_meta.get("is_anthropic"):
+            source_hint += "This is published research from Anthropic's Interpretability team."
 
     prompt = f"""You are classifying topics for an AI research podcast.
 
@@ -357,7 +402,7 @@ Topics already covered in previous podcast episodes: {covered_list}
 For each topic, indicate whether it's NEW (never covered) or RETURNING (covered before).
 
 Also extract the paper's AUTHORS (full names as they appear on the paper), TITLE, and
-INSTITUTION(S)/LAB(S) (e.g., "NVIDIA", "Google DeepMind", "MIT").
+INSTITUTION(S)/LAB(S) (e.g., "NVIDIA", "Google DeepMind", "MIT").{source_hint}
 
 Output as JSON:
 {{
@@ -373,7 +418,24 @@ Only output JSON.
 Paper content:
 {text[:6000]}"""
 
-    return llm_call(backend, model, prompt)
+    result = llm_call(backend, model, prompt)
+
+    # If extraction failed but we detected a known source, inject metadata
+    if result and source_meta:
+        authors = result.get("authors", [])
+        institutions = result.get("institutions", [])
+
+        # If authors are empty/unknown but this is Anthropic research, add Anthropic
+        if (not authors or len(authors) == 0 or any("unknown" in str(a).lower() for a in authors)):
+            if source_meta.get("is_anthropic"):
+                result["authors"] = ["Anthropic Interpretability Research Team"]
+                institutions = institutions or []
+                if "Anthropic" not in institutions:
+                    institutions.append("Anthropic")
+                result["institutions"] = institutions
+                print("[Podcast]   ⚠️  Injected Anthropic author metadata (source: transformer-circuits.pub)", file=sys.stderr)
+
+    return result
 
 
 def _find_shared_authors(authors, conn):
@@ -1083,6 +1145,31 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     humor_text = ""  # Jokes come from situation only, not pre-planned
 
+    # Detect source and add specialized guidance
+    source_guidance = ""
+    is_anthropic_interp = (
+        "jacobian" in text.lower() or
+        "logit lens" in text.lower() or
+        "transformer-circuits" in text.lower()
+    )
+    if is_anthropic_interp:
+        source_guidance = """
+SPECIAL GUIDANCE — This is Anthropic's Interpretability Research:
+- The paper describes the JACOBIAN LENS as a refinement of the LOGIT LENS.
+- CRITICAL: Clearly explain what the Jacobian lens corrects for:
+  "While the logit lens assumes that representations use the same coordinates
+   in all layers, the Jacobian lens corrects for representational changes that
+   take place across layers, allowing it to uncover meaningful information in
+   earlier layers where the logit lens produces uninterpretable readouts."
+- Explain why this matters: different layers use different coordinate systems,
+  so simply projecting hidden states to vocabulary doesn't work across all layers.
+- Reference the LessWrong post on logit lens (https://www.lesswrong.com/posts/
+  AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens) as public prior work.
+- Acknowledge this is rigorous, academic interpretability research (not speculation).
+- Tone: respectful and technically precise (not adversarial).
+"""
+        print("[Podcast]   ⚠️  Jacobian lens paper detected — adding specialized guidance", file=sys.stderr)
+
     # Collect all source papers
     all_sources = list(all_bg_papers)
     for r in analysis.get("additional_references", []):
@@ -1220,6 +1307,11 @@ point, use NONE. Do NOT force irrelevant facts into the conversation:
     # Only genuinely complex multi-topic papers earn 3 parts.
     complexity = num_topics + (num_questions * 0.3) + (num_refs * 0.1) + (paper_len / 40000)
 
+    # Boost complexity for Anthropic interpretability papers (need technical depth)
+    if is_anthropic_interp:
+        complexity += 3.0  # Ensure they get more time to explain technical concepts
+        print("[Podcast]   🔬 Complexity boost for interpretability research (+3.0)", file=sys.stderr)
+
     if complexity < 8:
         num_parts = 2  # Standard paper: ~12-15 min
     elif complexity < 14:
@@ -1346,7 +1438,7 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
 2. FOUNDATIONAL BACKGROUND: The key topics are: {topic_list}.
    For any topic that's new to the audience, explain it thoroughly. Compare with more
    familiar concepts. Reference foundational works by name, author, institution, year.
-{new_topic_bg}
+{new_topic_bg}{source_guidance}
 {color_facts_text}
 
 {common_style}
@@ -1405,7 +1497,7 @@ Topics discussed:
         p2_label = "Deep Dive + Critical Analysis + Conclusion"
         p2_content = f"""PART 2 COVERS — DEEP DIVE, CRITICAL ANALYSIS, AND CONCLUSION (FINAL PART):
 1. Walk through the key findings, methods, or arguments. Core contribution and main results.
-2. Technical concepts the audience needs, with analogies.
+2. Technical concepts the audience needs, with analogies.{source_guidance}
 3. Critical analysis: address these questions naturally:
 {questions_text}
 4. Additional references: {extra_refs_text}
