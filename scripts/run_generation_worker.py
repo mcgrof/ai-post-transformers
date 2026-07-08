@@ -197,19 +197,21 @@ def _is_verbatim_submission(sub):
         patterns = [
             r'^[AB]:\s+',  # A: or B:
             r'^\*\*[AB]\*\*:\s+',  # **A**: or **B**:
-            r'^(Hal|Ada|VERA):\s+',  # Named speakers
+            r'^\*\*(Hal|Ada|VERA|HOST)\*\*:\s*',  # **HAL**: **ADA**: **VERA**: (markdown bold)
+            r'^(Hal|Ada|VERA|HOST):\s+',  # Plain: Hal: Ada: VERA: (or uppercase)
             r'^\[(.*?)\]\s*:',  # [Speaker]:
+            r'\[MUSIC\b|\[SOUND\b|\[PAUSE\]|\[NOTIFICATION',  # Stage directions
         ]
 
         lines = sample.split('\n')
         marker_count = 0
         for line in lines:
             for pattern in patterns:
-                if re.match(pattern, line.strip()):
+                if re.search(pattern, line, re.IGNORECASE):
                     marker_count += 1
                     break
 
-        # If >10% of lines are speaker markers, it's a script
+        # If >10% of lines are speaker markers or stage directions, it's a script
         if marker_count > len(lines) * 0.1:
             return True
 

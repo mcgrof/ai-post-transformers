@@ -73,24 +73,26 @@ def _is_verbatim_script(text):
 
     Returns True if text has dialogue markers like:
     - A: / B:
-    - Hal: / Ada:
-    - **A:** / **B:**
+    - Hal: / Ada: / VERA:
+    - **A:** / **B:** / **HAL:** / **ADA:** / **VERA:** (markdown bold)
     - Host: / Guest:
+    - [Stage directions]
     """
     # Look for speaker markers in the first 2000 chars
     sample = text[:2000]
     patterns = [
         r'^[AB]:\s+',  # A: or B:
         r'^\*\*[AB]\*\*:\s+',  # **A**: or **B**:
-        r'^(Hal|Ada|VERA):\s+',  # Named speakers
-        r'^\[(.*?)\]\s*:',  # [Speaker]:
+        r'^\*\*(Hal|Ada|VERA|HOST)\*\*:\s*',  # **HAL**: **ADA**: (markdown bold)
+        r'^(Hal|Ada|VERA|HOST):\s+',  # Hal: Ada: VERA: (or uppercase)
+        r'^\[(MUSIC|SOUND|PAUSE|NOTIFICATION|DRAMATIC)',  # [Stage direction]
     ]
 
     lines = sample.split('\n')
     marker_count = 0
     for line in lines:
         for pattern in patterns:
-            if re.match(pattern, line.strip()):
+            if re.search(pattern, line.strip(), re.IGNORECASE):
                 marker_count += 1
                 break
 
