@@ -375,7 +375,7 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
             "text": seg["text"]
         })
 
-    return tmpdir, list_file, segments, [], script
+    return tmpdir, list_file, segment_files, [], script
 
 
 def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=None, goal=None):
@@ -401,7 +401,7 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
     # Create podcast
-    tmpdir, list_file, segments, sources, script = create_verbatim_podcast(script_text, config, soul_profiles)
+    tmpdir, list_file, segment_files, sources, script = create_verbatim_podcast(script_text, config, soul_profiles)
 
     try:
         # Output path
@@ -434,7 +434,7 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         transcript_file = audio_file.with_suffix(".txt")
         srt_file = audio_file.with_suffix(".srt")
         save_transcript(script, str(transcript_file), host_names)
-        generate_srt(script, segments, str(srt_file), host_names=host_names)
+        generate_srt(script, segment_files, str(srt_file), host_names=host_names)
 
         # Save script JSON
         script_file = audio_file.with_suffix(".json")
