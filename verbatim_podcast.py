@@ -121,15 +121,15 @@ def _extract_script_segments(text):
     # Map speaker names to A/B/C (C = VERA, new host)
     # VERA can use her own voice or share with Ada; for now route to B
     speaker_map = {
-        'Hal': 'A', 'HAL': 'A',
-        'Ada': 'B', 'ADA': 'B', 'DR. ADA': 'B',
+        'Hal': 'A', 'HAL': 'A', 'Hal Turing': 'A',
+        'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B',
         'VERA': 'B',  # VERA introduced as third host, uses B voice for now
-        'Overlord': 'A',  # Guest voices use default host voice
-        'Claude': 'A',
-        'Pro': 'B',
-        'Codex': 'A',
-        'Luis': 'A',
-        'Host': 'A', 'HOST': 'A',
+        'Overlord': 'A', 'OVERLORD': 'A', 'OVERLORD MEMO': 'A', 'OVERLORD VOICE': 'A',
+        'Claude': 'A', 'CLAUDE': 'A',
+        'Pro': 'B', 'PRO': 'B', 'ChatGPT Pro': 'B',
+        'Codex': 'A', 'CODEX': 'A',
+        'Luis': 'A', 'LUIS': 'A',
+        'Host': 'A', 'HOST': 'A', 'NARRATOR': 'A',
         'Guest': 'B', 'GUEST': 'B',
         'A': 'A', 'B': 'B',
     }
@@ -168,11 +168,26 @@ def _extract_script_segments(text):
             current_text = []
             continue
 
-        # Try to match speaker labels
-        match = re.match(r'^(?:\*\*)?([A-Z\s\.]+?)(?:\*\*)?\s*:\s+(.+)$', line)
+        # Try to match speaker labels: **SPEAKER (notes):** or SPEAKER:
+        # Format: **SPEAKER_NAME (optional notes):** where ** surrounds everything including colon
+        match = re.match(r'^\*\*(.+?):\*\*$', line)
         if match:
-            speaker_name = match.group(1).strip()
-            text = match.group(2).strip()
+            # Extract speaker name (might have parenthetical notes)
+            content = match.group(1).strip()
+            # Remove parenthetical notes to get speaker name
+            speaker_name = re.sub(r'\s*\([^)]*\)$', '', content).strip()
+            text = ""
+        else:
+            # Try plain format: SPEAKER: text
+            match = re.match(r'^([A-Z][A-Za-z\s\.]*?):\s+(.+)$', line)
+            if match:
+                speaker_name = match.group(1).strip()
+                text = match.group(2).strip()
+            else:
+                speaker_name = None
+                text = ""
+
+        if speaker_name:
 
             # Map to A/B
             speaker = speaker_map.get(speaker_name, None)
