@@ -2271,19 +2271,46 @@ function submitPage(subsData) {
     <div class="card">
       <h2>New Submission</h2>
       <form id="submit-form" onsubmit="handleSubmit(event)">
-        <div class="form-group">
-          <label for="urls">Paper URLs (one per line)</label>
-          <textarea id="urls" placeholder="https://arxiv.org/abs/2401.12345
+        <div class="form-group" style="margin-top:1rem;padding:0.75rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;margin-bottom:1rem">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0">
+            <input type="checkbox" id="custom-script-mode" style="cursor:pointer" onchange="toggleCustomScriptMode()" />
+            <span>
+              <strong>📝 Custom Script Mode</strong>
+              <span style="display:block;color:var(--text-secondary);font-size:0.813rem;margin-top:2px">
+                Generate from a complete script/transcript instead of analyzing papers.
+                Ideal for special episodes, meta-commentary, or scripted content.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div id="paper-urls-section">
+          <div class="form-group">
+            <label for="urls">Paper URLs (one per line)</label>
+            <textarea id="urls" placeholder="https://arxiv.org/abs/2401.12345
 https://www.usenix.org/system/files/fast26-example.pdf
 https://example.com/paper.pdf" rows="6"></textarea>
+          </div>
+          <div class="form-group" style="margin-top: 1rem;">
+            <label for="pdf-upload">Or upload a PDF file (optional)</label>
+            <input type="file" id="pdf-upload" accept="application/pdf" style="display:block;margin-top:0.25rem;color:var(--text-primary)" />
+            <p style="color:var(--text-muted,#8b949e);font-size:0.75rem;margin-top:4px">
+              Max 15 MB. The PDF is uploaded to R2 and its URL is added to the submission.
+            </p>
+          </div>
         </div>
-        <div class="form-group" style="margin-top: 1rem;">
-          <label for="pdf-upload">Or upload a PDF file (optional)</label>
-          <input type="file" id="pdf-upload" accept="application/pdf" style="display:block;margin-top:0.25rem;color:var(--text-primary)" />
-          <p style="color:var(--text-muted,#8b949e);font-size:0.75rem;margin-top:4px">
-            Max 15 MB. The PDF is uploaded to R2 and its URL is added to the submission.
-          </p>
+
+        <div id="custom-script-section" style="display:none">
+          <div class="form-group">
+            <label for="script-content">Complete Script / Transcript</label>
+            <textarea id="script-content" placeholder="Paste your full episode script or transcript here (can be 20,000+ characters).
+The system will generate audio from this using two-host dialogue (Hal Turing and Dr. Ada Shannon)." rows="12" style="font-family:monospace;font-size:0.875rem"></textarea>
+            <p style="color:var(--text-secondary);font-size:0.75rem;margin-top:4px">
+              For verbatim reproduction, start with: THIS IS A COMPLETE, FINAL SCRIPT. Perform it AS WRITTEN.
+            </p>
+          </div>
         </div>
+
         <div class="form-group" style="margin-top: 1rem;">
           <label for="instructions">Special Instructions (optional)</label>
           <textarea id="instructions" placeholder="Example: These papers are from USENIX FAST'26. Use the prefix 'FAST26:' in the episode title. Cover them serially so later episodes can reference earlier ones by title. Create a conference page to track all FAST26 episodes together.
@@ -2293,6 +2320,7 @@ Other ideas:
 • Request specific analysis angles
 • Ask for cross-references to prior episodes
 • Specify a conference or workshop theme" rows="6" style="font-size: 0.875rem;"></textarea>
+          <p style="color:var(--text-secondary);font-size:0.75rem;margin-top:2px">In Custom Script Mode, instructions guide how the script is performed.</p>
         </div>
         <div class="form-group" style="margin-top:1rem;padding:0.75rem;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px">
           <label style="display:flex;align-items:flex-start;gap:0.5rem;cursor:pointer;margin:0">
@@ -3097,20 +3125,45 @@ async function loadSubmissions() {
   }
 }
 
+function toggleCustomScriptMode() {
+  const isCustom = document.getElementById('custom-script-mode').checked;
+  document.getElementById('paper-urls-section').style.display = isCustom ? 'none' : 'block';
+  document.getElementById('custom-script-section').style.display = isCustom ? 'block' : 'none';
+  document.querySelector('button[type="submit"]').textContent = isCustom ? 'Submit Script' : 'Submit Papers';
+}
+
 async function handleSubmit(e) {
   e.preventDefault();
   const urlsField = document.getElementById('urls');
   const instrField = document.getElementById('instructions');
+  const scriptField = document.getElementById('script-content');
+  const customScriptCheckbox = document.getElementById('custom-script-mode');
   const pdfField = document.getElementById('pdf-upload');
   const privateCheckbox = document.getElementById('private-submission');
   const submitBtn = e.target.querySelector('button[type="submit"]');
-  const urls = urlsField.value.trim().split('\\n').filter(u => u.trim());
-  const pdfFile = pdfField && pdfField.files && pdfField.files[0] ? pdfField.files[0] : null;
+  const isCustomScript = customScriptCheckbox && customScriptCheckbox.checked;
   const isPrivate = !!(privateCheckbox && privateCheckbox.checked);
 
-  if (urls.length === 0 && !pdfFile) {
-    showToast('Please enter at least one URL or pick a PDF file', 'error');
-    return;
+  let urls, pdfFile;
+
+  if (isCustomScript) {
+    // Custom script mode
+    const script = scriptField.value.trim();
+    if (!script) {
+      showToast('Please paste your script or transcript', 'error');
+      return;
+    }
+    // Use a placeholder URL; the fallback_source_text will override it
+    urls = ['https://internal.do-not-panic.com/custom-script'];
+    pdfFile = null;
+  } else {
+    // Normal paper mode
+    urls = urlsField.value.trim().split('\\n').filter(u => u.trim());
+    pdfFile = pdfField && pdfField.files && pdfField.files[0] ? pdfField.files[0] : null;
+    if (urls.length === 0 && !pdfFile) {
+      showToast('Please enter at least one URL or pick a PDF file', 'error');
+      return;
+    }
   }
 
   // Basic URL validation
@@ -3173,14 +3226,29 @@ async function handleSubmit(e) {
     }
 
     const instrText = instrField.value.trim() || null;
+
+    // Build submission payload
+    const submitPayload = {
+      urls: cleanUrls,
+      instructions: instrText,
+      visibility: isPrivate ? 'private' : 'public',
+    };
+
+    // For custom script mode, add metadata with fallback_source_text
+    if (isCustomScript) {
+      const script = scriptField.value.trim();
+      submitPayload.metadata = {
+        'https://internal.do-not-panic.com/custom-script': {
+          fallback_source_text: script,
+          title: 'Custom Script Episode',
+        }
+      };
+    }
+
     const res = await fetch('/api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        urls: cleanUrls,
-        instructions: instrText,
-        visibility: isPrivate ? 'private' : 'public',
-      })
+      body: JSON.stringify(submitPayload)
     });
     if (!res.ok) {
       let msg = 'Server error (' + res.status + ')';
@@ -3190,11 +3258,16 @@ async function handleSubmit(e) {
     }
     const data = await res.json();
     if (data.success) {
-      showToast('Submitted ' + data.count + ' paper' + (data.count !== 1 ? 's' : '') + ' — pending generation pickup');
+      const msg = isCustomScript
+        ? 'Submitted custom script — pending generation pickup'
+        : 'Submitted ' + data.count + ' paper' + (data.count !== 1 ? 's' : '') + ' — pending generation pickup';
+      showToast(msg);
       urlsField.value = '';
+      scriptField.value = '';
       instrField.value = '';
       if (pdfField) pdfField.value = '';
       if (privateCheckbox) privateCheckbox.checked = false;
+      if (customScriptCheckbox) customScriptCheckbox.checked = false;
       // Optimistically render the new submission instead of re-fetching.
       // This avoids the failure mode where loadSubmissions() hits a CF Access
       // redirect and replaces the list with an error.
@@ -3224,7 +3297,12 @@ async function handleSubmit(e) {
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Submit Papers';
+      submitBtn.textContent = isCustomScript ? 'Submit Script' : 'Submit Papers';
+    }
+    // Reset form UI to paper mode
+    if (customScriptCheckbox && customScriptCheckbox.checked) {
+      customScriptCheckbox.checked = false;
+      toggleCustomScriptMode();
     }
   }
 }

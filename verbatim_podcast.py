@@ -83,16 +83,17 @@ def _is_verbatim_script(text):
     patterns = [
         r'^[AB]:\s+',  # A: or B:
         r'^\*\*[AB]\*\*:\s+',  # **A**: or **B**:
-        r'^\*\*(Hal|Ada|VERA|HOST)\*\*:\s*',  # **HAL**: **ADA**: (markdown bold)
-        r'^(Hal|Ada|VERA|HOST):\s+',  # Hal: Ada: VERA: (or uppercase)
+        r'^\*\*.*:\*\*',  # **SPEAKER (optional notes):** (markdown bold format)
+        r'^(Hal|Ada|VERA|HOST|OVERLORD|CLAUDE|PRO|CODEX|LUIS)(\s+\([^)]*\))?:\s+',  # Plain speaker with optional (notes):
         r'^\[(MUSIC|SOUND|PAUSE|NOTIFICATION|DRAMATIC)',  # [Stage direction]
     ]
 
     lines = sample.split('\n')
     marker_count = 0
     for line in lines:
+        stripped = line.strip()
         for pattern in patterns:
-            if re.search(pattern, line.strip(), re.IGNORECASE):
+            if re.match(pattern, stripped, re.IGNORECASE):
                 marker_count += 1
                 break
 
