@@ -375,14 +375,10 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     soul_profiles = _load_host_soul_profiles()
 
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
-
-    # Prepare script text with pronunciation hints
-    # Handle VERA's name: mark as "VAIR-uh" for TTS
-    script_text_prepared = script_text.replace("VERA:", "VAIR-uh:")
-    script_text_prepared = script_text_prepared.replace("VERA (", "VAIR-uh (")
+    print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
     # Create podcast
-    tmpdir, list_file, segments, sources, script = create_verbatim_podcast(script_text_prepared, config, soul_profiles)
+    tmpdir, list_file, segments, sources, script = create_verbatim_podcast(script_text, config, soul_profiles)
 
     try:
         # Output path

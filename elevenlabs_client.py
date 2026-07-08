@@ -43,6 +43,9 @@ import re as _re
 _PRONUNCIATION_FIXES = [
     # (compiled regex, replacement) — applied in order
     (_re.compile(r"\barXiv\b", _re.IGNORECASE), "archive"),
+    # Host names: ensure they're pronounced as words, not spelled
+    # VERA (new host) must be pronounced as "Vera" not "V-E-R-A"
+    (_re.compile(r"\bVERA\b"), "Vera"),
     # Acronyms: spell out so TTS pronounces letter-by-letter rather
     # than mangling them as syllables.
     (_re.compile(r"\bLLMs\b"), "L L Ms"),
