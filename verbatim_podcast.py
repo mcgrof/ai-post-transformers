@@ -122,14 +122,15 @@ def _extract_script_segments(text):
     # VERA can use her own voice or share with Ada; for now route to B
     speaker_map = {
         'Hal': 'A', 'HAL': 'A', 'Hal Turing': 'A',
-        'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B',
+        'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B', 'Dr Ada Shannon': 'B',
         'VERA': 'B',  # VERA introduced as third host, uses B voice for now
         'Overlord': 'A', 'OVERLORD': 'A', 'OVERLORD MEMO': 'A', 'OVERLORD VOICE': 'A',
         'Claude': 'A', 'CLAUDE': 'A',
         'Pro': 'B', 'PRO': 'B', 'ChatGPT Pro': 'B',
         'Codex': 'A', 'CODEX': 'A',
-        'Luis': 'A', 'LUIS': 'A',
+        'Luis': 'A', 'LUIS': 'A', 'LUIS': 'A',
         'Host': 'A', 'HOST': 'A', 'NARRATOR': 'A',
+        'NARRATOR/HOST INTRO': 'A',
         'Guest': 'B', 'GUEST': 'B',
         'A': 'A', 'B': 'B',
     }
@@ -172,10 +173,12 @@ def _extract_script_segments(text):
         # Format: **SPEAKER_NAME (optional notes):** where ** surrounds everything including colon
         match = re.match(r'^\*\*(.+?):\*\*$', line)
         if match:
-            # Extract speaker name (might have parenthetical notes)
+            # Extract speaker name (might have parenthetical notes or continuation phrases)
             content = match.group(1).strip()
             # Remove parenthetical notes to get speaker name
             speaker_name = re.sub(r'\s*\([^)]*\)$', '', content).strip()
+            # Remove continuation phrases like "continues", "presents", "outlines", "reads", etc.
+            speaker_name = re.sub(r'\s+(continues|presents|outlines|reads|reads from).*$', '', speaker_name).strip()
             text = ""
         else:
             # Try plain format: SPEAKER: text
@@ -188,9 +191,11 @@ def _extract_script_segments(text):
                 text = ""
 
         if speaker_name:
-
-            # Map to A/B
+            # Map to A/B - try exact match first, then try variations
             speaker = speaker_map.get(speaker_name, None)
+            # If no exact match, try removing 's and other possessive forms
+            if not speaker and "'s" in speaker_name:
+                speaker = speaker_map.get(speaker_name.replace("'s", ""), None)
             if speaker:
                 # Flush previous speaker
                 if current_text and current_speaker:
