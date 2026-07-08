@@ -420,20 +420,26 @@ Paper content:
 
     result = llm_call(backend, model, prompt)
 
-    # If extraction failed but we detected a known source, inject metadata
+    # Apply source metadata if we detected a known source
     if result and source_meta:
         authors = result.get("authors", [])
         institutions = result.get("institutions", [])
 
-        # If authors are empty/unknown but this is Anthropic research, add Anthropic
-        if (not authors or len(authors) == 0 or any("unknown" in str(a).lower() for a in authors)):
-            if source_meta.get("is_anthropic"):
+        # For Anthropic research, ALWAYS ensure Anthropic is in institutions
+        # (even if individual authors are extracted, the paper is from Anthropic)
+        if source_meta.get("is_anthropic"):
+            institutions = institutions or []
+            if "Anthropic" not in institutions:
+                institutions.append("Anthropic")
+            result["institutions"] = institutions
+
+            # If authors are empty/unknown, use Anthropic team as fallback
+            if not authors or len(authors) == 0 or any("unknown" in str(a).lower() for a in authors):
                 result["authors"] = ["Anthropic Interpretability Research Team"]
-                institutions = institutions or []
-                if "Anthropic" not in institutions:
-                    institutions.append("Anthropic")
-                result["institutions"] = institutions
                 print("[Podcast]   ⚠️  Injected Anthropic author metadata (source: transformer-circuits.pub)", file=sys.stderr)
+            else:
+                # Authors were extracted; just note Anthropic affiliation
+                print(f"[Podcast]   ✓ Anthropic affiliation added to institutions", file=sys.stderr)
 
     return result
 
@@ -1429,9 +1435,13 @@ EPISODE BIBLE (follow this allocation strictly):
 PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
 1. INTRO: Speaker A delivers this intro VERBATIM as the FIRST line:
    "{intro}"
-   Then Hal introduces today's material: title, first author et al. (number of co-authors),
-   institution(s), publication date. NEVER list all authors — say "First Author et al." and
-   mention the total co-author count. Ada jumps in with why it caught her attention.
+   Then Hal introduces today's material with these REQUIRED details:
+   - Title: {paper_title}
+   - Authors: {', '.join(paper_authors)} (total: {len(paper_authors)} authors)
+   - Institution(s): {', '.join(paper_institutions) if paper_institutions else '(not specified)'}
+   - Publication date: July 6, 2026
+   Hal should say "First Author et al." with the total co-author count, and mention
+   the institution(s). Ada jumps in with why it caught her attention.
    This is the ONLY time authors and full title should be stated.
 {intro_joke_text}
 
