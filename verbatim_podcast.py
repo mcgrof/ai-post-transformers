@@ -215,6 +215,23 @@ def _extract_script_segments(text):
         if current_speaker and line.strip():
             current_text.append(line)
         elif not current_speaker and line.strip() and not line.startswith('#'):
+            # Skip non-dialogue lines: metadata, bold formatting-only, stage directions
+            # Skip lines like: **Date:**, **[SOUND]**, **---**, etc.
+            stripped = line.strip()
+            if re.match(r'^\*\*.+?\*\*$', stripped):
+                # Pure bold formatting (no dialogue) - skip
+                if current_text and current_speaker:
+                    text_str = '\n'.join(current_text).strip()
+                    if text_str:
+                        segments.append({
+                            'speaker': current_speaker,
+                            'text': text_str,
+                            'is_narration': False
+                        })
+                current_speaker = None
+                current_text = []
+                continue
+
             # Standalone narration → treat as speaker A
             if current_text and current_speaker:
                 text_str = '\n'.join(current_text).strip()
