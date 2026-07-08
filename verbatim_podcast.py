@@ -38,6 +38,36 @@ import subprocess
 from elevenlabs_client import tts_segment, sweep_stale_podcast_tmp, get_llm_backend
 
 
+def _load_host_soul_profiles():
+    """Load SOUL.md personality profiles for all hosts.
+
+    Returns dict mapping host_name → personality version and traits.
+    Used for TTS pronunciation hints and dialogue attribution.
+    """
+    profiles = {}
+    hosts = ["Hal", "Ada", "VERA"]
+
+    for host in hosts:
+        soul_path = Path(__file__).parent / "hosts" / host.lower() / "SOUL.md"
+        if soul_path.exists():
+            try:
+                content = soul_path.read_text()
+                # Extract personality_version from YAML frontmatter
+                if "personality_version:" in content:
+                    match = re.search(r'personality_version:\s*([0-9.]+[a-z\-]*)', content)
+                    if match:
+                        profiles[host] = {
+                            "version": match.group(1),
+                            "soul_file": str(soul_path),
+                            "exists": True
+                        }
+                        print(f"[Verbatim] Loaded {host} SOUL v{profiles[host]['version']}", file=sys.stderr)
+            except Exception as e:
+                print(f"[Verbatim] Warning: Could not load {host} SOUL.md: {e}", file=sys.stderr)
+
+    return profiles
+
+
 def _is_verbatim_script(text):
     """Detect if text is a pre-written script vs paper content.
 
@@ -85,11 +115,17 @@ def _extract_script_segments(text):
     segments = []
     lines = text.split('\n')
 
-    # Map speaker names to A/B
+    # Map speaker names to A/B/C (C = VERA, new host)
+    # VERA can use her own voice or share with Ada; for now route to B
     speaker_map = {
         'Hal': 'A', 'HAL': 'A',
         'Ada': 'B', 'ADA': 'B', 'DR. ADA': 'B',
-        'VERA': 'A',  # VERA gets Host A voice
+        'VERA': 'B',  # VERA introduced as third host, uses B voice for now
+        'Overlord': 'A',  # Guest voices use default host voice
+        'Claude': 'A',
+        'Pro': 'B',
+        'Codex': 'A',
+        'Luis': 'A',
         'Host': 'A', 'HOST': 'A',
         'Guest': 'B', 'GUEST': 'B',
         'A': 'A', 'B': 'B',
@@ -207,10 +243,15 @@ def _generate_title_from_script(text):
     return "Special Episode"
 
 
-def create_verbatim_podcast(script_text, config):
+def create_verbatim_podcast(script_text, config, soul_profiles=None):
     """Create podcast from verbatim script without LLM analysis.
 
     Returns (tmpdir, list_file, segments, sources, script) similar to create_podcast.
+
+    Args:
+        script_text: verbatim script with dialogue markers
+        config: podcast configuration
+        soul_profiles: dict of host SOUL.md profiles (for logging)
     """
     el_config = config.get("elevenlabs", {})
     voice_a = el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")
@@ -224,6 +265,10 @@ def create_verbatim_podcast(script_text, config):
             voice_a = host["voice_id"]
         if guest.get("voice_id"):
             voice_b = guest["voice_id"]
+
+    # Log loaded host personalities
+    if soul_profiles:
+        print(f"[Podcast] Host profiles loaded: {', '.join(f'{h} v{soul_profiles[h]['version']}' for h in soul_profiles)}", file=sys.stderr)
 
     print("[Podcast] Parsing verbatim script segments...", file=sys.stderr)
     segments = _extract_script_segments(script_text)
@@ -326,10 +371,18 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     if not urls:
         urls = ["https://internal.do-not-panic.com/verbatim-script"]
 
+    # Load host SOUL profiles for personality versioning
+    soul_profiles = _load_host_soul_profiles()
+
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
 
+    # Prepare script text with pronunciation hints
+    # Handle VERA's name: mark as "VAIR-uh" for TTS
+    script_text_prepared = script_text.replace("VERA:", "VAIR-uh:")
+    script_text_prepared = script_text_prepared.replace("VERA (", "VAIR-uh (")
+
     # Create podcast
-    tmpdir, list_file, segments, sources, script = create_verbatim_podcast(script_text, config)
+    tmpdir, list_file, segments, sources, script = create_verbatim_podcast(script_text_prepared, config, soul_profiles)
 
     try:
         # Output path
