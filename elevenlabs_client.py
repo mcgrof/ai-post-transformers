@@ -12,6 +12,7 @@ import sys
 import time
 import requests
 import json
+from pathlib import Path
 
 from llm_backend import get_llm_backend, llm_call
 
@@ -89,6 +90,52 @@ def _pronounce_for_tts(text: str) -> str:
     for pat, repl in _PRONUNCIATION_FIXES:
         out = pat.sub(repl, out)
     return out
+
+
+def _load_host_soul_profiles():
+    """Load SOUL.md personality profiles for all hosts.
+
+    Returns dict mapping host_name → personality version and traits.
+    Personality versions evolve to bring dynamic engagement to each episode.
+    """
+    profiles = {}
+    hosts = ["Hal", "Ada", "VERA"]
+
+    for host in hosts:
+        soul_path = Path(__file__).parent / "hosts" / host.lower() / "SOUL.md"
+        if soul_path.exists():
+            try:
+                content = soul_path.read_text()
+                # Extract personality_version and description from YAML frontmatter
+                version = None
+                description = None
+
+                if "personality_version:" in content:
+                    match = re.search(r'personality_version:\s*([0-9.]+[a-z\-]*)', content)
+                    if match:
+                        version = match.group(1)
+
+                # Extract description (first line after opening ---)
+                lines = content.split('\n')
+                for i, line in enumerate(lines):
+                    if line.startswith('description:'):
+                        desc_match = re.search(r'description:\s*(.+)', line)
+                        if desc_match:
+                            description = desc_match.group(1).strip().strip('"\'')
+                        break
+
+                if version:
+                    profiles[host] = {
+                        "version": version,
+                        "soul_file": str(soul_path),
+                        "description": description or f"{host}'s evolving personality",
+                        "exists": True
+                    }
+                    print(f"[Podcast]   Loaded {host} SOUL v{version}", file=sys.stderr)
+            except Exception as e:
+                print(f"[Podcast]   Warning: Could not load {host} SOUL.md: {e}", file=sys.stderr)
+
+    return profiles
 
 
 def tts_segment(text, voice_id, output_path, config=None):
@@ -1205,6 +1252,9 @@ SPECIAL GUIDANCE — This is Anthropic's Interpretability Research:
     if quality_guidelines:
         instructions = f"{instructions}\n\n--- QUALITY GUIDELINES (from accumulated editorial feedback) ---\n{quality_guidelines}"
 
+    # Load SOUL personality profiles for dynamic engagement
+    soul_profiles = _load_host_soul_profiles()
+
     # Host configuration
     hosts = podcast_config.get("hosts", {})
     host_a = hosts.get("a", {})
@@ -1213,6 +1263,23 @@ SPECIAL GUIDANCE — This is Anthropic's Interpretability Research:
     host_b_name = host_b.get("name", "Dr. Ada Shannon")
     host_a_personality = host_a.get("personality", "Warm, curious, asks good questions.")
     host_b_personality = host_b.get("personality", "Sharp, knowledgeable, direct expert.")
+
+    # Inject SOUL personality versions if available
+    soul_context = ""
+    for host_name, soul_data in soul_profiles.items():
+        version = soul_data.get("version", "")
+        if host_name == "Hal" and "Hal" in host_a_name:
+            host_a_personality = f"{host_a_personality} [SOUL v{version}: {soul_data.get('description', 'evolving character')}]"
+            soul_context += f"HAL SOUL v{version}: {soul_data.get('description')}\n"
+        elif host_name == "Ada" and "Ada" in host_b_name:
+            host_b_personality = f"{host_b_personality} [SOUL v{version}: {soul_data.get('description', 'evolving character')}]"
+            soul_context += f"ADA SOUL v{version}: {soul_data.get('description')}\n"
+        elif host_name == "VERA" and "VERA" in host_b_name:
+            host_b_personality = f"{host_b_personality} [SOUL v{version}: {soul_data.get('description', 'evolving character')}]"
+            soul_context += f"VERA SOUL v{version}: {soul_data.get('description')}\n"
+
+    if soul_context:
+        print(f"[Podcast]   Injecting SOUL personality context:\n{soul_context}", file=sys.stderr)
 
     # Intro — must always be present. Without it the LLM skips the
     # opening entirely and dives straight into technical content.
@@ -1227,7 +1294,17 @@ SPECIAL GUIDANCE — This is Anthropic's Interpretability Research:
 
 HOST B — {host_b_name} (speaker "B"):
 {host_b_personality}
+"""
 
+    if soul_context:
+        host_block += f"""
+PERSONALITY EVOLUTION (SOUL VERSIONS):
+These hosts have evolving characters that grow with each episode:
+{soul_context}
+Reflect this personality evolution in their dialogue — new perspectives, maturing viewpoints,
+and callbacks to previous episodes where appropriate."""
+
+    host_block += f"""
 CITATION REQUIREMENTS:
 When referencing ANY paper, ALWAYS include: paper title, first author, institution/lab,
 year of publication. Example: "That reminds me of the Random Features paper by Rahimi
