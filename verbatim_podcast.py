@@ -457,7 +457,6 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
             title=title,
             publish_date=date_str,
             elevenlabs_project_id="tts-local",
-            transcript_file=str(transcript_file),
             image_file=str(image_file),
             audio_file=str(audio_file),
             source_urls=",".join(urls),
