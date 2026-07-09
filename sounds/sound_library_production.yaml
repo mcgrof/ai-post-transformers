@@ -1,0 +1,155 @@
+# Production Sound Library - Royalty-Free Audio for Podcast
+# All sounds are licensed for commercial use in podcasts
+# Replace this file with sound_library.yaml when ready for production
+
+sounds:
+  # Theme & Opening (Incompetech - Kevin MacLeod CC-BY 3.0)
+  theme:
+    file: "theme-futuristic.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 15000  # ~15 seconds for opening
+    url: "https://incompetech.com/music/royalty-free/?keywords=futuristic"
+    attribution: "Theme music: Futuristic Positive by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  # UI & Notification Sounds (Freesound.org CC0)
+  notification:
+    file: "notification-ping.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 800
+    url: "https://freesound.org/search/?q=notification+ping&filter_license=to_download"
+    attribution: ""
+
+  slack_ping:
+    file: "slack-notification.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 600
+    url: "https://freesound.org/search/?q=slack+notification"
+    attribution: ""
+
+  # Transition Sounds
+  transition:
+    file: "transition-stinger.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 1500
+    url: "https://freesound.org/search/?q=transition+stinger"
+    attribution: ""
+
+  whoosh:
+    file: "whoosh-transition.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 1000
+    url: "https://freesound.org/search/?q=whoosh+transition"
+    attribution: ""
+
+  # Special Effects
+  success_chime:
+    file: "success-chime.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 1200
+    url: "https://freesound.org/search/?q=success+chime"
+    attribution: ""
+
+  git_commit:
+    file: "git-commit-ding.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 800
+    url: "https://freesound.org/search/?q=bell+notification"
+    attribution: ""
+
+  pause:
+    file: "pause-beep.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 400
+    url: "https://freesound.org/search/?q=pause+beep"
+    attribution: ""
+
+  # Dramatic Moments (for VERA introduction - Incompetech Kevin MacLeod)
+  dramatic_strings:
+    file: "dramatic-strings-short.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 8000
+    url: "https://incompetech.com/music/royalty-free/?keywords=dramatic"
+    attribution: "Dramatic strings by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  # Scene Music (Incompetech Kevin MacLeod)
+  boardroom:
+    file: "corporate-boardroom.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 10000
+    url: "https://incompetech.com/music/royalty-free/?keywords=corporate"
+    attribution: "Corporate Background by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  moment_of_recognition:
+    file: "moment-of-recognition.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 6000
+    url: "https://incompetech.com/music/royalty-free/"
+    attribution: "Moment of Recognition by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  absurd_dramatic:
+    file: "dramatic-comedic.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 8000
+    url: "https://incompetech.com/music/royalty-free/?keywords=comedic+dramatic"
+    attribution: "Comedic Dramatic by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  serious_boardroom:
+    file: "serious-boardroom.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 12000
+    url: "https://incompetech.com/music/royalty-free/?keywords=serious"
+    attribution: "Serious Discussion by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  laughter:
+    file: "laughter.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 2000
+    url: "https://freesound.org/search/?q=laughter+audience"
+    attribution: ""
+
+# Production Attribution for Show Notes
+cc_by_attribution: |
+  **Sound Credits**
+
+  Music by Kevin MacLeod (Incompetech.com)
+  Licensed under Creative Commons: By Attribution 3.0
+  https://creativecommons.org/licenses/by/3.0/
+
+  Sound effects from Freesound.org (CC0)
+
+# Setup Instructions for Production Use
+production_notes: |
+  To use this production sound library:
+
+  1. Run the download script:
+     python3 download_production_sounds.py
+
+  2. Verify all sounds downloaded correctly:
+     ffprobe sounds/*.mp3 -v error -show_entries format=duration
+
+  3. Replace sound_library.yaml with sound_library_production.yaml:
+     cp sounds/sound_library.yaml sounds/sound_library_test.yaml
+     cp sounds/sound_library_production.yaml sounds/sound_library.yaml
+
+  4. Test with a VERA episode:
+     python3 -c "from verbatim_podcast import generate_verbatim_podcast_from_script; ..."
+
+  5. Verify audio includes real sounds (listen to the MP3):
+     - Opening theme (Incompetech)
+     - Notification pings (Freesound)
+     - Transition sounds (Freesound)
+     - Dramatic strings (Incompetech)
