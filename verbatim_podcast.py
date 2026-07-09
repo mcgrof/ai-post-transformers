@@ -105,6 +105,44 @@ def _is_verbatim_script(text):
     return marker_count > len(lines) * 0.1
 
 
+def _clean_dialogue_text(text):
+    """Remove metadata, stage directions, and formatting from dialogue."""
+    lines = text.split('\n')
+    cleaned = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Skip pure metadata lines
+        if re.match(r'^-{3,}', stripped):  # horizontal rules
+            continue
+        if re.match(r'^#{1,}', stripped):  # headers
+            continue
+        if re.match(r'^\[[A-Z]+.*?\]$', stripped):  # [STAGE: ...]
+            continue
+        if re.match(r'^>', stripped):  # blockquotes
+            continue
+        if re.match(r'^\*\*\[.*?\]\*\*$', stripped):  # **[STAGE]**
+            continue
+        if re.match(r'^\*\*[A-Z_]+.*:\*\*$', stripped):  # **LABEL:**
+            continue
+
+        # Remove inline stage directions from dialogue
+        cleaned_line = line
+        cleaned_line = re.sub(r'\*\*\[SOUND:[^\]]*\]\*\*', '', cleaned_line)
+        cleaned_line = re.sub(r'\*\*\[[A-Z_]+[^\]]*\]\*\*', '', cleaned_line)
+        cleaned_line = re.sub(r'\[SOUND:[^\]]*\]', '', cleaned_line)
+        cleaned_line = re.sub(r'\[[A-Z_]+[^\]]*\]', '', cleaned_line)
+        cleaned_line = cleaned_line.strip()
+
+        if cleaned_line:
+            cleaned.append(cleaned_line)
+
+    return '\n'.join(cleaned)
+
+
 def _extract_script_segments(text):
     """Parse verbatim script into segments for TTS.
 
@@ -204,6 +242,7 @@ def _extract_script_segments(text):
                 # Flush previous speaker
                 if current_text and current_speaker:
                     text_str = '\n'.join(current_text).strip()
+                    text_str = _clean_dialogue_text(text_str)  # Remove metadata
                     if text_str:
                         segments.append({
                             'speaker': current_speaker,
@@ -258,6 +297,7 @@ def _extract_script_segments(text):
     # Flush final segment
     if current_text and current_speaker:
         text_str = '\n'.join(current_text).strip()
+        text_str = _clean_dialogue_text(text_str)  # Remove metadata
         if text_str:
             segments.append({
                 'speaker': current_speaker,
