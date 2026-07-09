@@ -33,6 +33,7 @@ from rss import generate_feed
 from sound_handler import load_sound_library, find_sound_markers, get_attribution_text
 from sound_inserter import log_sound_timeline, insert_sounds_into_audio
 from sound_mixer import build_ffmpeg_concat_script, map_sounds_to_segments
+from script_parser import ScriptParser, render_tts_manifest, audit_parse
 
 import tempfile
 import time
@@ -143,6 +144,66 @@ def _clean_dialogue_text(text):
     return '\n'.join(cleaned)
 
 
+def _extract_script_segments_via_ast(text):
+    """Extract dialogue segments using proper AST parser.
+
+    Preserves theatrical structure (acts, scenes, cues) in the AST,
+    extracts only dialogue nodes for TTS, and validates parsing completeness.
+
+    Returns:
+        tuple: (segments_list, audit_dict)
+        segments_list: [{speaker, text}, ...]
+        audit_dict: {raw_lines, nodes, dialogue_nodes, acts, scenes, sounds, ...}
+    """
+    # Speaker name to A/B mapping
+    speaker_canon_map = {
+        'Hal Turing': 'HAL', 'Hal': 'HAL',
+        'Dr. Ada Shannon': 'ADA', 'Ada Shannon': 'ADA', 'Ada': 'ADA',
+        # VERA is NOT a speaker; she's a concept Hal & Ada discuss
+        # If VERA appears, she should not be voiced (skip her dialogue lines)
+    }
+
+    # Parse using AST parser
+    parser = ScriptParser(speaker_map=speaker_canon_map)
+    nodes = parser.parse(text)
+
+    # Audit for completeness
+    audit = audit_parse(nodes, text)
+
+    # Hard fail if parsed content is suspiciously small
+    if audit.dialogue_nodes < 2:
+        raise ValueError(
+            f"Parsed only {audit.dialogue_nodes} dialogue nodes. "
+            f"Script likely truncated or invalid. Check parsing."
+        )
+
+    # Convert dialogue nodes to segment format for compatibility
+    segments = []
+    voice_map = {'HAL': 'A', 'ADA': 'B'}  # HAL → voice A, ADA → voice B
+
+    for node in nodes:
+        if node.type.value == 'dialogue' and node.spoken and node.text:
+            speaker_voice = voice_map.get(node.canonical_speaker, 'A')
+            segments.append({
+                'speaker': speaker_voice,
+                'text': node.text,
+                'is_narration': False,
+                'canonical_speaker': node.canonical_speaker,
+            })
+
+    return segments, {
+        'raw_lines': audit.raw_nonblank_lines,
+        'nodes_total': audit.nodes_total,
+        'dialogue_nodes': audit.dialogue_nodes,
+        'act_nodes': audit.act_nodes,
+        'scene_nodes': audit.scene_nodes,
+        'sound_nodes': audit.sound_nodes,
+        'music_nodes': audit.music_nodes,
+        'spoken_words': audit.spoken_words,
+        'estimated_duration_seconds': audit.estimated_duration_seconds,
+    }
+
+
 def _extract_script_segments(text):
     """Parse verbatim script into segments for TTS.
 
@@ -160,17 +221,16 @@ def _extract_script_segments(text):
     segments = []
     lines = text.split('\n')
 
-    # Map speaker names to A/B/C (C = VERA, new host)
-    # VERA can use her own voice or share with Ada; for now route to B
+    # Map speaker names to A/B (only podcast personas, no personal names)
+    # VERA is not a speaker; she's a concept Hal & Ada discuss
     speaker_map = {
         'Hal': 'A', 'HAL': 'A', 'Hal Turing': 'A',
         'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B', 'Dr Ada Shannon': 'B',
-        'VERA': 'B',  # VERA introduced as third host, uses B voice for now
+        # Note: VERA is NOT a speaker in audio; she's mentioned but not voiced
         'Overlord': 'A', 'OVERLORD': 'A', 'OVERLORD MEMO': 'A', 'OVERLORD VOICE': 'A',
         'Claude': 'A', 'CLAUDE': 'A',
         'Pro': 'B', 'PRO': 'B', 'ChatGPT Pro': 'B',
         'Codex': 'A', 'CODEX': 'A',
-        'Luis': 'A', 'LUIS': 'A', 'LUIS': 'A',
         'Host': 'A', 'HOST': 'A', 'NARRATOR': 'A',
         'NARRATOR/HOST INTRO': 'A',
         'Guest': 'B', 'GUEST': 'B',
@@ -361,9 +421,21 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
     if soul_profiles:
         print(f"[Podcast] Host profiles loaded: {', '.join(f'{h} v{soul_profiles[h]['version']}' for h in soul_profiles)}", file=sys.stderr)
 
-    print("[Podcast] Parsing verbatim script segments...", file=sys.stderr)
-    segments = _extract_script_segments(script_text)
-    print(f"[Podcast] Extracted {len(segments)} dialogue segments", file=sys.stderr)
+    print("[Podcast] Parsing verbatim script segments with AST parser...", file=sys.stderr)
+    try:
+        segments, audit = _extract_script_segments_via_ast(script_text)
+        print(f"[Podcast] AST Parse audit:", file=sys.stderr)
+        print(f"[Podcast]   - Dialogue nodes: {audit['dialogue_nodes']}", file=sys.stderr)
+        print(f"[Podcast]   - Acts: {audit['act_nodes']}, Scenes: {audit['scene_nodes']}", file=sys.stderr)
+        print(f"[Podcast]   - Sounds: {audit['sound_nodes']}, Music: {audit['music_nodes']}", file=sys.stderr)
+        print(f"[Podcast]   - Spoken words: {audit['spoken_words']}", file=sys.stderr)
+        print(f"[Podcast]   - Est. duration: {audit['estimated_duration_seconds']:.1f}s (~{audit['estimated_duration_seconds']/60:.1f}m)", file=sys.stderr)
+        print(f"[Podcast] Extracted {len(segments)} dialogue segments", file=sys.stderr)
+    except ValueError as e:
+        print(f"[Podcast] AST parse failed: {e}", file=sys.stderr)
+        print(f"[Podcast] Falling back to legacy parser...", file=sys.stderr)
+        segments = _extract_script_segments(script_text)
+        print(f"[Podcast] Extracted {len(segments)} dialogue segments (legacy)", file=sys.stderr)
 
     if not segments:
         raise ValueError("No dialogue segments found in script")
