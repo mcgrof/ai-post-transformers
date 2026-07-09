@@ -31,6 +31,8 @@ from image_gen import generate_episode_image
 from local_cover import render_title_cover
 from rss import generate_feed
 from sound_handler import load_sound_library, find_sound_markers, get_attribution_text
+from sound_inserter import log_sound_timeline, insert_sounds_into_audio
+from sound_mixer import build_ffmpeg_concat_script, map_sounds_to_segments
 
 import tempfile
 import time
@@ -457,8 +459,28 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
 
         audio_file = output_dir / f"{stem}.mp3"
 
+        # Log audio timeline with sound effects
+        log_sound_timeline(segment_files, sound_markers, sound_library)
+
+        # Build enhanced concat file with sound insertions if sounds exist
+        concat_file = list_file
+        if sound_markers:
+            try:
+                # Map sound markers to segment indices
+                sound_map = map_sounds_to_segments(sound_markers, len(segment_files))
+                concat_file = build_ffmpeg_concat_script(
+                    segment_files,
+                    sound_map,
+                    sound_library,
+                    tmpdir
+                )
+                print(f"[Podcast] Using sound-enhanced concat file: {concat_file}", file=sys.stderr)
+            except Exception as e:
+                print(f"[Podcast] Warning: Sound concat build failed, using original: {e}", file=sys.stderr)
+                concat_file = list_file
+
         # Finalize audio
-        finalize_podcast(tmpdir, list_file, str(audio_file))
+        finalize_podcast(tmpdir, concat_file, str(audio_file))
 
         # Save transcript and SRT
         hosts = config.get("podcast", {}).get("hosts", {})
