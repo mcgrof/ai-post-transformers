@@ -107,41 +107,64 @@ def _is_verbatim_script(text):
 
 
 def _clean_dialogue_text(text):
-    """Remove metadata, stage directions, and formatting from dialogue."""
+    """Remove ALL metadata, stage directions, cues from dialogue.
+
+    Aggressively strips anything that shouldn't be spoken:
+    - [SOUND: X], [MUSIC: X], [SOUND MONTAGE ...], etc.
+    - **[SOUND: X]**, **[MUSIC]**, etc.
+    - Stage directions in any format
+    - Metadata markers
+    - Blockquotes
+
+    This prevents metadata from being vocalized in the audio.
+    """
+    # First pass: remove lines that are ONLY metadata/stage directions
     lines = text.split('\n')
-    cleaned = []
+    filtered = []
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
 
-        # Skip pure metadata lines
-        if re.match(r'^-{3,}', stripped):  # horizontal rules
+        # Skip entire lines that are only metadata
+        if re.match(r'^-{3,}$', stripped):  # --- alone
             continue
-        if re.match(r'^#{1,}', stripped):  # headers
+        if re.match(r'^#{1,}\s+', stripped):  # # Header alone
             continue
-        if re.match(r'^\[[A-Z]+.*?\]$', stripped):  # [STAGE: ...]
+        if re.match(r'^\[[A-Z]', stripped) and stripped.endswith(']'):  # [SOUND: ...], [MUSIC], etc
             continue
-        if re.match(r'^>', stripped):  # blockquotes
+        if re.match(r'^\*\*\[', stripped):  # **[STAGE]**
             continue
-        if re.match(r'^\*\*\[.*?\]\*\*$', stripped):  # **[STAGE]**
+        if re.match(r'^\*\*[A-Z_]+:\*\*$', stripped):  # **METADATA:**
             continue
-        if re.match(r'^\*\*[A-Z_]+.*:\*\*$', stripped):  # **LABEL:**
+        if re.match(r'^>', stripped):  # > blockquote
             continue
 
-        # Remove inline stage directions from dialogue
-        cleaned_line = line
-        cleaned_line = re.sub(r'\*\*\[SOUND:[^\]]*\]\*\*', '', cleaned_line)
-        cleaned_line = re.sub(r'\*\*\[[A-Z_]+[^\]]*\]\*\*', '', cleaned_line)
-        cleaned_line = re.sub(r'\[SOUND:[^\]]*\]', '', cleaned_line)
-        cleaned_line = re.sub(r'\[[A-Z_]+[^\]]*\]', '', cleaned_line)
-        cleaned_line = cleaned_line.strip()
+        filtered.append(line)
 
-        if cleaned_line:
-            cleaned.append(cleaned_line)
+    # Second pass: remove inline metadata from remaining lines
+    text = '\n'.join(filtered)
 
-    return '\n'.join(cleaned)
+    # Remove all inline sound/music/stage markers
+    text = re.sub(r'\s*\*\*\[SOUND[^\]]*\]\*\*\s*', ' ', text)
+    text = re.sub(r'\s*\*\*\[MUSIC[^\]]*\]\*\*\s*', ' ', text)
+    text = re.sub(r'\s*\*\*\[[A-Z_][^\]]*\]\*\*\s*', ' ', text)
+    text = re.sub(r'\s*\[SOUND[^\]]*\]\s*', ' ', text)
+    text = re.sub(r'\s*\[MUSIC[^\]]*\]\s*', ' ', text)
+    text = re.sub(r'\s*\[PAUSE\]\s*', ' ', text)
+    text = re.sub(r'\s*\[SILENCE\]\s*', ' ', text)
+    text = re.sub(r'\s*\[BEAT\]\s*', ' ', text)
+    text = re.sub(r'\s*\[NOTIFICATION[^\]]*\]\s*', ' ', text)
+
+    # Remove markdown bold/italic formatting
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+
+    # Clean up excess whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
 
 
 def _extract_script_segments_via_ast(text):
@@ -226,7 +249,7 @@ def _extract_script_segments(text):
     speaker_map = {
         'Hal': 'A', 'HAL': 'A', 'Hal Turing': 'A',
         'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B', 'Dr Ada Shannon': 'B',
-        # Note: VERA is NOT a speaker in audio; she's mentioned but not voiced
+        'Vera': 'C', 'VERA': 'C',  # Third host - use 'Vera' not 'VERA' (AI capitalization issues)
         'Overlord': 'A', 'OVERLORD': 'A', 'OVERLORD MEMO': 'A', 'OVERLORD VOICE': 'A',
         'Claude': 'A', 'CLAUDE': 'A',
         'Pro': 'B', 'PRO': 'B', 'ChatGPT Pro': 'B',
@@ -234,7 +257,7 @@ def _extract_script_segments(text):
         'Host': 'A', 'HOST': 'A', 'NARRATOR': 'A',
         'NARRATOR/HOST INTRO': 'A',
         'Guest': 'B', 'GUEST': 'B',
-        'A': 'A', 'B': 'B',
+        'A': 'A', 'B': 'B', 'C': 'C',
     }
 
     current_speaker = None
@@ -405,17 +428,21 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
         soul_profiles: dict of host SOUL.md profiles (for logging)
     """
     el_config = config.get("elevenlabs", {})
-    voice_a = el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")
-    voice_b = el_config.get("voice_b", "HBQuDIqftrmAQQAHSWnF")
+    voice_a = el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")  # Hal
+    voice_b = el_config.get("voice_b", "HBQuDIqftrmAQQAHSWnF")  # Ada
+    voice_c = el_config.get("voice_c", "TBD")  # Vera (third host)
 
     voices = el_config.get("voices", {})
     if voices:
         host = voices.get("host", {})
         guest = voices.get("guest", {})
+        third = voices.get("third_host", {})
         if host.get("voice_id"):
             voice_a = host["voice_id"]
         if guest.get("voice_id"):
             voice_b = guest["voice_id"]
+        if third.get("voice_id"):
+            voice_c = third["voice_id"]
 
     # Log loaded host personalities
     if soul_profiles:
@@ -486,7 +513,20 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
     # Generate TTS for script segments
     print("[Podcast] Generating TTS for script segments...", file=sys.stderr)
     for i, seg in enumerate(segments):
-        voice = voice_a if seg["speaker"] == "A" else voice_b
+        # Map speaker to voice
+        if seg["speaker"] == "A":
+            voice = voice_a
+            speaker_label = "Hal"
+        elif seg["speaker"] == "B":
+            voice = voice_b
+            speaker_label = "Ada"
+        elif seg["speaker"] == "C":
+            voice = voice_c
+            speaker_label = "Vera"
+        else:
+            voice = voice_a
+            speaker_label = seg["speaker"]
+
         seg_path = os.path.join(tmpdir, f"seg_{i:03d}.mp3")
         text = seg["text"]
 
@@ -494,7 +534,7 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Remove **bold**
         text = re.sub(r'^#+\s+', '', text)  # Remove # headers
 
-        print(f"[Podcast] TTS segment {i+1}/{len(segments)} ({seg['speaker']})...", file=sys.stderr)
+        print(f"[Podcast] TTS segment {i+1}/{len(segments)} ({speaker_label})...", file=sys.stderr)
         tts_segment(text, voice, seg_path)
         segment_files.append(seg_path)
         time.sleep(0.3)
@@ -560,16 +600,15 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         output_dir = Path(__file__).parent / "drafts" / year / month
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Unique stem
+        # Unique stem - temporary, will be renamed with checksum after generation
         slug = unicodedata.normalize("NFKD", title)
         slug = slug.encode("ascii", "ignore").decode("ascii")
         slug = re.sub(r"[^\w\s-]", "", slug, flags=re.ASCII).strip().lower()
         slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
-        hash_input = f"{title}|{date_str}|{','.join(sorted(urls))}"
-        hash6 = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
-        stem = f"{date_str}-{slug}-{hash6}"
 
-        audio_file = output_dir / f"{stem}.mp3"
+        # Temporary filename for generation
+        temp_stem = f"{date_str}-{slug}-temp"
+        temp_audio_file = output_dir / f"{temp_stem}.mp3"
 
         # Log audio timeline with sound effects
         log_sound_timeline(segment_files, sound_markers, sound_library)
@@ -591,8 +630,24 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                 print(f"[Podcast] Warning: Sound concat build failed, using original: {e}", file=sys.stderr)
                 concat_file = list_file
 
-        # Finalize audio
-        finalize_podcast(tmpdir, concat_file, str(audio_file))
+        # Finalize audio to temporary file
+        finalize_podcast(tmpdir, concat_file, str(temp_audio_file))
+
+        # Compute MD5 checksum of generated audio and rename with checksum
+        def compute_file_checksum(filepath, algo='md5'):
+            """Compute checksum of file."""
+            import hashlib
+            hash_obj = hashlib.new(algo)
+            with open(filepath, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    hash_obj.update(chunk)
+            return hash_obj.hexdigest()[:10]  # First 10 chars
+
+        checksum = compute_file_checksum(str(temp_audio_file))
+        stem = f"{date_str}-{slug}-{checksum}"
+        audio_file = output_dir / f"{stem}.mp3"
+        temp_audio_file.rename(audio_file)
+        print(f"[Podcast] Audio checksum: {checksum}", file=sys.stderr)
 
         # Save transcript and SRT
         hosts = config.get("podcast", {}).get("hosts", {})
