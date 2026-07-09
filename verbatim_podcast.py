@@ -266,8 +266,13 @@ def _extract_script_segments(text):
     for line in lines:
         line = line.rstrip()
 
-        # Skip sound/music directions
-        if re.match(r'^\[(SOUND|MUSIC|SOUND:|MUSIC:)', line, re.IGNORECASE):
+        # Strip leading metadata markers from line for processing
+        # e.g., "**[SOUND: theme]** Hal: text" → "Hal: text"
+        processed_line = re.sub(r'^\s*\*\*?\[.*?\]\*\*?\s+', '', line)
+        processed_line = re.sub(r'^\s*\[.*?\]\s+', '', processed_line)
+
+        # Skip pure standalone sound/music directions (only the marker, no speaker after)
+        if re.match(r'^\[(SOUND|MUSIC|SOUND:|MUSIC:)', line, re.IGNORECASE) and processed_line == line:
             if current_text and current_speaker:
                 text_str = '\n'.join(current_text).strip()
                 if text_str:
@@ -280,7 +285,7 @@ def _extract_script_segments(text):
             current_text = []
             continue
 
-        # Skip other stage directions
+        # Skip other standalone stage directions
         if re.match(r'^\[.*?\]$', line):
             if current_text and current_speaker:
                 text_str = '\n'.join(current_text).strip()
@@ -294,9 +299,9 @@ def _extract_script_segments(text):
             current_text = []
             continue
 
-        # Try to match speaker labels: **SPEAKER (notes):** or SPEAKER:
+        # Try to match speaker labels on the processed line (after stripping leading metadata)
         # Format: **SPEAKER_NAME (optional notes):** where ** surrounds everything including colon
-        match = re.match(r'^\*\*(.+?):\*\*$', line)
+        match = re.match(r'^\*\*(.+?):\*\*$', processed_line)
         if match:
             # Extract speaker name (might have parenthetical notes or continuation phrases)
             content = match.group(1).strip()
@@ -306,8 +311,8 @@ def _extract_script_segments(text):
             speaker_name = re.sub(r'\s+(continues|presents|outlines|reads|reads from).*$', '', speaker_name).strip()
             text = ""
         else:
-            # Try plain format: SPEAKER: text
-            match = re.match(r'^([A-Z][A-Za-z\s\.]*?):\s+(.+)$', line)
+            # Try plain format: SPEAKER: text (on processed line without leading metadata)
+            match = re.match(r'^([A-Z][A-Za-z\s\.]*?):\s+(.+)$', processed_line)
             if match:
                 speaker_name = match.group(1).strip()
                 text = match.group(2).strip()
