@@ -30,11 +30,13 @@ from elevenlabs_client import finalize_podcast, save_transcript, generate_srt, c
 from image_gen import generate_episode_image
 from local_cover import render_title_cover
 from rss import generate_feed
+from sound_handler import load_sound_library, find_sound_markers, get_attribution_text
 
 import tempfile
 import time
 import os
 import subprocess
+import yaml
 from elevenlabs_client import tts_segment, sweep_stale_podcast_tmp, get_llm_backend
 
 
@@ -421,6 +423,16 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     # Load host SOUL profiles for personality versioning
     soul_profiles = _load_host_soul_profiles()
 
+    # Load sound effects library and detect markers
+    sound_library = load_sound_library()
+    sound_markers = find_sound_markers(script_text)
+    sounds_used = [name for name, _, _ in sound_markers]
+
+    if sound_markers:
+        print(f"[Podcast] Found {len(sound_markers)} sound effect markers", file=sys.stderr)
+        for name, line, text in sound_markers:
+            print(f"[Podcast]   {name} at line {line}", file=sys.stderr)
+
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
     print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
@@ -460,10 +472,17 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         save_transcript(script, str(transcript_file), host_names)
         generate_srt(script, segment_files, str(srt_file), host_names=host_names)
 
-        # Save script JSON
+        # Save script JSON with sound attribution
         script_file = audio_file.with_suffix(".json")
+        sound_attribution = get_attribution_text(sound_library, sounds_used) if sounds_used else ""
         with open(script_file, "w") as f:
-            json.dump({"script": script, "sources": sources, "is_verbatim": True}, f, indent=2)
+            json.dump({
+                "script": script,
+                "sources": sources,
+                "is_verbatim": True,
+                "sound_effects": sounds_used,
+                "attribution": sound_attribution
+            }, f, indent=2)
 
         # Generate cover image
         image_file = audio_file.with_suffix(".png")
@@ -476,6 +495,11 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         conn = get_connection()
         init_db(conn)
 
+        # Build description with sound attribution note
+        description = f"Special episode: {title}"
+        if sounds_used:
+            description += "\n\nSound effects and music licensed under Creative Commons. See show notes for attribution."
+
         podcast_id = insert_podcast(
             conn,
             title=title,
@@ -484,7 +508,7 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
             image_file=str(image_file),
             audio_file=str(audio_file),
             source_urls=",".join(urls),
-            description=f"Special episode: {title}",
+            description=description,
             visibility="public",
         )
 

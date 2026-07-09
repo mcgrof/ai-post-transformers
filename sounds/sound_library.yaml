@@ -1,0 +1,128 @@
+# Sound Effect Library for Verbatim Podcasts
+# Maps sound markers to audio files (CC0/CC-BY licensed)
+# Format in script: **[SOUND: notification]** → triggers this library
+
+sounds:
+  # Theme & Opening
+  theme:
+    file: "theme-futuristic.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 5000
+    url: "https://incompetech.com/music/royalty-free/?keywords=futuristic"
+    attribution: "Theme music: Futuristic Interface by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  # UI & Notification Sounds
+  notification:
+    file: "notification-ping.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 400
+    url: "https://freesound.org/search/?q=notification+ping&filter_license=to_download"
+    attribution: ""
+
+  slack_ping:
+    file: "slack-notification.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 300
+    url: "https://freesound.org/search/?q=slack+notification"
+    attribution: ""
+
+  # Transition Sounds
+  transition:
+    file: "transition-stinger.mp3"
+    source: "Zapsplat"
+    license: "CC0"
+    duration_ms: 1200
+    url: "https://www.zapsplat.com/"
+    attribution: ""
+
+  whoosh:
+    file: "whoosh-transition.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 600
+    url: "https://freesound.org/search/?q=whoosh+transition"
+    attribution: ""
+
+  # Special Effects
+  success_chime:
+    file: "success-chime.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 800
+    url: "https://freesound.org/search/?q=success+chime"
+    attribution: ""
+
+  git_commit:
+    file: "git-commit-ding.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 500
+    url: "https://freesound.org/search/?q=success+bell"
+    attribution: ""
+
+  pause:
+    file: "pause-beep.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 200
+    url: "https://freesound.org/search/?q=pause+beep"
+    attribution: ""
+
+  # Dramatic Moments (for VERA introduction)
+  dramatic_strings:
+    file: "dramatic-strings-short.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 3000
+    url: "https://incompetech.com/music/royalty-free/?keywords=dramatic"
+    attribution: "Dramatic strings by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  # Scene Music
+  boardroom:
+    file: "corporate-boardroom.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 4000
+    url: "https://incompetech.com/music/royalty-free/?keywords=corporate"
+    attribution: "Boardroom theme by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  moment_of_recognition:
+    file: "moment-of-recognition.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 2000
+    url: "https://incompetech.com/music/royalty-free/"
+    attribution: "Music by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  absurd_dramatic:
+    file: "dramatic-comedic.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 3500
+    url: "https://incompetech.com/music/royalty-free/?keywords=comedic+dramatic"
+    attribution: "Music by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  serious_boardroom:
+    file: "serious-boardroom.mp3"
+    source: "Incompetech - Kevin MacLeod"
+    license: "CC-BY 3.0"
+    duration_ms: 4500
+    url: "https://incompetech.com/music/royalty-free/?keywords=serious"
+    attribution: "Music by Kevin MacLeod (Incompetech) - Licensed under CC-BY 3.0"
+
+  laughter:
+    file: "audience-laughter.mp3"
+    source: "Freesound.org"
+    license: "CC0"
+    duration_ms: 1500
+    url: "https://freesound.org/search/?q=laughter+audience"
+    attribution: ""
+
+# Attribution for show notes (concatenate all CC-BY sounds used)
+cc_by_attribution: |
+  Music by Kevin MacLeod (Incompetech.com)
+  Licensed under Creative Commons: By Attribution 3.0
+  https://creativecommons.org/licenses/by/3.0/
