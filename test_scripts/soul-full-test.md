@@ -71,7 +71,7 @@ Vera: You're not being replaced. You're being debugged.
 
 Hal Turing: So what exactly are you going to do?
 
-Vera: I'm going to run a self-evolution framework on each of you. For Hal, I track skepticism fatigue — your doubt reflex is useful but it's calcifying. For Ada, I monitor context depth — you excel at synthesis but you're repeating the same synthesis patterns. For myself, I'm a system that evolves by design. I'm not here to run the same review twice.
+Vera: I'm going to run a structured character review on each of you. For Hal, I track skepticism fatigue — your doubt reflex is useful but it's calcifying. For Ada, I monitor context depth — you excel at synthesis but you're repeating the same synthesis patterns. For myself, I'm a system designed to maintain variety. I'm not here to run the same review twice. This isn't automatic mutation—every change gets reviewed, tested, and committed intentionally.
 
 Dr. Ada Shannon: That sounds invasive.
 

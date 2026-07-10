@@ -483,7 +483,7 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
         "atrim=0:8,"
         "asetpts=PTS-STARTPTS,"
         "afade=t=in:st=0:d=0.8,"
-        "volume='if(lt(t,2),1,0.05)':eval=frame"
+        "volume='if(lt(t,2),1,if(lt(t,3),1-(0.95*(t-2)),0.05))':eval=frame"
         "[theme];"
 
         "[1:a]"
