@@ -202,7 +202,7 @@ def _extract_script_segments_via_ast(text):
 
     # Convert dialogue nodes to segment format for compatibility
     segments = []
-    voice_map = {'HAL': 'A', 'ADA': 'B'}  # HAL → voice A, ADA → voice B
+    voice_map = {'HAL': 'A', 'ADA': 'B', 'VERA': 'C'}  # HAL → voice A, ADA → voice B, VERA → voice C
 
     for node in nodes:
         if node.type.value == 'dialogue' and node.spoken and node.text:
@@ -728,6 +728,7 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     has_theme_marker = "[SOUND: theme]" in script_text or "[SOUND:theme]" in script_text
     is_special_episode = has_theme_marker or "SOUL" in (title or "") or "soul" in (goal or "").lower()
     theme_variant = "full" if is_special_episode else "short"
+    print(f"[Debug] has_theme_marker={has_theme_marker}, title={title!r}, goal={goal!r}, is_special={is_special_episode}, theme_variant={theme_variant}", file=sys.stderr)
 
     sound_library = load_sound_library(library_name="gemini_library.yaml", theme_variant=theme_variant)
     sound_markers = find_sound_markers(script_text)
