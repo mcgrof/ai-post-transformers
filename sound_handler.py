@@ -11,15 +11,24 @@ import yaml
 from pathlib import Path
 
 
-def load_sound_library():
+def load_sound_library(library_name="gemini_library.yaml", theme_variant="short"):
     """Load sound library configuration.
+
+    Args:
+        library_name: Which library to load (gemini_library.yaml or sound_library.yaml)
+        theme_variant: Which theme version to use ("short" or "full")
 
     Returns dict mapping sound names to metadata + file paths.
     """
-    lib_path = Path(__file__).parent / "sounds" / "sound_library.yaml"
+    lib_path = Path(__file__).parent / "sounds" / library_name
+
+    # Fallback to default library if specified one doesn't exist
+    if not lib_path.exists():
+        lib_path = Path(__file__).parent / "sounds" / "sound_library.yaml"
+        print(f"[Sound] Using fallback library: {lib_path}", file=sys.stderr)
 
     if not lib_path.exists():
-        print(f"[Sound] Warning: sound library not found at {lib_path}", file=sys.stderr)
+        print(f"[Sound] Warning: sound library not found", file=sys.stderr)
         return {}
 
     try:
@@ -27,16 +36,32 @@ def load_sound_library():
             data = yaml.safe_load(f)
         sounds = data.get("sounds", {})
 
-        # Verify files exist and add full paths
+        # Verify files exist and resolve paths (handle ~ expansion)
         for name, config in sounds.items():
             file_name = config.get("file")
             if file_name:
+                # Check if this sound has theme variants
+                if name == "theme" and config.get("variants"):
+                    # Select theme variant
+                    variant_file = config["variants"].get(theme_variant)
+                    if variant_file:
+                        file_name = variant_file
+                        config["file"] = file_name
+                        # Update duration based on variant
+                        if theme_variant == "full":
+                            config["duration_ms"] = 10000  # Full theme is 10s
+                        else:
+                            config["duration_ms"] = 5000   # Short theme is 5s
+                        print(f"[Sound] Using theme variant: {theme_variant} ({config['duration_ms']}ms)", file=sys.stderr)
+
+                # Resolve file path (relative to sounds/ or absolute)
                 file_path = Path(__file__).parent / "sounds" / file_name
+
                 config["file_path"] = str(file_path)
                 if not file_path.exists():
                     print(f"[Sound] Warning: {name} file not found: {file_path}", file=sys.stderr)
 
-        print(f"[Sound] Loaded {len(sounds)} sound effects from library", file=sys.stderr)
+        print(f"[Sound] Loaded {len(sounds)} sound effects from {library_name}", file=sys.stderr)
         return sounds
 
     except Exception as e:
