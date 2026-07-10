@@ -244,6 +244,15 @@ def _extract_script_segments(text):
     segments = []
     lines = text.split('\n')
 
+    # Skip YAML frontmatter (--- ... ---)
+    start_idx = 0
+    if lines and lines[0].strip() == '---':
+        for i in range(1, len(lines)):
+            if lines[i].strip() == '---':
+                start_idx = i + 1
+                break
+    lines = lines[start_idx:]
+
     # Map speaker names to A/B (only podcast personas, no personal names)
     # VERA is not a speaker; she's a concept Hal & Ada discuss
     speaker_map = {
@@ -572,7 +581,11 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     soul_profiles = _load_host_soul_profiles()
 
     # Load sound effects library and detect markers
-    sound_library = load_sound_library()
+    # Check if this is a special episode (use full theme) or regular (use short theme)
+    is_special_episode = "SOUL" in (title or "") or "soul" in (goal or "").lower()
+    theme_variant = "full" if is_special_episode else "short"
+
+    sound_library = load_sound_library(library_name="gemini_library.yaml", theme_variant=theme_variant)
     sound_markers = find_sound_markers(script_text)
     sounds_used = [name for name, _, _ in sound_markers]
 
