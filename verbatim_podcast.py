@@ -239,7 +239,8 @@ def _extract_script_segments(text):
     - [MUSIC] → skip
     - Narrative text with speakers embedded
 
-    Returns list of {speaker, text, is_narration} dicts.
+    Returns list of {speaker, text, is_narration, line_number} dicts.
+    Line numbers track the original script line for sound mapping.
     """
     segments = []
     lines = text.split('\n')
@@ -251,6 +252,9 @@ def _extract_script_segments(text):
             if lines[i].strip() == '---':
                 start_idx = i + 1
                 break
+
+    # Keep track of absolute line numbers (including frontmatter)
+    absolute_line_offset = start_idx
     lines = lines[start_idx:]
 
     # Map speaker names to A/B (only podcast personas, no personal names)
@@ -271,8 +275,9 @@ def _extract_script_segments(text):
 
     current_speaker = None
     current_text = []
+    current_line_number = None
 
-    for line in lines:
+    for line_idx, line in enumerate(lines, start=absolute_line_offset + 1):
         line = line.rstrip()
 
         # Strip leading metadata markers from line for processing
@@ -288,7 +293,8 @@ def _extract_script_segments(text):
                     segments.append({
                         'speaker': current_speaker,
                         'text': text_str,
-                        'is_narration': False
+                        'is_narration': False,
+                        'line_number': current_line_number or line_idx
                     })
             current_speaker = None
             current_text = []
@@ -302,7 +308,8 @@ def _extract_script_segments(text):
                     segments.append({
                         'speaker': current_speaker,
                         'text': text_str,
-                        'is_narration': False
+                        'is_narration': False,
+                        'line_number': current_line_number or line_idx
                     })
             current_speaker = None
             current_text = []
@@ -349,6 +356,7 @@ def _extract_script_segments(text):
 
                 current_speaker = speaker
                 current_text = [text] if text else []
+                current_line_number = line_idx
                 continue
 
         # Continuation of current speaker
@@ -386,7 +394,8 @@ def _extract_script_segments(text):
                     segments.append({
                         'speaker': current_speaker,
                         'text': text_str,
-                        'is_narration': False
+                        'is_narration': False,
+                        'line_number': current_line_number or line_idx
                     })
             current_speaker = 'A'
             current_text = [line]
@@ -742,7 +751,12 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         if sound_markers:
             try:
                 # Map sound markers to segment indices
-                sound_map = map_sounds_to_segments(sound_markers, len(segment_files))
+                # For theatrical episodes, pass script segments for intelligent mapping
+                if is_special_episode:
+                    sound_map = map_sounds_to_segments(sound_markers, len(segment_files), script_segments=segments)
+                else:
+                    sound_map = map_sounds_to_segments(sound_markers, len(segment_files))
+
                 concat_file = build_ffmpeg_concat_script(
                     segment_files,
                     sound_map,
@@ -771,8 +785,14 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                 )
                 # Replace temp file with theatrical mix
                 if final_body != str(temp_audio_file):
+                    size_before = temp_audio_file.stat().st_size if temp_audio_file.exists() else 0
+                    print(f"[Podcast] Replacing unmixed body ({size_before} bytes) with theatrical mix", file=sys.stderr)
                     temp_audio_file.unlink(missing_ok=True)
                     theatrical_output.rename(temp_audio_file)
+                    size_after = temp_audio_file.stat().st_size if temp_audio_file.exists() else 0
+                    print(f"[Podcast] Theatrical mix now at temp file ({size_after} bytes)", file=sys.stderr)
+                else:
+                    print(f"[Podcast] ⚠ render_soul_intro returned body path (mix failed?)", file=sys.stderr)
 
         # Compute MD5 checksum of generated audio and rename with checksum
         def compute_file_checksum(filepath, algo='md5'):

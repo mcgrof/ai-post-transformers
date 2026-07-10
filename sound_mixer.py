@@ -51,32 +51,51 @@ def generate_silence(duration_ms: int, sample_rate: int = 44100) -> str:
 
 def map_sounds_to_segments(
     sound_markers: List[Tuple[str, int, str]],
-    segment_count: int
+    segment_count: int,
+    script_segments: List[Dict] = None
 ) -> Dict[int, List[str]]:
-    """Map sound effects to segment indices.
+    """Map sound effects to segment indices using script context.
+
+    For theatrical episodes, matches sound markers to actual segment positions.
+    Falls back to proportional line-number mapping for regular episodes.
 
     Args:
         sound_markers: List of (sound_name, line_number, context)
         segment_count: Total number of dialogue segments
+        script_segments: Optional list of segment dicts with 'line_number' field
 
     Returns:
         Dict mapping segment index to list of sounds to insert after.
     """
     sound_map = {}
 
-    # Estimate max line number from markers to calibrate scaling
-    max_line = max((line_num for _, line_num, _ in sound_markers), default=100)
+    # If script segments provided, use intelligent placement
+    if script_segments and len(script_segments) == segment_count:
+        for sound_name, marker_line, context in sound_markers:
+            # Find the last segment whose line is <= sound marker line
+            best_segment = None
+            for seg_idx, seg in enumerate(script_segments):
+                seg_line = seg.get("line_number", 0)
+                if seg_line <= marker_line:
+                    best_segment = seg_idx
+                # If we've passed the marker, stop looking
+                if seg_line > marker_line:
+                    break
 
+            if best_segment is not None:
+                if best_segment not in sound_map:
+                    sound_map[best_segment] = []
+                sound_map[best_segment].append(sound_name)
+        return sound_map
+
+    # Fallback: proportional line-number mapping
+    max_line = max((line_num for _, line_num, _ in sound_markers), default=100)
     for sound_name, line_num, context in sound_markers:
-        # Map line number proportionally to segment index
-        # Sound at line 30 in 150-line script goes ~20% through segments
         if max_line > 0:
-            segment_idx = int((line_num / max_line) * segment_count * 0.95)  # 95% to leave room at end
+            segment_idx = int((line_num / max_line) * segment_count * 0.95)
         else:
             segment_idx = 0
-
         segment_idx = max(0, min(segment_idx, segment_count - 1))
-
         if segment_idx not in sound_map:
             sound_map[segment_idx] = []
         sound_map[segment_idx].append(sound_name)
