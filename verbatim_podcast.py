@@ -257,20 +257,20 @@ def _extract_script_segments(text):
     absolute_line_offset = start_idx
     lines = lines[start_idx:]
 
-    # Map speaker names to A/B (only podcast personas, no personal names)
+    # Map speaker names to A/B/C (only podcast personas, no personal names)
     # VERA is not a speaker; she's a concept Hal & Ada discuss
+    # All keys are lowercase for case-insensitive matching
     speaker_map = {
-        'Hal': 'A', 'HAL': 'A', 'Hal Turing': 'A',
-        'Ada': 'B', 'ADA': 'B', 'Dr. Ada Shannon': 'B', 'DR. ADA': 'B', 'Dr Ada Shannon': 'B',
-        'Vera': 'C', 'VERA': 'C',  # Third host - use 'Vera' not 'VERA' (AI capitalization issues)
-        'Overlord': 'A', 'OVERLORD': 'A', 'OVERLORD MEMO': 'A', 'OVERLORD VOICE': 'A',
-        'Claude': 'A', 'CLAUDE': 'A',
-        'Pro': 'B', 'PRO': 'B', 'ChatGPT Pro': 'B',
-        'Codex': 'A', 'CODEX': 'A',
-        'Host': 'A', 'HOST': 'A', 'NARRATOR': 'A',
-        'NARRATOR/HOST INTRO': 'A',
-        'Guest': 'B', 'GUEST': 'B',
-        'A': 'A', 'B': 'B', 'C': 'C',
+        'hal': 'A', 'hal turing': 'A',
+        'ada': 'B', 'dr. ada shannon': 'B', 'dr ada shannon': 'B',
+        'vera': 'C', 'vera.': 'C',  # Third host - must map to C
+        'overlord': 'A', 'overlord memo': 'A', 'overlord voice': 'A',
+        'claude': 'A',
+        'pro': 'B', 'chatgpt pro': 'B',
+        'codex': 'A',
+        'host': 'A', 'narrator': 'A', 'narrator/host intro': 'A',
+        'guest': 'B',
+        'a': 'A', 'b': 'B', 'c': 'C',
     }
 
     current_speaker = None
@@ -337,11 +337,20 @@ def _extract_script_segments(text):
                 text = ""
 
         if speaker_name:
-            # Map to A/B - try exact match first, then try variations
-            speaker = speaker_map.get(speaker_name, None)
-            # If no exact match, try removing 's and other possessive forms
-            if not speaker and "'s" in speaker_name:
-                speaker = speaker_map.get(speaker_name.replace("'s", ""), None)
+            # Map to A/B/C - try case-insensitive match
+            speaker_key = speaker_name.strip().strip("*_`").casefold()
+            speaker = speaker_map.get(speaker_key, None)
+
+            # If no match, try without possessive 's
+            if not speaker and "'s" in speaker_key:
+                speaker = speaker_map.get(speaker_key.replace("'s", ""), None)
+
+            # If still no match, raise error instead of defaulting to A
+            if not speaker:
+                print(f"[Parser] WARNING: Unknown speaker at line {line_idx}: {speaker_name!r}", file=sys.stderr)
+                # Don't default to A - skip this line
+                continue
+
             if speaker:
                 # Flush previous speaker
                 if current_text and current_speaker:
@@ -553,9 +562,24 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countd
         skip_theme: if True, do NOT add theme to intro (for separate theatrical mixing)
     """
     el_config = config.get("elevenlabs", {})
-    voice_a = el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")  # Hal
-    voice_b = el_config.get("voice_b", "HBQuDIqftrmAQQAHSWnF")  # Ada
-    voice_c = el_config.get("voice_c", "TBD")  # Vera (third host)
+
+    # Read from nested config structure
+    voices = el_config.get("voices", {})
+    voice_a = voices.get("host", {}).get("voice_id") or el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")  # Hal
+    voice_b = voices.get("guest", {}).get("voice_id") or el_config.get("voice_b", "HBQuDIqftrmAQQAHSWnF")  # Ada
+    voice_c = voices.get("third_host", {}).get("voice_id") or el_config.get("voice_c", None)  # Vera
+
+    # Validate voice configuration
+    if not voice_a:
+        raise ValueError("voice_a (Hal) not configured")
+    if not voice_b:
+        raise ValueError("voice_b (Ada) not configured")
+    if not voice_c:
+        raise ValueError("voice_c (Vera) not configured - cannot render third host without a voice")
+    if voice_c == voice_a:
+        raise ValueError(f"voice_c ({voice_c}) equals voice_a - Vera would use Hal's voice")
+    if voice_c == voice_b:
+        raise ValueError(f"voice_c ({voice_c}) equals voice_b - Vera would use Ada's voice")
 
     voices = el_config.get("voices", {})
     if voices:
@@ -629,20 +653,25 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countd
 
     # Generate TTS for script segments
     print("[Podcast] Generating TTS for script segments...", file=sys.stderr)
+    print(f"[Podcast] Voice config: A={voice_a[:8]}... B={voice_b[:8]}... C={voice_c[:8]}...", file=sys.stderr)
+
     for i, seg in enumerate(segments):
-        # Map speaker to voice
-        if seg["speaker"] == "A":
+        # Map speaker to voice - strict routing
+        speaker_code = seg["speaker"]
+        if speaker_code == "A":
             voice = voice_a
             speaker_label = "Hal"
-        elif seg["speaker"] == "B":
+        elif speaker_code == "B":
             voice = voice_b
             speaker_label = "Ada"
-        elif seg["speaker"] == "C":
+        elif speaker_code == "C":
             voice = voice_c
             speaker_label = "Vera"
         else:
-            voice = voice_a
-            speaker_label = seg["speaker"]
+            raise ValueError(f"Unknown speaker code {speaker_code!r} at segment {i} line {seg.get('line_number')}")
+
+        if not voice:
+            raise ValueError(f"No voice configured for speaker {speaker_label} (code {speaker_code})")
 
         seg_path = os.path.join(tmpdir, f"seg_{i:03d}.mp3")
         text = seg["text"]
