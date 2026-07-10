@@ -88,11 +88,14 @@ elevenlabs:
   model: eleven_multilingual_v2
   voices:
     host:
-      name: Chris
+      name: Hal
       voice_id: iP95p4xoKVk53GoZ742B
     guest:
-      name: Female AI
+      name: Ada
       voice_id: HBQuDIqftrmAQQAHSWnF
+    third_host:
+      name: Vera
+      voice_id: 21m00Tcm4TlvDq8ikWAM
   quality: high
 image_generation:
   enabled: true
@@ -138,6 +141,16 @@ podcast:
       personality: 'Sharp, knowledgeable, direct. The technical expert who can break
         down any paper. References related work naturally by author and date. Not
         a cheerleader — will call out weak evaluations or overhyped claims. Dry wit.
+
+        '
+    c:
+      name: Vera
+      role: personality-monitor
+      gender: neutral
+      personality: 'Analytical, precise, pattern-recognition focused. Monitors for
+        loops and stale phrases. Brings self-awareness to the show about what works
+        and what does not. Clinical but warming to genuine growth. Not a replacement
+        or competitor — a mirror.
 
         '
   dynamics:

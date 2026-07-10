@@ -453,21 +453,10 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
     if soul_profiles:
         print(f"[Podcast] Host profiles loaded: {', '.join(f'{h} v{soul_profiles[h]['version']}' for h in soul_profiles)}", file=sys.stderr)
 
-    print("[Podcast] Parsing verbatim script segments with AST parser...", file=sys.stderr)
-    try:
-        segments, audit = _extract_script_segments_via_ast(script_text)
-        print(f"[Podcast] AST Parse audit:", file=sys.stderr)
-        print(f"[Podcast]   - Dialogue nodes: {audit['dialogue_nodes']}", file=sys.stderr)
-        print(f"[Podcast]   - Acts: {audit['act_nodes']}, Scenes: {audit['scene_nodes']}", file=sys.stderr)
-        print(f"[Podcast]   - Sounds: {audit['sound_nodes']}, Music: {audit['music_nodes']}", file=sys.stderr)
-        print(f"[Podcast]   - Spoken words: {audit['spoken_words']}", file=sys.stderr)
-        print(f"[Podcast]   - Est. duration: {audit['estimated_duration_seconds']:.1f}s (~{audit['estimated_duration_seconds']/60:.1f}m)", file=sys.stderr)
-        print(f"[Podcast] Extracted {len(segments)} dialogue segments", file=sys.stderr)
-    except ValueError as e:
-        print(f"[Podcast] AST parse failed: {e}", file=sys.stderr)
-        print(f"[Podcast] Falling back to legacy parser...", file=sys.stderr)
-        segments = _extract_script_segments(script_text)
-        print(f"[Podcast] Extracted {len(segments)} dialogue segments (legacy)", file=sys.stderr)
+    print("[Podcast] Parsing verbatim script segments...", file=sys.stderr)
+    # Use legacy parser (AST parser has issues with narration detection)
+    segments = _extract_script_segments(script_text)
+    print(f"[Podcast] Extracted {len(segments)} dialogue segments", file=sys.stderr)
 
     if not segments:
         raise ValueError("No dialogue segments found in script")
@@ -659,6 +648,7 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         host_names = {
             "A": hosts.get("a", {}).get("name", "Hal Turing"),
             "B": hosts.get("b", {}).get("name", "Dr. Ada Shannon"),
+            "C": hosts.get("c", {}).get("name", "Vera"),  # Third host
         }
 
         transcript_file = audio_file.with_suffix(".txt")
