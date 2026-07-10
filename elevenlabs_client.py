@@ -2166,7 +2166,8 @@ def finalize_podcast(tmpdir, list_file, output_path, theme_fade_duration_ms=0, o
 
         # Split: first 2-3 segments are part of crossfade, rest are remaining
         # BUT: only bundle segments if there are NO sound effects (sound indices would shift)
-        has_sounds = bool([f for l in lines if "file '" in l and "sounds/" in l])
+        # Check for sound files (either in sounds/ dir OR normalized in tmpdir with norm_ prefix)
+        has_sounds = bool([f for l in lines if "file '" in l and ("sounds/" in l or "norm_" in l)])
 
         if len(dialogue_segments) > 2 and not has_sounds:
             # Safe to bundle: no sound effects to lose
