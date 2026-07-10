@@ -83,7 +83,8 @@ def build_ffmpeg_concat_script(
     segment_files: List[str],
     sound_map: Dict[int, List[str]],
     sound_library: Dict,
-    output_dir: str
+    output_dir: str,
+    intro_files: List[str] = None
 ) -> str:
     """Build FFmpeg concat file with sound insertions.
 
@@ -92,6 +93,7 @@ def build_ffmpeg_concat_script(
         sound_map: Dict mapping segment index to sounds
         sound_library: Sound library configuration
         output_dir: Directory for temp files
+        intro_files: Optional list of intro files to prepend (countdown, theme)
 
     Returns:
         Path to generated concat demux file.
@@ -100,6 +102,13 @@ def build_ffmpeg_concat_script(
     segments_added = 0
 
     with open(concat_file, "w") as f:
+        # Add intro files first (countdown + theme)
+        if intro_files:
+            for intro_file in intro_files:
+                if os.path.exists(intro_file):
+                    f.write(f"file '{intro_file}'\n")
+                    print(f"[Mixer] Added intro file: {os.path.basename(intro_file)}", file=sys.stderr)
+
         for i, seg_file in enumerate(segment_files):
             f.write(f"file '{seg_file}'\n")
             segments_added += 1

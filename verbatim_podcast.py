@@ -475,25 +475,12 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
     tmpdir = tempfile.mkdtemp(prefix="podcast_")
     segment_files = []
 
-    # Countdown intro (same as normal podcasts)
+    # Countdown intro (skip welcome for verbatim episodes - goes straight to script)
     print("[Podcast] Generating countdown intro...", file=sys.stderr)
     tts_segment("three", voice_a, os.path.join(tmpdir, "countdown_3.mp3"), config)
     tts_segment("two", voice_b, os.path.join(tmpdir, "countdown_2.mp3"))
     tts_segment("one", voice_a, os.path.join(tmpdir, "countdown_1.mp3"))
     time.sleep(0.3)
-
-    tts_segment("Welcome to AI Post Transformers!", voice_a, os.path.join(tmpdir, "welcome_a.mp3"))
-    tts_segment("Welcome to AI Post Transformers!", voice_b, os.path.join(tmpdir, "welcome_b.mp3"))
-    time.sleep(0.3)
-
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", os.path.join(tmpdir, "welcome_a.mp3"),
-         "-i", os.path.join(tmpdir, "welcome_b.mp3"),
-         "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]",
-         "-map", "[out]", "-c:a", "libmp3lame", "-q:a", "2",
-         os.path.join(tmpdir, "welcome_overlay.mp3")],
-        capture_output=True, text=True
-    )
 
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
@@ -502,6 +489,9 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
         capture_output=True, text=True
     )
 
+    # Add theme song to intro (plays after 3-2-1)
+    theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+
     intro_audio_files = [
         os.path.join(tmpdir, "countdown_3.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
@@ -509,9 +499,13 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
         os.path.join(tmpdir, "short_pause.mp3"),
         os.path.join(tmpdir, "countdown_1.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
-        os.path.join(tmpdir, "welcome_overlay.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
     ]
+
+    # Add theme if it exists
+    if theme_path.exists():
+        intro_audio_files.append(str(theme_path))
+        intro_audio_files.append(os.path.join(tmpdir, "short_pause.mp3"))
+        print("[Podcast] Added theme song to intro", file=sys.stderr)
 
     # Generate TTS for script segments
     print("[Podcast] Generating TTS for script segments...", file=sys.stderr)
@@ -630,7 +624,8 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                     segment_files,
                     sound_map,
                     sound_library,
-                    tmpdir
+                    tmpdir,
+                    intro_files=intro_audio_files
                 )
                 print(f"[Podcast] Using sound-enhanced concat file: {concat_file}", file=sys.stderr)
             except Exception as e:
