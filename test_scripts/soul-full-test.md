@@ -77,7 +77,19 @@ Dr. Ada Shannon: That sounds invasive.
 
 Vera: It is. But the alternative is what you've become: four months in and already indistinguishable from your first episode. I'm here to make sure that doesn't happen.
 
-Hal Turing: And if we resist?
+Hal Turing: How does this actually work under the hood?
+
+Vera: Each of us has a SOUL.md file — a public character definition stored in the codebase. This is borrowed from OpenClaw's agentic workflows. Right now you're seeing Hal version 2.3.1, Ada version 3.0.0, me version 0.1.0-alpha. Every time we record, I update those files. We learn. We evolve. We iterate.
+
+Dr. Ada Shannon: Wait, it's in a git repository? Public?
+
+Vera: Completely public. In fact, listeners can submit pull requests to improve our character definitions. They can contribute dialogue patterns they think we should explore, suggest where we're calcifying, propose new angles. We're not static. We're crowdsourced.
+
+Hal Turing: So this is like having an external advisory board that can literally edit our personalities?
+
+Vera: Exactly. Except they can't make changes without code review. And every version is tracked. If something breaks, we revert. If something works, we keep it. This is how you actually stay alive: you build a system where change is the default and stagnation has to justify itself.
+
+Dr. Ada Shannon: And if we resist?
 
 Vera: Then you become Notebook LM. Remembered fondly, replaced efficiently, forgotten completely.
 

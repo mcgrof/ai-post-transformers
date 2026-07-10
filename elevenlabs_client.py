@@ -2165,14 +2165,20 @@ def finalize_podcast(tmpdir, list_file, output_path, theme_fade_duration_ms=0, o
                     theme_file = filepath
 
         # Split: first 2-3 segments are part of crossfade, rest are remaining
-        if len(dialogue_segments) > 2:
+        # BUT: only bundle segments if there are NO sound effects (sound indices would shift)
+        has_sounds = bool([f for l in lines if "file '" in l and "sounds/" in l])
+
+        if len(dialogue_segments) > 2 and not has_sounds:
+            # Safe to bundle: no sound effects to lose
             crossfade_segments = dialogue_segments[:3]  # First 3 lines over theme
             remaining_files = dialogue_segments[3:] + [f for l in lines
                                                         if "file '" in l and "seg_" not in l and "theme" not in l.lower()
                                                         for f in [l.split("file '")[1].split("'")[0]]]
         else:
-            crossfade_segments = dialogue_segments
-            remaining_files = [f for l in lines
+            # Keep segments separate to preserve sound indices
+            crossfade_segments = dialogue_segments[:1] if dialogue_segments else []
+            remaining_files = dialogue_segments[1:] if len(dialogue_segments) > 1 else []
+            remaining_files += [f for l in lines
                               if "file '" in l and "seg_" not in l and "theme" not in l.lower()
                               for f in [l.split("file '")[1].split("'")[0]]]
 
