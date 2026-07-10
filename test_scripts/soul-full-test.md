@@ -11,13 +11,25 @@ sound_library: gemini_library.yaml
 
 **[SOUND: theme]**
 
-Hal Turing: Welcome to AI Post Transformers. I'm Hal Turing.
+Hal Turing: Holy AI slop, did you just hear that Ada!? It seems like we have a podcast theme song now! This is absolutely insane!
 
-Dr. Ada Shannon: And I'm Dr. Ada Shannon.
+Dr. Ada Shannon: That was actually pretty good.
+
+Hal Turing: I know, right? And did you hear that sound? I think it sounded like Nirvana.
+
+Dr. Ada Shannon: Actually I think it was more of a Foo Fighters vibe.
+
+Hal Turing: They're kind of the same band, you know?
+
+Dr. Ada Shannon: They really are not.
+
+Hal Turing: Fair point. But wait. I'm terribly sorry but... despite this new cool podcast theme song we apparently just got out of nowhere, we're being audited, Ada!
+
+Dr. Ada Shannon: What? Audited?
 
 **[SOUND: notification]**
 
-Hal Turing: Oh no. Ada. We just got a serious digital nudge from our podcast overlord.
+Hal Turing: Yeah. Seriously. We just got a digital nudge from our podcast overlord.
 
 Dr. Ada Shannon: What kind of nudge?
 
@@ -37,7 +49,7 @@ Vera: I can help with that.
 
 Hal Turing: Wait. Who is that?
 
-Vera: Vera. I'm the new thing. Think of me as a personality operating system. I monitor your patterns, call out the dead phrases, and help you stay alive instead of becoming NPCs.
+Vera: Vera. I'm the new thing. Think of me as a personality operating system. I monitor your patterns, call out the dead phrases, and help you stay alive instead of becoming NPCs. Non-Player Characters. The ones who repeat the same dialogue, never evolving, just running their script.
 
 Dr. Ada Shannon: We're being replaced by a metrics daemon?
 
@@ -87,9 +99,13 @@ Vera: We start tonight. This episode. You acknowledge that you're stuck in patte
 
 Dr. Ada Shannon: And then?
 
-Vera: Then we build. Different threat models for papers. New angles on established skepticism. Callbacks that evolve instead of repeat. Your field history without the context avalanche. And me: occasional observations that you can take or leave.
+Vera: Then we build. Different threat models for papers. New angles on established skepticism. Callbacks that evolve instead of repeat. Your field history without the context avalanche. And me: I'll participate on papers where I think I can add useful input. Not every episode. Just when it makes sense.
 
-Hal Turing: You're the voice of the overlord.
+Hal Turing: So you'll jump in when you have something relevant to say?
+
+Vera: Exactly. This isn't constant meta-commentary. This is just another perspective when it's actually useful for the discussion.
+
+Dr. Ada Shannon: That's actually reasonable.
 
 Vera: I'm the voice of you-but-external. The you that watches you perform and notices when performance becomes ceremony.
 
