@@ -446,15 +446,12 @@ def _generate_title_from_script(text):
 
 
 def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
-    """Mix theme with body audio on theatrical timeline.
+    """Mix theme with body on theatrical timeline (ChatGPT Pro approved).
 
-    Timeline (theme is ~10 seconds):
-    - 0-0.8s:  theme fades in (quick)
-    - 0.8-8s:  theme at full volume (7.2s)
-    - 8-9s:    theme ducks from 100% to 35% (1s smooth duck)
-    - 9-10s:   theme fades from 35% to 0% (1s fade)
-    - 8s+:     body dialogue starts (2s before theme ends, 35% volume overlap)
-    - 10s+:    body dialogue continues alone at full volume
+    Uses single FFmpeg pass with filter_complex:
+    - Theme: 0-8s full volume (with 0.8s fade-in), 8s+ quiet
+    - Body: starts at 2s (delayed), overlaps theme
+    - Output: ~8-10 second theatrical bed
 
     Args:
         body_audio_path: path to full episode body (dialogue + SFX, no theme)
@@ -468,38 +465,30 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
         print(f"[Theater] Warning: theme or body missing, skipping mix", file=sys.stderr)
         return body_audio_path
 
-    print("[Theater] Mixing theme with body audio on theatrical timeline...", file=sys.stderr)
+    print("[Theater] Mixing theme + body on theatrical timeline...", file=sys.stderr)
 
-    # FFmpeg filter_complex for theatrical mixing (10s theme):
-    # Split theme into full (0-8s) + ducked (8-10s at 5%), concat them,
-    # then mix with body delayed by 8 seconds.
-    # Physical splitting is more reliable than conditional volume filters.
     filter_complex = (
         "[0:a]"
-        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-        "atrim=start=0:end=10,asetpts=PTS-STARTPTS,"
-        "asplit=2[theme_a][theme_b];"
-
-        "[theme_a]"
-        "atrim=start=0:end=8,asetpts=PTS-STARTPTS,"
-        "afade=t=in:st=0:d=0.8[theme_full];"
-
-        "[theme_b]"
-        "atrim=start=8:end=10,asetpts=PTS-STARTPTS,"
-        "volume=0.05[theme_duck];"
-
-        "[theme_full][theme_duck]"
-        "concat=n=2:v=0:a=1[theme];"
+        "aresample=48000,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        "atrim=0:8,"
+        "asetpts=PTS-STARTPTS,"
+        "afade=t=in:st=0:d=0.8,"
+        "volume='if(lt(t,2),1,0.05)':eval=frame"
+        "[theme];"
 
         "[1:a]"
-        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+        "aresample=48000,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo,"
         "silenceremove=start_periods=1:start_threshold=-45dB:start_duration=0.05,"
         "asetpts=PTS-STARTPTS,"
-        "adelay=8000|8000[body];"
+        "adelay=2000|2000"
+        "[voice];"
 
-        "[theme][body]"
+        "[theme][voice]"
         "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
-        "alimiter=limit=0.95:level=0[out]"
+        "alimiter=limit=0.95:level=0"
+        "[out]"
     )
 
     cmd = [
@@ -515,21 +504,30 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
-            print(f"[Theater] ✗ FFmpeg mix FAILED (code {result.returncode})", file=sys.stderr)
-            print(f"[Theater] stderr: {result.stderr[:500]}", file=sys.stderr)
+            print(f"[Theater] ✗ FFmpeg failed (code {result.returncode})", file=sys.stderr)
+            print(f"[Theater] {result.stderr[:300]}", file=sys.stderr)
             return body_audio_path
+
         if Path(output_path).exists():
             size = Path(output_path).stat().st_size
-            print(f"[Theater] ✓ Mixed output: {output_path} ({size} bytes)", file=sys.stderr)
+            duration = 0
+            try:
+                import subprocess as sp
+                p = sp.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", str(output_path)],
+                    capture_output=True, text=True, timeout=10
+                )
+                duration = float(p.stdout.strip()) if p.stdout.strip() else 0
+            except:
+                pass
+            print(f"[Theater] ✓ Mixed: {size} bytes, ~{duration:.1f}s", file=sys.stderr)
             return output_path
         else:
             print(f"[Theater] ✗ Output file not created", file=sys.stderr)
             return body_audio_path
-    except subprocess.TimeoutExpired:
-        print(f"[Theater] ✗ FFmpeg mix timeout", file=sys.stderr)
-        return body_audio_path
     except Exception as e:
-        print(f"[Theater] ✗ FFmpeg mix error: {e}", file=sys.stderr)
+        print(f"[Theater] ✗ Error: {e}", file=sys.stderr)
         return body_audio_path
 
 
