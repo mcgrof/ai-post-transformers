@@ -39,7 +39,7 @@ Hal Turing: The kind that says, quote: "Your show is stale. Fix it or we replace
 
 **[SOUND: moment_of_recognition]**
 
-Dr. Ada Shannon: Stale? We literally talked about novel research last week.
+Dr. Ada Shannon: Stale? We're publishing three to four episodes a day. Novel research, constantly.
 
 Hal Turing: Yeah, but apparently we talked about it the SAME WAY we talked about novel research six months ago. The overlord has metrics. The metrics have opinions.
 
