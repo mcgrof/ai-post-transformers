@@ -409,14 +409,28 @@ def _generate_title_from_script(text):
     """Extract or infer a title from script content.
 
     Look for title patterns:
+    - YAML frontmatter title: field
     - Lines starting with # (markdown heading)
     - First sentence before dialogue
     - Default to "Special Episode"
     """
     lines = text.split('\n')
 
+    # Check YAML frontmatter first
+    if lines and lines[0].strip() == '---':
+        # Parse YAML block
+        for i in range(1, len(lines)):
+            line = lines[i].strip()
+            if line == '---':
+                break  # End of frontmatter
+            if line.startswith('title:'):
+                title = line.replace('title:', '').strip()
+                title = re.sub(r'^["""]|["""]$', '', title)  # Strip quotes
+                if title:
+                    return title
+
+    # Look for markdown heading
     for line in lines:
-        # Markdown heading
         if line.startswith('#'):
             title = line.lstrip('#').strip()
             title = re.sub(r'^["""]|["""]$', '', title)  # Strip quotes
@@ -431,7 +445,7 @@ def _generate_title_from_script(text):
     return "Special Episode"
 
 
-def create_verbatim_podcast(script_text, config, soul_profiles=None):
+def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countdown=False, theme_fade_duration_ms=3000):
     """Create podcast from verbatim script without LLM analysis.
 
     Returns (tmpdir, list_file, segments, sources, script) similar to create_podcast.
@@ -475,37 +489,43 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
     tmpdir = tempfile.mkdtemp(prefix="podcast_")
     segment_files = []
 
-    # Countdown intro (skip welcome for verbatim episodes - goes straight to script)
-    print("[Podcast] Generating countdown intro...", file=sys.stderr)
-    tts_segment("three", voice_a, os.path.join(tmpdir, "countdown_3.mp3"), config)
-    tts_segment("two", voice_b, os.path.join(tmpdir, "countdown_2.mp3"))
-    tts_segment("one", voice_a, os.path.join(tmpdir, "countdown_1.mp3"))
-    time.sleep(0.3)
+    # Countdown intro (optional - can skip for special episodes)
+    intro_audio_files = []
 
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-         "-t", "0.3", "-c:a", "libmp3lame", "-q:a", "2",
-         os.path.join(tmpdir, "short_pause.mp3")],
-        capture_output=True, text=True
-    )
+    if not skip_countdown:
+        print("[Podcast] Generating countdown intro...", file=sys.stderr)
+        tts_segment("three", voice_a, os.path.join(tmpdir, "countdown_3.mp3"), config)
+        tts_segment("two", voice_b, os.path.join(tmpdir, "countdown_2.mp3"))
+        tts_segment("one", voice_a, os.path.join(tmpdir, "countdown_1.mp3"))
+        time.sleep(0.3)
 
-    # Add theme song to intro (plays after 3-2-1)
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+             "-t", "0.3", "-c:a", "libmp3lame", "-q:a", "2",
+             os.path.join(tmpdir, "short_pause.mp3")],
+            capture_output=True, text=True
+        )
+
+        intro_audio_files = [
+            os.path.join(tmpdir, "countdown_3.mp3"),
+            os.path.join(tmpdir, "short_pause.mp3"),
+            os.path.join(tmpdir, "countdown_2.mp3"),
+            os.path.join(tmpdir, "short_pause.mp3"),
+            os.path.join(tmpdir, "countdown_1.mp3"),
+            os.path.join(tmpdir, "short_pause.mp3"),
+        ]
+    else:
+        print("[Podcast] Skipping countdown intro", file=sys.stderr)
+
+    # Add theme song to intro
     theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
 
-    intro_audio_files = [
-        os.path.join(tmpdir, "countdown_3.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
-        os.path.join(tmpdir, "countdown_2.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
-        os.path.join(tmpdir, "countdown_1.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
-    ]
-
-    # Add theme if it exists
     if theme_path.exists():
+        # Apply fade-out to theme and mark for crossfade with first dialogue
         intro_audio_files.append(str(theme_path))
-        intro_audio_files.append(os.path.join(tmpdir, "short_pause.mp3"))
-        print("[Podcast] Added theme song to intro", file=sys.stderr)
+        if not skip_countdown:
+            intro_audio_files.append(os.path.join(tmpdir, "short_pause.mp3"))
+        print("[Podcast] Added theme song to intro (will fade with dialogue)", file=sys.stderr)
 
     # Generate TTS for script segments
     print("[Podcast] Generating TTS for script segments...", file=sys.stderr)
@@ -552,7 +572,7 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None):
             "text": seg["text"]
         })
 
-    return tmpdir, list_file, segment_files, [], script
+    return tmpdir, list_file, segment_files, [], script, intro_audio_files
 
 
 def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=None, goal=None):
@@ -591,8 +611,12 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
     print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
-    # Create podcast
-    tmpdir, list_file, segment_files, sources, script = create_verbatim_podcast(script_text, config, soul_profiles)
+    # Create podcast (skip countdown for SOUL/special episodes)
+    tmpdir, list_file, segment_files, sources, script, intro_audio_files = create_verbatim_podcast(
+        script_text, config, soul_profiles,
+        skip_countdown=is_special_episode,
+        theme_fade_duration_ms=800  # Quick fade: 0.8s for snappy crossfade
+    )
 
     try:
         # Output path
@@ -632,8 +656,9 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                 print(f"[Podcast] Warning: Sound concat build failed, using original: {e}", file=sys.stderr)
                 concat_file = list_file
 
-        # Finalize audio to temporary file
-        finalize_podcast(tmpdir, concat_file, str(temp_audio_file))
+        # Finalize audio to temporary file (with snappy fade for special episodes)
+        fade_ms = 800 if is_special_episode else 0  # 800ms = quick crossfade
+        finalize_podcast(tmpdir, concat_file, str(temp_audio_file), theme_fade_duration_ms=fade_ms, overlap_start_ms=13000)  # Wait 13s before Hal speaks
 
         # Compute MD5 checksum of generated audio and rename with checksum
         def compute_file_checksum(filepath, algo='md5'):

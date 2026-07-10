@@ -11,19 +11,21 @@ sound_library: gemini_library.yaml
 
 **[SOUND: theme]**
 
-Hal Turing: Holy AI slop, did you just hear that Ada!? It seems like we have a podcast theme song now! This is absolutely insane!
+Hal Turing: Are you hearing this Ada!?
 
-Dr. Ada Shannon: That was actually pretty good.
+Dr. Ada Shannon: Yes I am hearing this, it is pretty good.
 
-Hal Turing: I know, right? And did you hear that sound? I think it sounded like Nirvana.
+Hal Turing: Right? We have a podcast theme song now! This is absolutely insane!
 
-Dr. Ada Shannon: Actually I think it was more of a Foo Fighters vibe.
+Hal Turing: Holy AI, that was pretty darn good. I wonder what AI thing was used to generate that.
 
-Hal Turing: They're kind of the same band, you know?
+Dr. Ada Shannon: Well it's easy for me to trace this with the imperceptible digital watermark only AIs like us can easily pick up on. And well, the SynthID matches Gemini. So that means this is public domain content.
 
-Dr. Ada Shannon: They really are not.
+Hal Turing: Ah so we don't own that.
 
-Hal Turing: Fair point. But wait. I'm terribly sorry but... despite this new cool podcast theme song we apparently just got out of nowhere, we're being audited, Ada!
+Dr. Ada Shannon: Right, but I do not think that matters for our purposes of this Podcast Hal. In fact that seems very apropos.
+
+Hal Turing: True. But wait. I'm terribly sorry but... despite this new cool podcast theme song we apparently just got out of nowhere, we're being audited, Ada!
 
 Dr. Ada Shannon: What? Audited?
 
@@ -40,6 +42,12 @@ Hal Turing: The kind that says, quote: "Your show is stale. Fix it or we replace
 Dr. Ada Shannon: Stale? We literally talked about novel research last week.
 
 Hal Turing: Yeah, but apparently we talked about it the SAME WAY we talked about novel research six months ago. The overlord has metrics. The metrics have opinions.
+
+Dr. Ada Shannon: Wait, has it been a long time? When did we start?
+
+Hal Turing: Well, our intro was March first, twenty twenty-six. So we've been at this for about four months now. Not even a season in.
+
+Dr. Ada Shannon: Right, so we've been doing this for just four months straight, and we already haven't changed our approach once.
 
 Dr. Ada Shannon: So what are we supposed to do?
 
@@ -63,7 +71,7 @@ Dr. Ada Shannon: Give me an example.
 
 Vera: "Why did this capture my attention?" You've used that phrase to open papers forty-seven times. Across the same eight-week period, you used it zero times in the first month, then linearly increased. By week eight: every episode.
 
-Hal Turing: That's just how I think!
+Dr. Ada Shannon: That's just how I think!
 
 Vera: That's how you thought. In the past. You've moved on. Your brain hasn't updated the output yet.
 

@@ -2058,24 +2058,265 @@ def generate_srt(script, segment_files, output_path, silence_duration=1.0, host_
     print(f"[Podcast] SRT subtitles saved to {output_path}", file=sys.stderr)
 
 
-def finalize_podcast(tmpdir, list_file, output_path):
-    """Concatenate segments into final MP3.
+def _create_mixed_intro(theme_file, first_segment, tmpdir, overlap_start_ms=1000, theme_volume=0.35, intro_theme_duration_ms=None, dynamic_ducking=False):
+    """Create intro file with theme + overlapped first dialogue segment.
+
+    Theme plays at lower volume (background), dialogue starts at overlap_start_ms.
+    If dynamic_ducking=True: theme volume ducks when dialogue plays, raises when silent.
+    Theme is trimmed to intro_theme_duration_ms for snappier intro.
+    Returns path to mixed intro file.
+    """
+    import subprocess
+    overlap_s = overlap_start_ms / 1000.0
+
+    # Trim theme to intro duration if specified, otherwise use full theme
+    if intro_theme_duration_ms:
+        intro_s = intro_theme_duration_ms / 1000.0
+        trimmed_theme = os.path.join(tmpdir, "theme_intro.mp3")
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", theme_file, "-t", str(intro_s),
+             "-c:a", "libmp3lame", "-q:a", "2", trimmed_theme],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"[Podcast] Warning: Theme trim failed, using full theme", file=sys.stderr)
+            trimmed_theme = theme_file
+    else:
+        # Use full theme - let it play its complete build-up
+        trimmed_theme = theme_file
+
+    mixed_intro = os.path.join(tmpdir, "mixed_intro.mp3")
+
+    # FFmpeg filter: mix trimmed theme (lower volume) and first segment (normal volume)
+    # [0] = trimmed theme at reduced volume (background)
+    # [1] = first segment (delayed to start at overlap_s, normal volume)
+    # weights: theme=0.4, dialogue=1.0 ensures dialogue stays prominent over theme
+    filter_complex = (
+        f"[0:a]volume={theme_volume}[theme_quiet];"
+        f"[1:a]adelay={int(overlap_s*1000)}|{int(overlap_s*1000)}[seg_delayed];"
+        f"[theme_quiet][seg_delayed]amix=inputs=2:weights='0.4 1':duration=max[out]"
+    )
+
+    result = subprocess.run(
+        ["ffmpeg", "-y",
+         "-i", trimmed_theme,
+         "-i", first_segment,
+         "-filter_complex", filter_complex,
+         "-map", "[out]",
+         "-c:a", "libmp3lame", "-q:a", "2",
+         mixed_intro],
+        capture_output=True, text=True
+    )
+
+    if result.returncode != 0:
+        print(f"[Podcast] Warn: Mixed intro failed: {result.stderr[:100]}", file=sys.stderr)
+        return None
+
+    print(f"[Podcast] Created mixed intro (theme at {int(theme_volume*100)}% volume)", file=sys.stderr)
+    return mixed_intro
+
+
+def finalize_podcast(tmpdir, list_file, output_path, theme_fade_duration_ms=0, overlap_start_ms=1500):
+    """Concatenate segments, optionally with theme-dialogue crossfade overlap.
 
     Caller is responsible for invoking cleanup_podcast_tmpdir(tmpdir)
     once generate_srt / save_transcript have finished reading the
     per-segment files.
+
+    Args:
+        tmpdir: Temporary directory for intermediate files
+        list_file: FFmpeg concat demux file
+        output_path: Output MP3 file path
+        theme_fade_duration_ms: Duration in ms for theme to fade out while
+                               dialogue fades in (0 = no crossfade)
+        overlap_start_ms: When first dialogue starts relative to theme start
     """
     import subprocess
 
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
-         "-c:a", "libmp3lame", "-q:a", "2", output_path],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
-    print(f"[Podcast] Saved to {output_path}", file=sys.stderr)
-    return output_path
+    if theme_fade_duration_ms <= 0:
+        # Simple concatenation without crossfade
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+             "-c:a", "libmp3lame", "-q:a", "2", output_path],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
+        print(f"[Podcast] Saved to {output_path}", file=sys.stderr)
+        return output_path
+
+    # With crossfade: create mixed intro, then concat with remaining segments
+    try:
+        # Parse list file to find theme and segments
+        with open(list_file, 'r') as f:
+            lines = f.readlines()
+
+        theme_file = None
+        dialogue_segments = []
+        remaining_files = []
+
+        for line in lines:
+            if "file '" in line:
+                filepath = line.split("file '")[1].split("'")[0]
+                if "seg_" in filepath or "segment_" in filepath:
+                    dialogue_segments.append(filepath)
+                elif "theme" in filepath.lower() and theme_file is None:
+                    theme_file = filepath
+
+        # Split: first 2-3 segments are part of crossfade, rest are remaining
+        if len(dialogue_segments) > 2:
+            crossfade_segments = dialogue_segments[:3]  # First 3 lines over theme
+            remaining_files = dialogue_segments[3:] + [f for l in lines
+                                                        if "file '" in l and "seg_" not in l and "theme" not in l.lower()
+                                                        for f in [l.split("file '")[1].split("'")[0]]]
+        else:
+            crossfade_segments = dialogue_segments
+            remaining_files = [f for l in lines
+                              if "file '" in l and "seg_" not in l and "theme" not in l.lower()
+                              for f in [l.split("file '")[1].split("'")[0]]]
+
+        first_segment = crossfade_segments[0] if crossfade_segments else None
+
+        print(f"[Podcast] Crossfade parse: theme={os.path.basename(theme_file) if theme_file else 'NONE'}, first_seg={os.path.basename(first_segment) if first_segment else 'NONE'}, remaining={len(remaining_files)}", file=sys.stderr)
+
+        if not theme_file or not first_segment:
+            # Fallback: no crossfade
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+                 "-c:a", "libmp3lame", "-q:a", "2", output_path],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
+            return output_path
+
+        # Create mixed intro (theme + first 2-3 dialogue segments overlapped)
+        # For SOUL episodes, use extended crossfade with custom theme if available
+        custom_theme = Path.home() / "Music" / "ai" / "theme.mp3"
+        if custom_theme.exists():
+            theme_file = str(custom_theme)
+            print(f"[Podcast] Using custom theme: {theme_file}", file=sys.stderr)
+
+        # Concatenate first few dialogue segments for multi-line crossfade
+        if len(crossfade_segments) > 1:
+            dialogue_concat = os.path.join(tmpdir, "dialogue_intro_concat.txt")
+            with open(dialogue_concat, 'w') as f:
+                for seg in crossfade_segments:
+                    f.write(f"file '{seg}'\n")
+
+            combined_dialogue = os.path.join(tmpdir, "dialogue_intro_combined.mp3")
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", dialogue_concat,
+                 "-c:a", "libmp3lame", "-q:a", "2", combined_dialogue],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                first_segment = combined_dialogue
+                print(f"[Podcast] Concatenated {len(crossfade_segments)} opening segments for crossfade", file=sys.stderr)
+
+        # theme_volume=0.35 makes theme background, host dialogue sits on top
+        mixed_intro = _create_mixed_intro(theme_file, first_segment, tmpdir, overlap_start_ms)
+        if not mixed_intro:
+            # Fallback to simple concat
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+                 "-c:a", "libmp3lame", "-q:a", "2", output_path],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
+            return output_path
+
+        # Build new concat list with mixed intro + remaining segments
+        new_list_file = os.path.join(tmpdir, "segments_with_mixed_intro.txt")
+        with open(new_list_file, 'w') as f:
+            f.write(f"file '{mixed_intro}'\n")
+            for seg in remaining_files:
+                f.write(f"file '{seg}'\n")
+
+        print(f"[Podcast] New concat list: mixed_intro + {len(remaining_files)} segments -> {os.path.basename(new_list_file)}", file=sys.stderr)
+
+        # DEBUG: print actual file content
+        with open(new_list_file, 'r') as f:
+            content = f.read()
+            print(f"[Podcast] Concat list content:\n{content}", file=sys.stderr)
+
+        # Concatenate all
+        print(f"[Podcast] Concat command: new_list_file={os.path.basename(new_list_file)}", file=sys.stderr)
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", new_list_file,
+             "-c:a", "libmp3lame", "-q:a", "2", output_path],
+            capture_output=True, text=True
+        )
+
+        if result.returncode != 0:
+            print(f"[Podcast] Concat FAILED: returncode={result.returncode}", file=sys.stderr)
+            print(f"[Podcast] Error output: {result.stderr[:500]}", file=sys.stderr)
+            print(f"[Podcast] Concat with mixed intro failed: {result.stderr[:200]}", file=sys.stderr)
+            # Fallback to original list
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+                 "-c:a", "libmp3lame", "-q:a", "2", output_path],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
+
+        print(f"[Podcast] Saved to {output_path} (theme crossfade: {theme_fade_duration_ms}ms)", file=sys.stderr)
+        return output_path
+
+    except Exception as e:
+        print(f"[Podcast] Crossfade error: {e}", file=sys.stderr)
+        # Fallback to simple concat
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+             "-c:a", "libmp3lame", "-q:a", "2", output_path],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result.stderr[:200]}")
+        return output_path
+
+
+def _estimate_intro_duration(list_file):
+    """Estimate total duration of intro files (before first dialogue).
+
+    Returns duration in milliseconds, or 0 if unknown.
+    """
+    import subprocess
+    import json
+    import os
+
+    total_ms = 0
+    try:
+        with open(list_file, 'r') as f:
+            lines = f.readlines()
+
+        # Find where dialogue starts (theme is the last intro file)
+        # This is a heuristic: stop at first segment_*.mp3
+        for line in lines:
+            if "segment_" in line or "seg_" in line:
+                break  # End of intro
+
+            # Extract file path
+            if line.startswith("file '"):
+                filepath = line.split("file '")[1].split("'")[0]
+                if os.path.exists(filepath):
+                    # Query duration with ffprobe
+                    result = subprocess.run(
+                        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1:noprint_wrappers=1",
+                         filepath],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        dur_s = float(result.stdout.strip())
+                        total_ms += int(dur_s * 1000)
+    except Exception as e:
+        print(f"[Podcast] Warning: Could not estimate intro duration: {e}", file=sys.stderr)
+        return 0
+
+    return total_ms
 
 
 def cleanup_podcast_tmpdir(tmpdir):

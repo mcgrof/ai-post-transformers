@@ -62,15 +62,20 @@ def map_sounds_to_segments(
     Returns:
         Dict mapping segment index to list of sounds to insert after.
     """
-    # This is approximate - ideally we'd have exact line→segment mapping
     sound_map = {}
 
-    for i, marker_data in enumerate(sound_markers):
-        sound_name, line_num, context = marker_data
-        # Distribute sounds across segments
-        segment_idx = (i * segment_count) // len(sound_markers) if sound_markers else 0
-        if segment_idx >= segment_count:
-            segment_idx = segment_count - 1
+    # Estimate max line number from markers to calibrate scaling
+    max_line = max((line_num for _, line_num, _ in sound_markers), default=100)
+
+    for sound_name, line_num, context in sound_markers:
+        # Map line number proportionally to segment index
+        # Sound at line 30 in 150-line script goes ~20% through segments
+        if max_line > 0:
+            segment_idx = int((line_num / max_line) * segment_count * 0.95)  # 95% to leave room at end
+        else:
+            segment_idx = 0
+
+        segment_idx = max(0, min(segment_idx, segment_count - 1))
 
         if segment_idx not in sound_map:
             sound_map[segment_idx] = []
@@ -122,9 +127,9 @@ def build_ffmpeg_concat_script(
 
                         if sound_file and os.path.exists(sound_file):
                             f.write(f"file '{sound_file}'\n")
-                            print(f"[Mixer] Inserting {sound_name} after segment {i}", file=sys.stderr)
+                            print(f"[Mixer] Inserting {sound_name} after segment {i} ({os.path.basename(sound_file)})", file=sys.stderr)
                         else:
-                            print(f"[Mixer] Warning: Sound file not found for {sound_name}", file=sys.stderr)
+                            print(f"[Mixer] ERROR: Sound file NOT FOUND for {sound_name}: {sound_file}", file=sys.stderr)
                     else:
                         print(f"[Mixer] Warning: Sound {sound_name} not in library", file=sys.stderr)
 
