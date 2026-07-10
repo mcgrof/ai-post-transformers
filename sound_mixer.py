@@ -84,6 +84,33 @@ def map_sounds_to_segments(
     return sound_map
 
 
+def normalize_audio_to_stereo(input_file: str, output_dir: str) -> str:
+    """Convert audio to stereo, 44100 Hz for concat compatibility.
+
+    Returns path to normalized file.
+    """
+    import subprocess
+    normalized = os.path.join(output_dir, f"norm_{os.path.basename(input_file)}")
+
+    # Check if already normalized
+    if os.path.exists(normalized):
+        return normalized
+
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", input_file,
+         "-ac", "2", "-ar", "44100",
+         "-c:a", "libmp3lame", "-q:a", "2",
+         normalized],
+        capture_output=True, text=True
+    )
+
+    if result.returncode != 0:
+        # Fallback to original if normalization fails
+        return input_file
+
+    return normalized
+
+
 def build_ffmpeg_concat_script(
     segment_files: List[str],
     sound_map: Dict[int, List[str]],
@@ -126,7 +153,9 @@ def build_ffmpeg_concat_script(
                         sound_file = config.get("file_path")
 
                         if sound_file and os.path.exists(sound_file):
-                            f.write(f"file '{sound_file}'\n")
+                            # Normalize audio to stereo for concat compatibility
+                            normalized = normalize_audio_to_stereo(sound_file, output_dir)
+                            f.write(f"file '{normalized}'\n")
                             print(f"[Mixer] Inserting {sound_name} after segment {i} ({os.path.basename(sound_file)})", file=sys.stderr)
                         else:
                             print(f"[Mixer] ERROR: Sound file NOT FOUND for {sound_name}: {sound_file}", file=sys.stderr)

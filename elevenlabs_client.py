@@ -2135,8 +2135,9 @@ def finalize_podcast(tmpdir, list_file, output_path, theme_fade_duration_ms=0, o
 
     if theme_fade_duration_ms <= 0:
         # Simple concatenation without crossfade
+        # Use -protocol_whitelist to allow file:// protocol for concat demuxer safety
         result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+            ["ffmpeg", "-y", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0", "-i", list_file,
              "-c:a", "libmp3lame", "-q:a", "2", output_path],
             capture_output=True, text=True
         )
