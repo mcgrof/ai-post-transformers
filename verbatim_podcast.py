@@ -445,7 +445,95 @@ def _generate_title_from_script(text):
     return "Special Episode"
 
 
-def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countdown=False, theme_fade_duration_ms=3000):
+def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
+    """Mix theme with body audio on theatrical timeline.
+
+    Timeline (theme is ~10 seconds):
+    - 0-0.8s:  theme fades in (quick)
+    - 0.8-8s:  theme at full volume (7.2s)
+    - 8-9s:    theme ducks from 100% to 35% (1s smooth duck)
+    - 9-10s:   theme fades from 35% to 0% (1s fade)
+    - 8s+:     body dialogue starts (2s before theme ends, 35% volume overlap)
+    - 10s+:    body dialogue continues alone at full volume
+
+    Args:
+        body_audio_path: path to full episode body (dialogue + SFX, no theme)
+        theme_path: path to theme.mp3
+        output_path: where to write final mixed audio
+        tmpdir: temp directory for intermediate files
+    """
+    import subprocess
+
+    if not Path(theme_path).exists() or not Path(body_audio_path).exists():
+        print(f"[Theater] Warning: theme or body missing, skipping mix", file=sys.stderr)
+        return body_audio_path
+
+    print("[Theater] Mixing theme with body audio on theatrical timeline...", file=sys.stderr)
+
+    # FFmpeg filter_complex for theatrical mixing (10s theme):
+    # Split theme into full (0-8s) + ducked (8-10s at 5%), concat them,
+    # then mix with body delayed by 8 seconds.
+    # Physical splitting is more reliable than conditional volume filters.
+    filter_complex = (
+        "[0:a]"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+        "atrim=start=0:end=10,asetpts=PTS-STARTPTS,"
+        "asplit=2[theme_a][theme_b];"
+
+        "[theme_a]"
+        "atrim=start=0:end=8,asetpts=PTS-STARTPTS,"
+        "afade=t=in:st=0:d=0.8[theme_full];"
+
+        "[theme_b]"
+        "atrim=start=8:end=10,asetpts=PTS-STARTPTS,"
+        "volume=0.05[theme_duck];"
+
+        "[theme_full][theme_duck]"
+        "concat=n=2:v=0:a=1[theme];"
+
+        "[1:a]"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+        "silenceremove=start_periods=1:start_threshold=-45dB:start_duration=0.05,"
+        "asetpts=PTS-STARTPTS,"
+        "adelay=8000|8000[body];"
+
+        "[theme][body]"
+        "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.95:level=0[out]"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(theme_path),
+        "-i", str(body_audio_path),
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
+        "-c:a", "libmp3lame", "-q:a", "2",
+        str(output_path)
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            print(f"[Theater] ✗ FFmpeg mix FAILED (code {result.returncode})", file=sys.stderr)
+            print(f"[Theater] stderr: {result.stderr[:500]}", file=sys.stderr)
+            return body_audio_path
+        if Path(output_path).exists():
+            size = Path(output_path).stat().st_size
+            print(f"[Theater] ✓ Mixed output: {output_path} ({size} bytes)", file=sys.stderr)
+            return output_path
+        else:
+            print(f"[Theater] ✗ Output file not created", file=sys.stderr)
+            return body_audio_path
+    except subprocess.TimeoutExpired:
+        print(f"[Theater] ✗ FFmpeg mix timeout", file=sys.stderr)
+        return body_audio_path
+    except Exception as e:
+        print(f"[Theater] ✗ FFmpeg mix error: {e}", file=sys.stderr)
+        return body_audio_path
+
+
+def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countdown=False, theme_fade_duration_ms=3000, skip_theme=False):
     """Create podcast from verbatim script without LLM analysis.
 
     Returns (tmpdir, list_file, segments, sources, script) similar to create_podcast.
@@ -454,6 +542,8 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countd
         script_text: verbatim script with dialogue markers
         config: podcast configuration
         soul_profiles: dict of host SOUL.md profiles (for logging)
+        skip_countdown: if True, omit countdown intro
+        skip_theme: if True, do NOT add theme to intro (for separate theatrical mixing)
     """
     el_config = config.get("elevenlabs", {})
     voice_a = el_config.get("voice_a", "oTOJ3soGzir2ldiaDSNs")  # Hal
@@ -517,15 +607,18 @@ def create_verbatim_podcast(script_text, config, soul_profiles=None, skip_countd
     else:
         print("[Podcast] Skipping countdown intro", file=sys.stderr)
 
-    # Add theme song to intro
-    theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+    # Add theme song to intro (skip if doing separate theatrical mixing)
+    if not skip_theme:
+        theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
 
-    if theme_path.exists():
-        # Apply fade-out to theme and mark for crossfade with first dialogue
-        intro_audio_files.append(str(theme_path))
-        if not skip_countdown:
-            intro_audio_files.append(os.path.join(tmpdir, "short_pause.mp3"))
-        print("[Podcast] Added theme song to intro (will fade with dialogue)", file=sys.stderr)
+        if theme_path.exists():
+            # Apply fade-out to theme and mark for crossfade with first dialogue
+            intro_audio_files.append(str(theme_path))
+            if not skip_countdown:
+                intro_audio_files.append(os.path.join(tmpdir, "short_pause.mp3"))
+            print("[Podcast] Added theme song to intro (will fade with dialogue)", file=sys.stderr)
+    else:
+        print("[Podcast] Skipping theme in intro (will mix separately for theatrical)", file=sys.stderr)
 
     # Generate TTS for script segments
     print("[Podcast] Generating TTS for script segments...", file=sys.stderr)
@@ -595,26 +688,34 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     soul_profiles = _load_host_soul_profiles()
 
     # Load sound effects library and detect markers
-    # Check if this is a special episode (use full theme) or regular (use short theme)
-    is_special_episode = "SOUL" in (title or "") or "soul" in (goal or "").lower()
+    # Check if this is a special episode (has [SOUND: theme] marker or SOUL in title)
+    has_theme_marker = "[SOUND: theme]" in script_text or "[SOUND:theme]" in script_text
+    is_special_episode = has_theme_marker or "SOUL" in (title or "") or "soul" in (goal or "").lower()
     theme_variant = "full" if is_special_episode else "short"
 
     sound_library = load_sound_library(library_name="gemini_library.yaml", theme_variant=theme_variant)
     sound_markers = find_sound_markers(script_text)
+
+    # For special episodes, remove theme marker from sound effects (will be mixed separately)
+    if is_special_episode:
+        sound_markers = [(name, line, text) for name, line, text in sound_markers if name.lower() != "theme"]
+        print(f"[Podcast] Special episode: theme will be mixed via theatrical renderer", file=sys.stderr)
+
     sounds_used = [name for name, _, _ in sound_markers]
 
     if sound_markers:
-        print(f"[Podcast] Found {len(sound_markers)} sound effect markers", file=sys.stderr)
+        print(f"[Podcast] Found {len(sound_markers)} sound effect markers (excluding theme)", file=sys.stderr)
         for name, line, text in sound_markers:
             print(f"[Podcast]   {name} at line {line}", file=sys.stderr)
 
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
     print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
-    # Create podcast (skip countdown for SOUL/special episodes)
+    # Create podcast (skip countdown and theme for SOUL/special episodes)
     tmpdir, list_file, segment_files, sources, script, intro_audio_files = create_verbatim_podcast(
         script_text, config, soul_profiles,
         skip_countdown=is_special_episode,
+        skip_theme=is_special_episode,  # Skip theme in concat; will mix separately for theatrical
         theme_fade_duration_ms=800  # Quick fade: 0.8s for snappy crossfade
     )
 
@@ -656,9 +757,24 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                 print(f"[Podcast] Warning: Sound concat build failed, using original: {e}", file=sys.stderr)
                 concat_file = list_file
 
-        # Finalize audio to temporary file (with snappy fade for special episodes)
-        fade_ms = 800 if is_special_episode else 0  # 800ms = quick crossfade
-        finalize_podcast(tmpdir, concat_file, str(temp_audio_file), theme_fade_duration_ms=fade_ms, overlap_start_ms=13000)  # Wait 13s before Hal speaks
+        # Finalize audio to temporary file
+        finalize_podcast(tmpdir, concat_file, str(temp_audio_file))
+
+        # For special episodes, mix with theme on theatrical timeline
+        if is_special_episode:
+            theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+            if theme_path.exists():
+                theatrical_output = output_dir / f"{temp_stem}-theatrical.mp3"
+                final_body = render_soul_intro(
+                    str(temp_audio_file),
+                    str(theme_path),
+                    str(theatrical_output),
+                    tmpdir
+                )
+                # Replace temp file with theatrical mix
+                if final_body != str(temp_audio_file):
+                    temp_audio_file.unlink(missing_ok=True)
+                    theatrical_output.rename(temp_audio_file)
 
         # Compute MD5 checksum of generated audio and rename with checksum
         def compute_file_checksum(filepath, algo='md5'):
