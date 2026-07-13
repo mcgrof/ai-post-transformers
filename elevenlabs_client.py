@@ -211,10 +211,19 @@ def _tts_elevenlabs(text, voice_id, output_path):
 def _tts_piper(text, voice_id, output_path):
     """Generate TTS using local Piper voices."""
     import subprocess, os
-    # Female voice IDs: Ada Shannon, VERA
-    female_ids = {"HBQuDIqftrmAQQAHSWnF", "21m00Tcm4TlvDq8ikWAM"}  # Ada, VERA
-    if voice_id in female_ids:
+    # Map voice IDs to Piper voice models
+    # Ada (HBQuDIqftrmAQQAHSWnF) -> amy (female American)
+    # VERA (21m00Tcm4TlvDq8ikWAM) -> libritts_high/2559 (different female voice)
+    if voice_id == "HBQuDIqftrmAQQAHSWnF":
+        # Ada: standard female voice
         model = os.path.expanduser("~/.cache/huggingface/hub/models--rhasspy--piper-voices/"
+            "snapshots/834f23262168a7e809179465e4113f23f5a7d1f7/en/en_US/amy/medium/en_US-amy-medium.onnx")
+    elif voice_id == "21m00Tcm4TlvDq8ikWAM":
+        # VERA: alternative female voice (if available, fallback to amy)
+        vera_model = os.path.expanduser("~/.cache/huggingface/hub/models--rhasspy--piper-voices/"
+            "snapshots/834f23262168a7e809179465e4113f23f5a7d1f7/en/en_GB/alba/medium/en_GB-alba-medium.onnx")
+        # Use British female voice (alba) if available, else fall back to amy
+        model = vera_model if os.path.exists(vera_model) else os.path.expanduser("~/.cache/huggingface/hub/models--rhasspy--piper-voices/"
             "snapshots/834f23262168a7e809179465e4113f23f5a7d1f7/en/en_US/amy/medium/en_US-amy-medium.onnx")
     else:
         model = os.path.expanduser("~/devel/piper-voices/lessac.onnx")
@@ -317,9 +326,15 @@ def _tts_kokoro(text, voice_id, output_path):
     import uuid
 
     # Map ElevenLabs voice IDs to Kokoro voices
-    # Female voice IDs: Ada Shannon, VERA -> af_kore, male -> bm_george
-    female_ids = {"HBQuDIqftrmAQQAHSWnF", "21m00Tcm4TlvDq8ikWAM"}  # Ada, VERA
-    kokoro_voice = "af_kore" if voice_id in female_ids else "bm_george"
+    # Ada Shannon (HBQuDIqftrmAQQAHSWnF) -> af_kore (American female)
+    # VERA (21m00Tcm4TlvDq8ikWAM) -> bf_emma (British female, distinct voice)
+    # All others: male default -> bm_george
+    if voice_id == "HBQuDIqftrmAQQAHSWnF":
+        kokoro_voice = "af_kore"  # Ada uses American female
+    elif voice_id == "21m00Tcm4TlvDq8ikWAM":
+        kokoro_voice = "bf_emma"  # VERA uses British female (distinct voice)
+    else:
+        kokoro_voice = "bm_george"  # Default to male
 
     # Create unique temp paths
     script_id = uuid.uuid4().hex[:8]
