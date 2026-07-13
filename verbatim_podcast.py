@@ -360,7 +360,8 @@ def _extract_script_segments(text):
                         segments.append({
                             'speaker': current_speaker,
                             'text': text_str,
-                            'is_narration': False
+                            'is_narration': False,
+                            'line_number': current_line_number or line_idx
                         })
 
                 current_speaker = speaker
@@ -408,6 +409,7 @@ def _extract_script_segments(text):
                     })
             current_speaker = 'A'
             current_text = [line]
+            current_line_number = line_idx
 
     # Flush final segment
     if current_text and current_speaker:
@@ -417,7 +419,8 @@ def _extract_script_segments(text):
             segments.append({
                 'speaker': current_speaker,
                 'text': text_str,
-                'is_narration': False
+                'is_narration': False,
+                'line_number': current_line_number or len(lines)
             })
 
     return segments
@@ -747,6 +750,9 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
     print(f"[Podcast] Generating verbatim podcast: {title}", file=sys.stderr)
     print(f"[Podcast] VERA pronunciation: TTS will pronounce as 'Vera', not spell 'V-E-R-A'", file=sys.stderr)
 
+    # Extract segments for sound mapping (needed for theatrical mixing)
+    segments = _extract_script_segments(script_text)
+
     # Create podcast (skip countdown and theme for SOUL/special episodes)
     tmpdir, list_file, segment_files, sources, script, intro_audio_files = create_verbatim_podcast(
         script_text, config, soul_profiles,
@@ -795,7 +801,12 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                 )
                 print(f"[Podcast] Using sound-enhanced concat file: {concat_file}", file=sys.stderr)
             except Exception as e:
+                import traceback
+                tb_lines = traceback.format_exc().split('\n')
                 print(f"[Podcast] Warning: Sound concat build failed, using original: {e}", file=sys.stderr)
+                for line in tb_lines[-10:]:
+                    if line.strip():
+                        print(f"[Podcast]   {line}", file=sys.stderr)
                 concat_file = list_file
 
         # Finalize audio to temporary file
