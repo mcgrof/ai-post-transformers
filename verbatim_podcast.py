@@ -466,19 +466,20 @@ def _generate_title_from_script(text):
     return "Special Episode"
 
 
-def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
+def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_duration_s=10):
     """Mix theme with body on theatrical timeline (ChatGPT Pro approved).
 
     Uses single FFmpeg pass with filter_complex:
-    - Theme: 0-8s full volume (with 0.8s fade-in), 8s+ quiet
+    - Theme: plays for full duration with fade-in, fades to quiet as dialogue starts
     - Body: starts at 2s (delayed), overlaps theme
-    - Output: ~8-10 second theatrical bed
+    - Output: theatrical bed with theme + voice overlap
 
     Args:
         body_audio_path: path to full episode body (dialogue + SFX, no theme)
         theme_path: path to theme.mp3
         output_path: where to write final mixed audio
         tmpdir: temp directory for intermediate files
+        theme_duration_s: duration of theme in seconds (5 for short, 10 for full)
     """
     import subprocess
 
@@ -492,7 +493,7 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir):
         "[0:a]"
         "aresample=48000,"
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        "atrim=0:8,"
+        f"atrim=0:{theme_duration_s},"
         "asetpts=PTS-STARTPTS,"
         "afade=t=in:st=0:d=0.8,"
         "volume='if(lt(t,2),1,if(lt(t,3),1-(0.95*(t-2)),0.05))':eval=frame"
@@ -821,7 +822,8 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
                     str(temp_audio_file),
                     str(theme_path),
                     str(theatrical_output),
-                    tmpdir
+                    tmpdir,
+                    theme_duration_s=10  # Full theme is 10 seconds
                 )
                 # Replace temp file with theatrical mix
                 if final_body != str(temp_audio_file):
