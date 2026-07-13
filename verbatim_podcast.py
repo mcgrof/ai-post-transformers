@@ -487,12 +487,16 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_du
         print(f"[Theater] Warning: theme or body missing, skipping mix", file=sys.stderr)
         return body_audio_path
 
-    print("[Theater] Mixing theme + body on theatrical timeline...", file=sys.stderr)
+    print(f"[Theater] Mixing theme + body on theatrical timeline (theme_duration_s={theme_duration_s})...", file=sys.stderr)
+    print(f"[Theater] Theme file: {theme_path} ({Path(theme_path).stat().st_size} bytes)", file=sys.stderr)
 
-    # Theme mixing: intro loud (0-2s), then background level (2-9s), then fade to silent (9-10s)
-    # Use volume filter with piecewise logic: t<2 ? 1 : t<9 ? 0.25 : (1-(t-9)/1)*0.25
-    intro_end = 2
-    bg_fade_start = theme_duration_s - 1
+    # Theme mixing: scales based on duration
+    # 10s theme: intro 0-2s, background 2-9s, fade 9-10s
+    # 20s theme: intro 0-4s, background 4-18s, fade 18-20s
+    # Dialogue delay scales proportionally: 2s for 10s theme, 4s for 20s theme
+    intro_end = 2 * (theme_duration_s / 10)  # 2s for 10s, 4s for 20s
+    bg_fade_start = theme_duration_s - (1 * (theme_duration_s / 10))  # 1s before end, scaled
+    dialogue_delay_ms = int(intro_end * 1000)
 
     filter_complex = (
         "[0:a]"
@@ -509,7 +513,7 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_du
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
         "silenceremove=start_periods=1:start_threshold=-45dB:start_duration=0.05,"
         "asetpts=PTS-STARTPTS,"
-        "adelay=2000|2000"
+        f"adelay={dialogue_delay_ms}|{dialogue_delay_ms}"
         "[voice];"
 
         "[theme][voice]"
@@ -820,21 +824,29 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
 
         # For special episodes, mix with theme on theatrical timeline
         if is_special_episode:
-            theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+            # Use 20s full theme from Music directory if available, else fallback to 10s
+            theme_path = Path.home() / "Music" / "ai_cuts" / "theme.mp3"
+            if not theme_path.exists():
+                theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+
             print(f"[Podcast] Special episode detected: theme_path={theme_path}", file=sys.stderr)
             print(f"[Podcast] Theme file exists: {theme_path.exists()}", file=sys.stderr)
             if theme_path.exists():
                 theme_size = theme_path.stat().st_size
-                print(f"[Podcast] Using theme: {theme_path.name} ({theme_size} bytes)", file=sys.stderr)
+                # Determine duration: 20s if it's the ai_cuts version, 10s otherwise
+                theme_duration_s = 20 if "ai_cuts" in str(theme_path) else 10
+                print(f"[Podcast] Using theme: {theme_path.name} ({theme_size} bytes, {theme_duration_s}s)", file=sys.stderr)
                 theatrical_output = output_dir / f"{temp_stem}-theatrical.mp3"
                 final_body = render_soul_intro(
                     str(temp_audio_file),
                     str(theme_path),
                     str(theatrical_output),
                     tmpdir,
-                    theme_duration_s=10  # Full theme is 10 seconds
+                    theme_duration_s=theme_duration_s
                 )
                 # Replace temp file with theatrical mix
+                print(f"[Podcast] render_soul_intro returned: {final_body}", file=sys.stderr)
+                print(f"[Podcast] temp_audio_file: {temp_audio_file}", file=sys.stderr)
                 if final_body != str(temp_audio_file):
                     size_before = temp_audio_file.stat().st_size if temp_audio_file.exists() else 0
                     print(f"[Podcast] Replacing unmixed body ({size_before} bytes) with theatrical mix", file=sys.stderr)
