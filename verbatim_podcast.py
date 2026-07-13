@@ -490,12 +490,16 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_du
     print(f"[Theater] Mixing theme + body on theatrical timeline (theme_duration_s={theme_duration_s})...", file=sys.stderr)
     print(f"[Theater] Theme file: {theme_path} ({Path(theme_path).stat().st_size} bytes)", file=sys.stderr)
 
-    # Theme mixing: scales based on duration
-    # 10s theme: intro 0-2s, background 2-9s, fade 9-10s
-    # 20s theme: intro 0-4s, background 4-18s, fade 18-20s
-    # Dialogue delay scales proportionally: 2s for 10s theme, 4s for 20s theme
-    intro_end = 2 * (theme_duration_s / 10)  # 2s for 10s, 4s for 20s
-    bg_fade_start = theme_duration_s - (1 * (theme_duration_s / 10))  # 1s before end, scaled
+    # Theme mixing: for 20s theme, dialogue starts at 12.5s
+    # Theme plays solo for 12.5s, then dialogue with background theme, fades at end
+    if theme_duration_s == 20:
+        intro_end = 12.5  # Theme solo for 12.5s, then Hal starts
+        bg_fade_start = 19  # Fade last 1s
+    else:
+        # Fallback for 10s theme
+        intro_end = 2
+        bg_fade_start = 9
+
     dialogue_delay_ms = int(intro_end * 1000)
 
     filter_complex = (
