@@ -211,8 +211,8 @@ def _tts_elevenlabs(text, voice_id, output_path):
 def _tts_piper(text, voice_id, output_path):
     """Generate TTS using local Piper voices."""
     import subprocess, os
-    # Female voice IDs (Ada Shannon)
-    female_ids = {"HBQuDIqftrmAQQAHSWnF"}
+    # Female voice IDs: Ada Shannon, VERA
+    female_ids = {"HBQuDIqftrmAQQAHSWnF", "21m00Tcm4TlvDq8ikWAM"}  # Ada, VERA
     if voice_id in female_ids:
         model = os.path.expanduser("~/.cache/huggingface/hub/models--rhasspy--piper-voices/"
             "snapshots/834f23262168a7e809179465e4113f23f5a7d1f7/en/en_US/amy/medium/en_US-amy-medium.onnx")
@@ -317,8 +317,8 @@ def _tts_kokoro(text, voice_id, output_path):
     import uuid
 
     # Map ElevenLabs voice IDs to Kokoro voices
-    # Female voice IDs (Ada Shannon) -> af_kore, male -> bm_george
-    female_ids = {"HBQuDIqftrmAQQAHSWnF"}
+    # Female voice IDs: Ada Shannon, VERA -> af_kore, male -> bm_george
+    female_ids = {"HBQuDIqftrmAQQAHSWnF", "21m00Tcm4TlvDq8ikWAM"}  # Ada, VERA
     kokoro_voice = "af_kore" if voice_id in female_ids else "bm_george"
 
     # Create unique temp paths
