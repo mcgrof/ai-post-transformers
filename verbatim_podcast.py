@@ -821,7 +821,11 @@ def generate_verbatim_podcast_from_script(script_text, config, title=None, urls=
         # For special episodes, mix with theme on theatrical timeline
         if is_special_episode:
             theme_path = Path(__file__).parent / "sounds" / "theme-full.mp3"
+            print(f"[Podcast] Special episode detected: theme_path={theme_path}", file=sys.stderr)
+            print(f"[Podcast] Theme file exists: {theme_path.exists()}", file=sys.stderr)
             if theme_path.exists():
+                theme_size = theme_path.stat().st_size
+                print(f"[Podcast] Using theme: {theme_path.name} ({theme_size} bytes)", file=sys.stderr)
                 theatrical_output = output_dir / f"{temp_stem}-theatrical.mp3"
                 final_body = render_soul_intro(
                     str(temp_audio_file),
