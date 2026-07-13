@@ -489,9 +489,10 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_du
 
     print("[Theater] Mixing theme + body on theatrical timeline...", file=sys.stderr)
 
-    # Theme mixing: plays full theme duration with smooth volume fade
-    # Uses afade to handle volume transitions smoothly
-    fade_start_s = max(2, theme_duration_s - 1.5)
+    # Theme mixing: intro loud (0-2s), then background level (2-9s), then fade to silent (9-10s)
+    # Use volume filter with piecewise logic: t<2 ? 1 : t<9 ? 0.25 : (1-(t-9)/1)*0.25
+    intro_end = 2
+    bg_fade_start = theme_duration_s - 1
 
     filter_complex = (
         "[0:a]"
@@ -500,8 +501,7 @@ def render_soul_intro(body_audio_path, theme_path, output_path, tmpdir, theme_du
         f"atrim=0:{theme_duration_s},"
         "asetpts=PTS-STARTPTS,"
         "afade=t=in:st=0:d=0.8,"
-        f"afade=t=out:st={fade_start_s}:d=1.5,"
-        f"volume=0.3:eval=frame"
+        f"volume=if(lt(t\\,{intro_end})\\,1\\,if(lt(t\\,{bg_fade_start})\\,0.25\\,(1-((t-{bg_fade_start})/1))*0.25)):eval=frame"
         "[theme];"
 
         "[1:a]"
