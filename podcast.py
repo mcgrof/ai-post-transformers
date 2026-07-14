@@ -28,7 +28,7 @@ def _make_episode_stem(title, date_str, urls=None):
     slug = unicodedata.normalize("NFKD", title)
     slug = slug.encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^\w\s-]", "", slug, flags=re.ASCII).strip().lower()
-    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
+    slug = re.sub(r"[-\s]+", "-", slug)[:120].strip("-")
     slug = re.sub(r"^episode-", "", slug)
     hash_input = f"{title}|{date_str}|{','.join(sorted(urls or []))}"
     hash6 = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
