@@ -1559,6 +1559,23 @@ Source content:
         p1_script = p1_script.get("script", [])
     p1_words = sum(len(s["text"].split()) for s in p1_script)
     print(f"[Podcast]     {len(p1_script)} segments, {p1_words} words", file=sys.stderr)
+
+    # Fallback: if Part 1 (intro) returned 0 segments, inject the
+    # intro manually so the episode isn't missing its opening.
+    if not p1_script:
+        print(f"[Podcast]     WARNING: Part 1 returned no segments; "
+              "injecting fallback intro", file=sys.stderr)
+        p1_script = [
+            {"speaker": "A", "text": intro},
+            {"speaker": "B", "text": (f"Thanks Hal! So today we're diving into "
+                                      f'"{paper_title}" by {paper_authors[0]} et al. '
+                                      f"from {paper_institutions[0] if paper_institutions else 'an interesting group'}. "
+                                      f"This one really caught my attention.")}
+        ]
+        p1_words = sum(len(s["text"].split()) for s in p1_script)
+        print(f"[Podcast]     Injected {len(p1_script)} fallback segments, "
+              f"{p1_words} words", file=sys.stderr)
+
     all_scripts.extend(p1_script)
 
     # Extract questions and key concepts from a script part for the coverage memo
