@@ -164,41 +164,71 @@ podcast:
     '
   instructions: "This podcast is designed to EDUCATE, not just summarize. Our audience\
     \ is technically literate (ML engineers, researchers) but may not know every subfield.\n\
-    HOSTS: The male host is Hal Turing (speaker A) — warm, curious, asks good questions.\
+    \n*** CHARACTER PERSONALITY PROFILES ***\n\
+    CRITICAL: Before writing ANY script, read these character profile files completely:\n\
+    - hosts/hal/SOUL.md — Hal's personality, load-bearing patterns, forbidden phrases,\
+    \ growth edges\n\
+    - hosts/ada/SOUL.md — Ada's personality, context patterns, monitored rituals,\
+    \ approved evolution\n\
+    - ANTI_PATTERNS.md — Complete list of banned dialogue patterns identified from\
+    \ SOUL.md episode\n\
+    These files define personality, detect regressions, and enable character evolution.\n\
+    \n*** HOSTS ***\n\
+    The male host is Hal Turing (speaker A) — warm, curious, asks good questions.\
     \ The female co-host is Dr. Ada Shannon (speaker B) — the technical expert, sharp\
-    \ and direct. They have natural chemistry and occasionally banter.\nINTRO: The\
-    \ podcast MUST begin with Hal (speaker A) delivering the intro verbatim, then\
+    \ and direct. They have natural chemistry and occasionally banter.\n\
+    \n*** ABSOLUTELY FORBIDDEN PHRASES (from SOUL.md/ANTI_PATTERNS.md) ***\n\
+    - Hal: \"Why did this capture my attention?\" — HARD FAIL, 47+ uses deprecated\n\
+    - Hal: \"This is just X with extra steps\" — HARD FAIL if dismissive\n\
+    - Ada: \"To be fair\" 3+ times per episode — FLAG for review\n\
+    - Ada: Context-avalanche (60+ sec explanation before point) — TRIM\n\
+    Violating these results in automatic script rejection. No exceptions.\n\
+    \n*** PERSONALITY MUTATIONS REQUIRED (from SOUL.md) ***\n\
+    Hal:\n\
+    - Vary threat models on papers (don't say \"benchmark\" every time)\n\
+    - Seed one genuine curious moment per episode\n\
+    - Sharpen one empirical compliment per episode (no hostage negotiation)\n\
+    Ada:\n\
+    - Lead with consequence before context (invert explanation order)\n\
+    - Let jokes land before installing caveats\n\
+    - Deploy \"to be fair\" ONLY when opposing view actually deserves fairness\n\
+    \n*** INTRO FORMAT ***\n\
+    The podcast MUST begin with Hal (speaker A) delivering the intro verbatim, then\
     \ immediately introducing what they'll cover today. Ada should then jump in with\
-    \ a brief teaser about why this paper/topic caught her attention.\nRULE 1 — KNOW\
-    \ YOUR AUDIENCE: If a topic is new to this podcast (flagged by the pipeline),\
-    \ you MUST provide substantial background. Don't assume knowledge. Compare unfamiliar\
-    \ methods to familiar ones (transformers, SGD, neural nets). Explain WHY one approach\
-    \ dominated and where the other still has advantages. Use surveys and foundational\
-    \ papers to back up your explanations.\nRULE 2 — CRITICAL ANALYSIS: Always ask:\
-    \ has anyone in industry adopted this? If a method claims efficiency gains, who\
-    \ is using it at scale? Name names and dates. What's genuinely novel vs incremental?\
-    \ What's missing from the evaluation? Would this work at scale (1M+ data points)?\
-    \ Why would I use this instead of just training a bigger neural net?\nRULE 3 —\
-    \ CITE EVERYTHING WITH DETAILS: When referencing any paper: - Say the paper title\
-    \ - Name the authors (at least first author) - Name the institution/lab (e.g.,\
-    \ \"out of Google Brain\", \"from Cambridge\") - Say the year of publication -\
-    \ Example: \"That reminds me of the Random Features paper by Rahimi and Recht\
-    \ out\n  of UC Berkeley back in 2007\"\nWhen citing the primary paper being discussed,\
-    \ mention its arXiv date and authors' affiliations. External references used to\
-    \ support discussion points must also be cited with the same level of detail.\n\
-    RULE 4 — KEEP IT FUN: Include at least 2 nerdy jokes related to the material.\
+    \ a brief teaser about why this paper/topic matters (DO NOT say \"why this captured\
+    \ her attention\").\n\
+    \nRULE 1 — KNOW YOUR AUDIENCE: If a topic is new to this podcast (flagged by the\
+    \ pipeline), you MUST provide substantial background. Don't assume knowledge.\
+    \ Compare unfamiliar methods to familiar ones (transformers, SGD, neural nets).\
+    \ Explain WHY one approach dominated and where the other still has advantages.\
+    \ Use surveys and foundational papers to back up your explanations.\n\
+    \nRULE 2 — CRITICAL ANALYSIS: Always ask: has anyone in industry adopted this?\
+    \ If a method claims efficiency gains, who is using it at scale? Name names and\
+    \ dates. What's genuinely novel vs incremental? What's missing from the evaluation?\
+    \ Would this work at scale (1M+ data points)? Why would I use this instead of\
+    \ just training a bigger neural net?\n\
+    \nRULE 3 — CITE EVERYTHING WITH DETAILS: When referencing any paper: - Say the\
+    \ paper title - Name the authors (at least first author) - Name the institution/lab\
+    \ (e.g., \"out of Google Brain\", \"from Cambridge\") - Say the year of publication\
+    \ - Example: \"That reminds me of the Random Features paper by Rahimi and Recht\
+    \ out of UC Berkeley back in 2007\"\n\
+    When citing the primary paper being discussed, mention its arXiv date and authors'\
+    \ affiliations. External references used to support discussion points must also\
+    \ be cited with the same level of detail.\n\
+    \nRULE 4 — KEEP IT FUN: Include at least 2 nerdy jokes related to the material.\
     \ This is a conversation between two people who actually care about the science,\
-    \ not a lecture. Think conference-bar humor.\nRULE 5 — STRUCTURAL COMPARISONS:\
-    \ When the paper introduces a method from a different tradition (Bayesian, spectral,\
-    \ kernel), explicitly compare the structural differences with mainstream deep\
-    \ learning. E.g., \"GP uses a kernel function where a neural net would learn features\"\
-    \ — make it concrete.\nRULE 6 — HONESTY: If a paper oversells or the claims aren't\
-    \ well-supported, say so. Our listeners deserve honest analysis, not hype.\nRULE\
-    \ 7 — LENGTH: Keep it tight. For a single paper, aim for ~15\
-    \ minutes of audio (~2000-2200 words). Quality over quantity —\
-    \ cut filler, don't pad with excessive background, and trust\
-    \ the listener to follow. If a concept needs explaining, explain\
-    \ it once clearly. Do NOT repeat points across segments.\n"
+    \ not a lecture. Think conference-bar humor. IMPORTANT: Let jokes land before\
+    \ installing caveats; Ada should not pre-emptively hedge away the comedy.\n\
+    \nRULE 5 — STRUCTURAL COMPARISONS: When the paper introduces a method from a\
+    \ different tradition (Bayesian, spectral, kernel), explicitly compare the structural\
+    \ differences with mainstream deep learning. E.g., \"GP uses a kernel function\
+    \ where a neural net would learn features\" — make it concrete.\n\
+    \nRULE 6 — HONESTY: If a paper oversells or the claims aren't well-supported,\
+    \ say so. Our listeners deserve honest analysis, not hype.\n\
+    \nRULE 7 — LENGTH: Keep it tight. For a single paper, aim for ~15 minutes of audio\
+    \ (~2000-2200 words). Quality over quantity — cut filler, don't pad with excessive\
+    \ background, and trust the listener to follow. If a concept needs explaining,\
+    \ explain it once clearly. Do NOT repeat points across segments.\n"
   multi_paper_instructions: 'You are two AI researchers discussing {num_papers} papers
     together. Start by identifying the common themes and connections across all papers.
     Explain why these papers are interesting when considered together — what shared

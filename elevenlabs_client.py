@@ -1887,7 +1887,8 @@ def create_podcast(text, config, covered_topics=None):
     tmpdir = tempfile.mkdtemp(prefix="podcast_")
     segment_files = []
 
-    # --- Generate countdown + dual-voice intro ---
+    # --- Generate countdown + theme song intro ---
+    # Strategy: 3 2 1 countdown, then theme song plays, then hosts begin script
     print("[Podcast] Generating countdown intro...", file=sys.stderr)
     import subprocess
 
@@ -1898,22 +1899,7 @@ def create_podcast(text, config, covered_topics=None):
     tts_segment("one", voice_a, os.path.join(tmpdir, "countdown_1.mp3"))
     time.sleep(0.3)
 
-    # Both voices say the show name (overlaid)
-    tts_segment("Welcome to AI Post Transformers!", voice_a, os.path.join(tmpdir, "welcome_a.mp3"))
-    tts_segment("Welcome to AI Post Transformers!", voice_b, os.path.join(tmpdir, "welcome_b.mp3"))
-    time.sleep(0.3)
-
-    # Overlay both welcome voices
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", os.path.join(tmpdir, "welcome_a.mp3"),
-         "-i", os.path.join(tmpdir, "welcome_b.mp3"),
-         "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]",
-         "-map", "[out]", "-c:a", "libmp3lame", "-q:a", "2",
-         os.path.join(tmpdir, "welcome_overlay.mp3")],
-        capture_output=True, text=True
-    )
-
-    # Short pause between countdown numbers
+    # Short pause between countdown numbers and after final countdown
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
          "-t", "0.3", "-c:a", "libmp3lame", "-q:a", "2",
@@ -1921,16 +1907,24 @@ def create_podcast(text, config, covered_topics=None):
         capture_output=True, text=True
     )
 
-    # Build the intro sequence as pre-segments
+    # Medium pause between countdown and theme (let countdown settle)
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+         "-t", "0.5", "-c:a", "libmp3lame", "-q:a", "2",
+         os.path.join(tmpdir, "medium_pause.mp3")],
+        capture_output=True, text=True
+    )
+
+    # Build the intro sequence: countdown -> pause -> theme (theme plays via
+    # finalize_podcast's crossfade logic which mixes first script segment
+    # with theme, no need to append theme here)
     intro_audio_files = [
         os.path.join(tmpdir, "countdown_3.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
         os.path.join(tmpdir, "countdown_2.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
         os.path.join(tmpdir, "countdown_1.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
-        os.path.join(tmpdir, "welcome_overlay.mp3"),
-        os.path.join(tmpdir, "short_pause.mp3"),
+        os.path.join(tmpdir, "medium_pause.mp3"),
     ]
 
     # --- Generate main script TTS ---
