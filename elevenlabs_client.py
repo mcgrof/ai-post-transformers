@@ -1915,23 +1915,16 @@ def create_podcast(text, config, covered_topics=None):
         capture_output=True, text=True
     )
 
-    # Append theme song if it exists (custom theme at ~/Music/ai/theme.mp3)
-    custom_theme = Path.home() / "Music" / "ai" / "theme.mp3"
+    # Append theme song if it exists (from podcast-theme directory)
+    theme_intro = Path(__file__).parent / "podcast-theme" / "theme-intro.mp3"
     theme_intro_file = None
-    if custom_theme.exists():
-        # Trim theme to ~8 seconds for intro (snappy, not the full song)
-        theme_intro_file = os.path.join(tmpdir, "theme_intro.mp3")
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(custom_theme), "-t", "8",
-             "-c:a", "libmp3lame", "-q:a", "2", theme_intro_file],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            print("[Podcast] Warning: theme trim failed, skipping theme intro",
-                  file=sys.stderr)
-            theme_intro_file = None
-        else:
-            print("[Podcast] Theme intro prepared (8 seconds)", file=sys.stderr)
+
+    if theme_intro.exists():
+        theme_intro_file = str(theme_intro)
+        print(f"[Podcast] Theme intro prepared ({theme_intro.name})", file=sys.stderr)
+    else:
+        print("[Podcast] Warning: theme-intro.mp3 not found, skipping theme",
+              file=sys.stderr)
 
     # Build the intro sequence: countdown -> pause -> theme (8s intro)
     intro_audio_files = [
@@ -2227,11 +2220,20 @@ def finalize_podcast(tmpdir, list_file, output_path, theme_fade_duration_ms=0, o
             return output_path
 
         # Create mixed intro (theme + first 2-3 dialogue segments overlapped)
-        # For SOUL episodes, use extended crossfade with custom theme if available
-        custom_theme = Path.home() / "Music" / "ai" / "theme.mp3"
-        if custom_theme.exists():
-            theme_file = str(custom_theme)
-            print(f"[Podcast] Using custom theme: {theme_file}", file=sys.stderr)
+        # Use theme-intro.mp3 for standard episodes, theme.mp3 for special episodes
+        theme_intro = Path(__file__).parent / "podcast-theme" / "theme-intro.mp3"
+        theme_full = Path(__file__).parent / "podcast-theme" / "theme.mp3"
+
+        # Check if this is a theatrical/special episode based on concat list
+        concat_text = open(list_file).read().upper() if list_file else ""
+        is_theatrical = any(word in concat_text
+                           for word in ["SOUL", "SEVERANCE", "VERA"])
+        selected_theme = theme_full if is_theatrical and theme_full.exists() else theme_intro
+
+        if selected_theme.exists():
+            theme_file = str(selected_theme)
+            theme_type = "full (theatrical)" if is_theatrical else "intro"
+            print(f"[Podcast] Using theme ({theme_type}): {theme_file}", file=sys.stderr)
 
         # Concatenate first few dialogue segments for multi-line crossfade
         if len(crossfade_segments) > 1:
