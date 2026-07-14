@@ -390,8 +390,34 @@ def _build_image_prompt(config, title, description):
     img_config = config.get("image_generation", {})
     style = img_config.get("style_prompt", "").strip()
 
-    # Extract key stats/points from description for infographic
-    prompt = f"""{style}
+    # Special handling for theatrical/SOUL-type episodes
+    is_theatrical = any(kw in title.lower() for kw in ["soul", "severance", "vera"])
+
+    if is_theatrical:
+        # For theatrical episodes, create a conceptual/artistic cover
+        prompt = f"""{style}
+
+Create a CINEMATIC THEATRICAL POSTER for a podcast episode cover.
+
+Episode: {title}
+
+Concept: {description[:600]}
+
+DESIGN REQUIREMENTS:
+- Dark moody background with layered depth (deep purples, dark teals, charcoal blacks)
+- Glowing neon accents (electric cyan, vivid magenta, lime green) creating contrast
+- Abstract geometric shapes or flowing digital elements suggesting AI/consciousness/evolution
+- Subtle silhouettes with glowing outlines suggesting multiple intelligent entities in dialogue
+- NO realistic faces — use symbolic representation of minds/consciousness/digital entities
+- Dramatic volumetric lighting with glowing edges creating cinematic depth
+- Central focal point with layers of visual interest (foreground/midground/background)
+- Bold typography in futuristic font: episode title or key theme word
+- Futuristic tech aesthetic (circuit patterns, data streams, glowing networks as texture)
+- 1024x1024 square format, high-contrast, visually striking cinematic quality
+- Feel: sci-fi thriller meets philosophical exploration"""
+    else:
+        # For research paper episodes, use the data-focused approach
+        prompt = f"""{style}
 
 Create a DARK-THEMED INFOGRAPHIC for a podcast episode cover image.
 
