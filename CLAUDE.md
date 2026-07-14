@@ -182,6 +182,43 @@ After generation, review the draft in `drafts/YYYY/MM/`, then:
 This uploads to R2, copies files to `public/YYYY/MM/`, and
 regenerates the RSS feed.
 
+### Cleaning up stale drafts
+
+When draft episodes need to be deleted (rejected, superceded, or test
+iterations), remove them from THREE places atomically:
+
+1. **Database** — Delete from `papers.db`:
+   ```bash
+   sqlite3 papers.db "DELETE FROM podcasts WHERE title LIKE '%search%';"
+   ```
+
+2. **Manifest** — Remove entries from R2 `podcast-admin/manifest.json`:
+   ```bash
+   # Download manifest
+   aws s3api get-object --bucket podcast-admin --key "manifest.json" \
+     /tmp/manifest.json --endpoint-url "$AWS_ENDPOINT_URL"
+   
+   # Filter with Python (remove matching drafts from data['drafts'] list)
+   # Re-upload to R2
+   aws s3 cp /tmp/manifest.json s3://podcast-admin/manifest.json \
+     --endpoint-url "$AWS_ENDPOINT_URL"
+   ```
+
+3. **R2 draft files** — Delete draft audio/metadata from R2:
+   ```bash
+   aws s3 rm s3://ai-post-transformers/drafts/ --recursive \
+     --endpoint-url "$AWS_ENDPOINT_URL" \
+     --include "*search-term*"
+   ```
+
+4. **Admin UI** — Restart the admin worker to reload manifest:
+   ```bash
+   systemctl --user restart podcast-worker.service
+   ```
+
+**CRITICAL:** Do all four steps. Skipping any leaves stale entries in the
+admin UI or database, causing confusion and duplicate work.
+
 ### Directory layout
 
 - `drafts/YYYY/MM/` — newly generated episodes (work-in-progress)
