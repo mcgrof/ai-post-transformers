@@ -4434,6 +4434,15 @@ async function getDrafts(env) {
         manifest_drafts_count: (manifest.drafts || []).length,
         sidecar_reads: needsSidecar.length,
         published_basenames_count: publishedBasenames.size,
+        stale_check: drafts
+          .filter(d => d.title && (d.title.includes('Nemotron-Labs-3-Puzzle-75B-A9B') || d.title.includes('internal.do-not-panic')))
+          .map(d => ({
+            title: d.title,
+            key: d.key,
+            source: d.key ? 'drafts/' : 'unknown',
+            has_manifest_entry: !!matched.get(d.key),
+            has_sidecar: !!sidecarMap.get(d.key),
+          })),
       },
     };
   } catch (error) {
@@ -5852,6 +5861,22 @@ async function rejectDrafts(env, {
       reason: reason || '',
     });
     await env.ADMIN_BUCKET.put(obj.key, JSON.stringify(submission));
+
+    // Delete the draft sidecar files from PODCAST_BUCKET so they're
+    // not accessible and don't cause storage/bandwidth waste. The
+    // submission record itself is kept for audit trail.
+    if (submission.draft_stem) {
+      const suffixes = ['.mp3', '.json', '.srt', '.png', '.txt'];
+      for (const suffix of suffixes) {
+        const sidecardKey = `${submission.draft_stem}${suffix}`;
+        try {
+          await env.PODCAST_BUCKET.delete(sidecardKey);
+        } catch (_) {
+          // Ignore errors for missing files — they may have been
+          // deleted already or never existed
+        }
+      }
+    }
   }
 
   return {
