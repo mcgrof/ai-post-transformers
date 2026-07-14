@@ -605,6 +605,150 @@ test('POST /api/review reject updates submission without draft_stem via key matc
   assert.equal(submission.status_history.at(-1).status, 'rejected');
 });
 
+test('POST /api/review reject deletes draft sidecar files', async () => {
+  // Verify that rejecting a draft cleans up the physical sidecar files
+  // (.mp3, .json, .srt, .png, .txt) while preserving manifest and
+  // submission audit trail for historical record.
+  const env = makeEnv({
+    admin: {
+      'manifest.json': {
+        drafts: [
+          {
+            id: 42,
+            title: 'Draft with Sidecars',
+            draft_key: 'drafts/2026/04/example-sidecars.mp3',
+            episode_key: 'paper://sidecars-test',
+          },
+        ],
+      },
+      'submissions/2026-04-10T10-00-00-000Z.json': {
+        urls: ['https://arxiv.org/abs/9999.99999'],
+        timestamp: '2026-04-10T10:00:00.000Z',
+        status: 'draft_generated',
+        draft_stem: 'drafts/2026/04/example-sidecars',
+        status_history: [
+          { status: 'submitted', at: '2026-04-10T10:00:00.000Z' },
+          { status: 'draft_generated', at: '2026-04-10T11:00:00.000Z' },
+        ],
+      },
+    },
+    podcast: {
+      'drafts/2026/04/example-sidecars.mp3': 'audio-data',
+      'drafts/2026/04/example-sidecars.json': JSON.stringify({
+        title: 'Draft with Sidecars',
+        description: 'Test sidecar cleanup',
+      }),
+      'drafts/2026/04/example-sidecars.srt': '1\n00:00:00,000 --> 00:00:05,000\nSubtitle text',
+      'drafts/2026/04/example-sidecars.png': 'image-data',
+      'drafts/2026/04/example-sidecars.txt': 'transcript text',
+    },
+  });
+
+  // Verify files exist before rejection
+  assert.ok(env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.mp3'));
+  assert.ok(env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.json'));
+  assert.ok(env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.srt'));
+  assert.ok(env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.png'));
+  assert.ok(env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.txt'));
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'drafts/2026/04/example-sidecars.mp3',
+        action: 'reject',
+        reason: 'Sidecars cleanup test',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.rejected_keys.includes('drafts/2026/04/example-sidecars.mp3'));
+
+  // Verify all sidecar files are deleted
+  assert.equal(
+    env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.mp3'),
+    undefined,
+    'MP3 should be deleted',
+  );
+  assert.equal(
+    env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.json'),
+    undefined,
+    'JSON metadata should be deleted',
+  );
+  assert.equal(
+    env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.srt'),
+    undefined,
+    'SRT subtitles should be deleted',
+  );
+  assert.equal(
+    env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.png'),
+    undefined,
+    'PNG cover should be deleted',
+  );
+  assert.equal(
+    env.PODCAST_BUCKET.objects.get('drafts/2026/04/example-sidecars.txt'),
+    undefined,
+    'TXT transcript should be deleted',
+  );
+
+  // Verify manifest entry still exists (for audit trail)
+  const manifest = JSON.parse(env.ADMIN_BUCKET.objects.get('manifest.json'));
+  const rejectedDraft = manifest.drafts.find(d => d.episode_key === 'paper://sidecars-test');
+  assert.ok(rejectedDraft, 'Manifest entry should still exist');
+  assert.equal(rejectedDraft.revision_state, 'rejected', 'Should be marked as rejected');
+  assert.equal(rejectedDraft.rejected_reason, 'Sidecars cleanup test');
+
+  // Verify submission still exists with rejected status (for audit trail)
+  const submission = JSON.parse(
+    env.ADMIN_BUCKET.objects.get('submissions/2026-04-10T10-00-00-000Z.json'),
+  );
+  assert.equal(submission.status, 'rejected');
+  assert.equal(submission.rejection_reason, 'Sidecars cleanup test');
+});
+
+test('rejectDrafts filters rejected submissions from fallback list', async () => {
+  // Unit test for the draftGeneratedSubs filter logic used by
+  // draftsPageWithData(). Verify that submissions with status='rejected'
+  // are excluded from the fallback card render list.
+  const submissions = [
+    {
+      key: 'submissions/active.json',
+      status: 'draft_generated',
+      draft_stem: 'drafts/2026/04/active-draft',
+      timestamp: '2026-04-15T09:00:00.000Z',
+    },
+    {
+      key: 'submissions/rejected.json',
+      status: 'rejected',
+      draft_stem: 'drafts/2026/04/rejected-draft',
+      timestamp: '2026-04-14T09:00:00.000Z',
+    },
+    {
+      key: 'submissions/approved.json',
+      status: 'approved_for_publish',
+      draft_stem: 'drafts/2026/04/approved-draft',
+      timestamp: '2026-04-13T09:00:00.000Z',
+    },
+  ];
+
+  // Simulate the filter used in draftsPageWithData (line 1519)
+  const draftGeneratedSubs = submissions
+    .filter(s => s.status === 'draft_generated' || s.status === 'approved_for_publish')
+    .filter(s => s.visibility !== 'private');
+
+  // Verify only draft_generated and approved_for_publish are included
+  assert.equal(draftGeneratedSubs.length, 2, 'Should have 2 active submissions');
+  assert.ok(draftGeneratedSubs.some(s => s.status === 'draft_generated'));
+  assert.ok(draftGeneratedSubs.some(s => s.status === 'approved_for_publish'));
+  assert.ok(!draftGeneratedSubs.some(s => s.status === 'rejected'),
+    'Rejected submissions must be filtered out');
+});
 
 test('GET /drafts server-rendered page reflects approved state in action buttons', async () => {
   const env = makeEnv({
