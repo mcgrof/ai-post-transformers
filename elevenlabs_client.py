@@ -1907,25 +1907,44 @@ def create_podcast(text, config, covered_topics=None):
         capture_output=True, text=True
     )
 
-    # Medium pause between countdown and theme (let countdown settle)
+    # Short pause after final countdown (before theme)
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-         "-t", "0.5", "-c:a", "libmp3lame", "-q:a", "2",
-         os.path.join(tmpdir, "medium_pause.mp3")],
+         "-t", "0.3", "-c:a", "libmp3lame", "-q:a", "2",
+         os.path.join(tmpdir, "after_countdown_pause.mp3")],
         capture_output=True, text=True
     )
 
-    # Build the intro sequence: countdown -> pause -> theme (theme plays via
-    # finalize_podcast's crossfade logic which mixes first script segment
-    # with theme, no need to append theme here)
+    # Append theme song if it exists (custom theme at ~/Music/ai/theme.mp3)
+    custom_theme = Path.home() / "Music" / "ai" / "theme.mp3"
+    theme_intro_file = None
+    if custom_theme.exists():
+        # Trim theme to ~8 seconds for intro (snappy, not the full song)
+        theme_intro_file = os.path.join(tmpdir, "theme_intro.mp3")
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(custom_theme), "-t", "8",
+             "-c:a", "libmp3lame", "-q:a", "2", theme_intro_file],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print("[Podcast] Warning: theme trim failed, skipping theme intro",
+                  file=sys.stderr)
+            theme_intro_file = None
+        else:
+            print("[Podcast] Theme intro prepared (8 seconds)", file=sys.stderr)
+
+    # Build the intro sequence: countdown -> pause -> theme (8s intro)
     intro_audio_files = [
         os.path.join(tmpdir, "countdown_3.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
         os.path.join(tmpdir, "countdown_2.mp3"),
         os.path.join(tmpdir, "short_pause.mp3"),
         os.path.join(tmpdir, "countdown_1.mp3"),
-        os.path.join(tmpdir, "medium_pause.mp3"),
+        os.path.join(tmpdir, "after_countdown_pause.mp3"),
     ]
+    if theme_intro_file and os.path.exists(theme_intro_file):
+        intro_audio_files.append(theme_intro_file)
+        print("[Podcast] Theme song appended to intro", file=sys.stderr)
 
     # --- Generate main script TTS ---
     for i, seg in enumerate(script):
