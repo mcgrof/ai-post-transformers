@@ -731,7 +731,10 @@ def _upload_draft_artifacts(draft_stem: str) -> tuple[bool, dict]:
                 return False, {"error": f"failed to upload {r2_key}: {exc}"}
             warnings.append(f"failed to upload {r2_key}: {exc}")
 
+    draft_key = f"{remote_stem}.mp3"
     details = {
+        "draft_key": draft_key,
+        "draft_stem": remote_stem,
         "draft_artifacts": uploaded,
         "draft_uploaded_at": datetime.now(timezone.utc).isoformat(),
     }
