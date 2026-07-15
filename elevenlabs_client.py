@@ -1590,7 +1590,23 @@ Output as JSON:
 Source content (read from file):
 {bible_file}"""
 
-    episode_bible = llm_call(backend, model, bible_prompt, temperature=0.3, max_tokens=4000)
+    try:
+        episode_bible = llm_call(backend, model, bible_prompt, temperature=0.3, max_tokens=4000)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Episode bible generation failed: {e}; using minimal fallback", file=sys.stderr)
+        # Fallback: minimal structure allows script generation to proceed
+        episode_bible = {
+            "paper_citation": f"Paper on {', '.join(topic_names[:2])} (details not extracted)",
+            "core_research_question": "How can we improve efficiency and scalability in this domain?",
+            "key_definitions": [
+                {"term": t, "define_in_part": 1, "brief": f"A concept in {t}"}
+                for t in topic_names[:3]
+            ],
+            "part_1_must_cover": ["intro + authors", "background foundations", "key definitions"],
+            "part_2_must_cover": ["core methods", "key results/data", "technical details"],
+            "part_3_must_cover": ["critical analysis", "practical implications", "future directions"]
+        }
+
     bible_text = json.dumps(episode_bible, indent=2)
 
     # Anti-repetition constraints used in all parts after Part 1
