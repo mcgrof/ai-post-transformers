@@ -985,3 +985,11 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
         print(f"  Source: {url}", file=sys.stderr)
     if sources:
         print(f"  References: {len(sources)}", file=sys.stderr)
+
+    return {
+        "id": podcast_id,
+        "title": title,
+        "audio_file": str(audio_file),
+        "image_file": str(image_file) if image_file and Path(image_file).exists() else None,
+        "urls": urls,
+    }

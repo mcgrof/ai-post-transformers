@@ -131,6 +131,58 @@ def publish_episode(audio_file, image_file=None, srt_file=None,
     return urls
 
 
+def upload_draft(audio_file, image_file=None, srt_file=None, json_file=None):
+    """Upload draft episode files to R2 drafts/ directory for admin review.
+
+    After podcast generation completes, upload all associated files
+    to drafts/ on R2 so the admin UI can locate them. This is separate
+    from final publication which uploads to episodes/.
+
+    Args:
+        audio_file: Path to the MP3 file.
+        image_file: Path to the PNG cover art (optional).
+        srt_file: Path to the SRT transcript (optional).
+        json_file: Path to the JSON metadata (optional).
+
+    Returns:
+        Dict of uploaded URLs keyed by type, or empty if upload fails.
+    """
+    if not audio_file or not os.path.exists(audio_file):
+        return {}
+
+    try:
+        from pathlib import Path
+        audio_path = Path(audio_file)
+        # Preserve the drafts/YYYY/MM/ directory structure
+        draft_dir = str(audio_path.parent)
+        if "/drafts/" in draft_dir:
+            r2_prefix = draft_dir.split("/drafts/")[-1]
+            r2_prefix = f"drafts/{r2_prefix}"
+        else:
+            # Fallback if not in expected directory
+            return {}
+
+        urls = publish_episode(
+            audio_file, image_file=image_file, srt_file=srt_file,
+            r2_prefix=r2_prefix
+        )
+
+        # Also upload JSON metadata
+        if json_file and os.path.exists(json_file):
+            client = get_r2_client()
+            json_basename = os.path.basename(json_file)
+            urls["metadata"] = upload_file(
+                client, json_file,
+                f"{r2_prefix}/{json_basename}",
+            )
+
+        return urls
+    except Exception as e:
+        print(f"{_c('33', '[R2]')} Draft upload error: {e}",
+              file=sys.stderr)
+        return {}
+
+
 def upload_feed(feed_file):
     """Upload the RSS feed XML to R2 root.
 

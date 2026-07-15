@@ -346,7 +346,28 @@ modes:
             print("Error: No URLs provided.", file=sys.stderr)
             sys.exit(1)
         from podcast import generate_podcast_from_urls
-        generate_podcast_from_urls(urls, config, goal=args.goal, description_guidance=args.description)
+        episode = generate_podcast_from_urls(urls, config, goal=args.goal, description_guidance=args.description)
+
+        # Upload draft files to R2 for admin review
+        if episode:
+            try:
+                from r2_upload import upload_draft
+                srt_file = episode.get("audio_file", "").replace(".mp3", ".srt") if episode.get("audio_file") else None
+                json_file = episode.get("audio_file", "").replace(".mp3", ".json") if episode.get("audio_file") else None
+                srt_file = srt_file if srt_file and os.path.exists(srt_file) else None
+                json_file = json_file if json_file and os.path.exists(json_file) else None
+                upload_draft(episode["audio_file"], image_file=episode.get("image_file"),
+                            srt_file=srt_file, json_file=json_file)
+                print("[Podcast] Draft uploaded to R2", file=sys.stderr)
+            except Exception as e:
+                print(f"[Podcast] Draft upload failed: {e}", file=sys.stderr)
+
+            # Update manifest with draft metadata for admin UI
+            try:
+                from scripts.draft_manifest import backfill_manifest
+                backfill_manifest(dry_run=False)
+            except Exception as e:
+                print(f"[Podcast] Manifest update failed: {e}", file=sys.stderr)
 
     # --publish after generation
     if args.publish:
