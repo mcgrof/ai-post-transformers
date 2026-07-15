@@ -231,6 +231,7 @@ def _call_anthropic(client, model, prompt, temperature, max_tokens):
 
 def _call_claude_cli(model, prompt, max_tokens):
     import signal
+    import os
 
     cmd = ["claude", "-p",
            "--output-format", "text",
@@ -265,9 +266,8 @@ def _call_claude_cli(model, prompt, max_tokens):
             stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
             # Kill the stuck process to prevent poisoning subsequent calls
-            import os, signal as _signal_module
             try:
-                os.killpg(os.getpgid(proc.pid), _signal_module.SIGKILL)
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
                 pass  # Process already terminated
             try:
