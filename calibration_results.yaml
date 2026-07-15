@@ -1,0 +1,529 @@
+calibration_date: '2026-07-15T12:32:22.218147'
+sample_size: 25
+sample:
+- id: 16
+  title: Regular Fourier Features for Nonstationary Gaussian Processes
+  publish_date: '2026-03-01'
+- id: 46
+  title: Gradient Descent at Inference Time for LLM Reasoning
+  publish_date: '2026-03-11'
+- id: 53
+  title: Model-Aware Tokenizer Transfer for Multilingual LLMs
+  publish_date: '2026-03-17'
+- id: 88
+  title: Language Models are Injective and Hence Invertible
+  publish_date: '2026-03-25'
+- id: 121
+  title: AI Agent Traps and Prompt Injection
+  publish_date: '2026-04-02'
+- id: 124
+  title: Internal Safety Collapse in Frontier LLMs
+  publish_date: '2026-04-04'
+- id: 143
+  title: In-Place Test-Time Training for Transformers
+  publish_date: '2026-04-11'
+- id: 155
+  title: SkillsBench for Evaluating Agent Skills
+  publish_date: '2026-04-15'
+- id: 162
+  title: Gated Delta Networks for Long-Context Retrieval
+  publish_date: '2026-04-20'
+- id: 186
+  title: Agentic Aggregation for Long-Horizon AI Tasks
+  publish_date: '2026-04-23'
+- id: 194
+  title: Deep Learning in Spiking Neural Networks
+  publish_date: '2026-04-28'
+- id: 216
+  title: Do Language Models Know Their Limits
+  publish_date: '2026-05-02'
+- id: 226
+  title: 'Reinforcement Learning in 2025: An Overview'
+  publish_date: '2026-05-04'
+- id: 237
+  title: Why LightGBM Made Boosted Trees Fast
+  publish_date: '2026-05-07'
+- id: 230
+  title: Generative Modeling via Drifting in One Step
+  publish_date: '2026-05-09'
+- id: 269
+  title: 'MELT: Decoupling Compute From Memory'
+  publish_date: '2026-05-13'
+- id: 277
+  title: Causal-JEPA for Object-Level World Models
+  publish_date: '2026-05-15'
+- id: 295
+  title: Generative Recursive Reasoning in Latent Space
+  publish_date: '2026-05-26'
+- id: 307
+  title: Memory-Bound, Not Bandwidth-Limited Batch-1 LLM Decode
+  publish_date: '2026-06-02'
+- id: 319
+  title: Unified Neural Scaling Laws Across Regimes
+  publish_date: '2026-06-10'
+- id: 337
+  title: From Natural Language to Verified Dafny Code
+  publish_date: '2026-06-14'
+- id: 353
+  title: When Quantization Hurts Reasoning Models
+  publish_date: '2026-06-18'
+- id: 352
+  title: Modeling Financial Habits with Transaction Transformers
+  publish_date: '2026-06-22'
+- id: 376
+  title: 'ReasonCACHE: Learning Reasoning Without Weight Updates'
+  publish_date: '2026-06-26'
+- id: 394
+  title: DART Speeds Up Speculative LLM Decoding
+  publish_date: '2026-07-02'
+audit_results:
+  16:
+    title: Regular Fourier Features for Nonstationary Gaussian Processes
+    publish_date: '2026-03-01'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  46:
+    title: Gradient Descent at Inference Time for LLM Reasoning
+    publish_date: '2026-03-11'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  53:
+    title: Model-Aware Tokenizer Transfer for Multilingual LLMs
+    publish_date: '2026-03-17'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  88:
+    title: Language Models are Injective and Hence Invertible
+    publish_date: '2026-03-25'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  121:
+    title: AI Agent Traps and Prompt Injection
+    publish_date: '2026-04-02'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  124:
+    title: Internal Safety Collapse in Frontier LLMs
+    publish_date: '2026-04-04'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  143:
+    title: In-Place Test-Time Training for Transformers
+    publish_date: '2026-04-11'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  155:
+    title: SkillsBench for Evaluating Agent Skills
+    publish_date: '2026-04-15'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  162:
+    title: Gated Delta Networks for Long-Context Retrieval
+    publish_date: '2026-04-20'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  186:
+    title: Agentic Aggregation for Long-Horizon AI Tasks
+    publish_date: '2026-04-23'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  194:
+    title: Deep Learning in Spiking Neural Networks
+    publish_date: '2026-04-28'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  216:
+    title: Do Language Models Know Their Limits
+    publish_date: '2026-05-02'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  226:
+    title: 'Reinforcement Learning in 2025: An Overview'
+    publish_date: '2026-05-04'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  237:
+    title: Why LightGBM Made Boosted Trees Fast
+    publish_date: '2026-05-07'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  230:
+    title: Generative Modeling via Drifting in One Step
+    publish_date: '2026-05-09'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  269:
+    title: 'MELT: Decoupling Compute From Memory'
+    publish_date: '2026-05-13'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  277:
+    title: Causal-JEPA for Object-Level World Models
+    publish_date: '2026-05-15'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  295:
+    title: Generative Recursive Reasoning in Latent Space
+    publish_date: '2026-05-26'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  307:
+    title: Memory-Bound, Not Bandwidth-Limited Batch-1 LLM Decode
+    publish_date: '2026-06-02'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  319:
+    title: Unified Neural Scaling Laws Across Regimes
+    publish_date: '2026-06-10'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  337:
+    title: From Natural Language to Verified Dafny Code
+    publish_date: '2026-06-14'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  353:
+    title: When Quantization Hurts Reasoning Models
+    publish_date: '2026-06-18'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  352:
+    title: Modeling Financial Habits with Transaction Transformers
+    publish_date: '2026-06-22'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  376:
+    title: 'ReasonCACHE: Learning Reasoning Without Weight Updates'
+    publish_date: '2026-06-26'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false
+  394:
+    title: DART Speeds Up Speculative LLM Decoding
+    publish_date: '2026-07-02'
+    scores:
+      evidence_score: 0
+      character_score: 2
+      conversation_score: 2
+      belief_score: 2
+      agency_score: 2
+      anti_caricature_score: 2
+      naturalism_score: 2
+    audit_results:
+      failure_tags:
+      - PAPER_SUBSTITUTABLE
+      severity_count: 1
+      generic_openers: 0
+      persona_declarations: 0
+      round_robin: false

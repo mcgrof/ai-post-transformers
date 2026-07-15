@@ -1,0 +1,174 @@
+anchor_candidates:
+  Agency/Asymmetry:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+  Anti-Caricature Coherence:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+  Belief Continuity:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+  Character-Contingent Appraisal:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+  Conversational Causality:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+  Evidence Contingency:
+    high: []
+    low:
+    - !!python/tuple
+      - 16
+      - 0
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 0
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 0
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+    mid: []
+  Naturalism:
+    high: []
+    low: []
+    mid:
+    - !!python/tuple
+      - 16
+      - 2
+      - Regular Fourier Features for Nonstationary Gaussian Processes
+    - !!python/tuple
+      - 46
+      - 2
+      - Gradient Descent at Inference Time for LLM Reasoning
+    - !!python/tuple
+      - 53
+      - 2
+      - Model-Aware Tokenizer Transfer for Multilingual LLMs
+calibration_date: '2026-07-15T12:32:22.218147'
+dimension_statistics:
+  Agency/Asymmetry:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+  Anti-Caricature Coherence:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+  Belief Continuity:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+  Character-Contingent Appraisal:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+  Conversational Causality:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+  Evidence Contingency:
+    max: 0
+    mean: 0
+    median: 0
+    min: 0
+    q25: 0
+    q75: 0
+    stdev: 0.0
+  Naturalism:
+    max: 2
+    mean: 2
+    median: 2
+    min: 2
+    q25: 2
+    q75: 2
+    stdev: 0.0
+failure_tag_frequency:
+  PAPER_SUBSTITUTABLE: 25
+sample_size: 25
