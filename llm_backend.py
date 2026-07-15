@@ -230,6 +230,8 @@ def _call_anthropic(client, model, prompt, temperature, max_tokens):
 
 
 def _call_claude_cli(model, prompt, max_tokens):
+    import signal
+
     cmd = ["claude", "-p",
            "--output-format", "text",
            "--model", model,
@@ -242,27 +244,45 @@ def _call_claude_cli(model, prompt, max_tokens):
     # for most LLM calls; token budget doesn't directly correlate to latency.
     prompt_factor = min(60, len(prompt) // 5000 * 30)  # ~30s per 5K chars, capped at 60s
     timeout = max(60, prompt_factor + 60)  # base 60s + prompt adjustment, min 60s, max 120s
+
+    # Use Popen + signal.alarm for harder timeout (subprocess.run timeout doesn't work)
     try:
-        result = subprocess.run(
-            cmd, input=prompt, capture_output=True,
-            text=True, env=env, timeout=timeout)
-    except subprocess.TimeoutExpired as e:
+        proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, env=env)
+
+        # Set alarm signal for hard timeout
+        def timeout_handler(signum, frame):
+            proc.kill()
+            raise RuntimeError(
+                f"Claude CLI timeout after {timeout}s (model={model}): "
+                f"hard kill via signal.alarm")
+
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout + 5)  # add 5s buffer
+
+        try:
+            stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+        finally:
+            signal.alarm(0)  # cancel alarm
+
+        stdout = stdout.strip()
+        # Claude CLI may put errors on stdout instead of stderr
+        if stdout.startswith("Error:") or not stdout:
+            stderr_msg = stderr[:300] if stderr else ""
+            raise RuntimeError(
+                f"Claude CLI error (rc={proc.returncode}, "
+                f"timeout={timeout}s): stdout={stdout[:200]}, "
+                f"stderr={stderr_msg}")
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Claude CLI error (rc={proc.returncode}, "
+                f"timeout={timeout}s): {stderr[:300]}")
+        return stdout
+    except subprocess.TimeoutExpired:
         raise RuntimeError(
             f"Claude CLI timeout after {timeout}s (model={model}): "
-            f"subprocess did not complete within deadline")
-    stdout = result.stdout.strip()
-    # Claude CLI may put errors on stdout instead of stderr
-    if stdout.startswith("Error:") or not stdout:
-        stderr_msg = result.stderr[:300] if result.stderr else ""
-        raise RuntimeError(
-            f"Claude CLI error (rc={result.returncode}, "
-            f"timeout={timeout}s): stdout={stdout[:200]}, "
-            f"stderr={stderr_msg}")
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Claude CLI error (rc={result.returncode}, "
-            f"timeout={timeout}s): {result.stderr[:300]}")
-    return stdout
+            f"communicate() timed out")
 
 
 def _call_codex(model, prompt, max_tokens):
