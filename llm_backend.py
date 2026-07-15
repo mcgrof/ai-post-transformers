@@ -232,6 +232,7 @@ def _call_anthropic(client, model, prompt, temperature, max_tokens):
 def _call_claude_cli(model, prompt, max_tokens):
     import signal
     import os
+    import contextlib
 
     cmd = ["claude", "-p",
            "--output-format", "text",
@@ -240,62 +241,64 @@ def _call_claude_cli(model, prompt, max_tokens):
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions
-    # Scale timeout with prompt size: large prompts need more time
-    # (editorial pass, multi-paper scripts). Cap at 120 seconds reasonable
-    # for most LLM calls; token budget doesn't directly correlate to latency.
-    prompt_factor = min(60, len(prompt) // 5000 * 30)  # ~30s per 5K chars, capped at 60s
-    timeout = max(60, prompt_factor + 60)  # base 60s + prompt adjustment, min 60s, max 120s
 
-    # Use Popen + signal.alarm for harder timeout (subprocess.run timeout doesn't work)
+    # Scale timeout with prompt size: large prompts need more time
+    prompt_factor = min(90, len(prompt) // 5000 * 45)  # ~45s per 5K chars, capped at 90s
+    timeout = max(90, prompt_factor + 90)  # base 90s + prompt adjustment, min 90s, max 180s
+
+    # Create subprocess in isolated process group using start_new_session=True
+    # This prevents os.killpg() from killing the parent process
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, env=env)
+        stderr=subprocess.PIPE, text=True, env=env,
+        start_new_session=True)  # Critical: isolate child process group
 
-    # Set alarm signal for hard timeout
-    def timeout_handler(signum, frame):
-        proc.kill()
-        raise RuntimeError(
-            f"Claude CLI timeout after {timeout}s (model={model}): "
-            f"hard kill via signal.alarm")
-
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(timeout + 5)  # add 5s buffer
+    # Child's process group ID is its PID when start_new_session=True
+    child_pgid = proc.pid
 
     try:
+        stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Try graceful shutdown first, then escalate to SIGKILL
         try:
-            stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+            os.killpg(child_pgid, signal.SIGTERM)
+            stdout, stderr = proc.communicate(timeout=3)
         except subprocess.TimeoutExpired:
-            # Kill the stuck process to prevent poisoning subsequent calls
+            # Escalate to SIGKILL
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, OSError):
-                pass  # Process already terminated
-            try:
-                proc.communicate(timeout=2)  # Wait briefly for cleanup
-            except:
+                os.killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
                 pass
-            raise RuntimeError(
-                f"Claude CLI timeout after {timeout}s (model={model}): "
-                f"communicate() timed out; process killed")
-        finally:
-            signal.alarm(0)  # cancel alarm
+            try:
+                stdout, stderr = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = "", ""
+        except ProcessLookupError:
+            stdout, stderr = "", ""
 
-        stdout = stdout.strip()
-        # Claude CLI may put errors on stdout instead of stderr
-        if stdout.startswith("Error:") or not stdout:
-            stderr_msg = stderr[:300] if stderr else ""
-            raise RuntimeError(
-                f"Claude CLI error (rc={proc.returncode}, "
-                f"timeout={timeout}s): stdout={stdout[:200]}, "
-                f"stderr={stderr_msg}")
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"Claude CLI error (rc={proc.returncode}, "
-                f"timeout={timeout}s): {stderr[:300]}")
-        return stdout
-    except Exception:
-        signal.alarm(0)  # ensure alarm is cancelled on any error
+        raise RuntimeError(
+            f"Claude CLI timeout after {timeout}s (model={model}): "
+            f"process terminated; stderr={stderr[:200] if stderr else '(empty)'}")
+    except BaseException:
+        # Clean up child on any parent-side interruption
+        with contextlib.suppress(Exception):
+            os.killpg(child_pgid, signal.SIGKILL)
+            proc.communicate(timeout=2)
         raise
+
+    stdout = stdout.strip()
+    # Claude CLI may put errors on stdout instead of stderr
+    if stdout.startswith("Error:") or not stdout:
+        stderr_msg = stderr[:300] if stderr else ""
+        raise RuntimeError(
+            f"Claude CLI error (rc={proc.returncode}, "
+            f"timeout={timeout}s): stdout={stdout[:200]}, "
+            f"stderr={stderr_msg}")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Claude CLI error (rc={proc.returncode}, "
+            f"timeout={timeout}s): {stderr[:300]}")
+    return stdout
 
 
 def _call_codex(model, prompt, max_tokens):
