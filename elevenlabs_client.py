@@ -684,8 +684,10 @@ Paper content (read from file):
 {text[:8000]}"""
 
     import uuid
-    paper_file = f".claude/paper-context/pass2-{uuid.uuid4().hex[:8]}.txt"
-    os.makedirs(os.path.dirname(paper_file), exist_ok=True)
+    from pathlib import Path as _Path
+    paper_context_dir = _Path.cwd() / ".claude" / "paper-context"
+    paper_context_dir.mkdir(parents=True, exist_ok=True)
+    paper_file = str(paper_context_dir / f"pass2-{uuid.uuid4().hex[:8]}.txt")
     with open(paper_file, 'w') as f:
         f.write(text)
 
@@ -1559,8 +1561,10 @@ No padding — every segment must earn its place."""
 
     # Write source content to file for bible generation (avoid inline text hang)
     import uuid as _uuid
-    bible_file = f".claude/paper-context/bible-{_uuid.uuid4().hex[:8]}.txt"
-    os.makedirs(os.path.dirname(bible_file), exist_ok=True)
+    from pathlib import Path as _Path
+    paper_context_dir = _Path.cwd() / ".claude" / "paper-context"
+    paper_context_dir.mkdir(parents=True, exist_ok=True)
+    bible_file = str(paper_context_dir / f"bible-{_uuid.uuid4().hex[:8]}.txt")
     with open(bible_file, 'w') as f:
         f.write(text)
 
@@ -1608,8 +1612,10 @@ ANTI-REPETITION RULES (STRICT — VIOLATION = FAILURE):
     # Write paper content to file in project directory (claude-cli can't read /tmp)
     # (claude-cli hangs on 32KB inline text + SOUL context)
     import uuid
-    paper_file = f".claude/paper-context/{uuid.uuid4().hex[:8]}.txt"
-    os.makedirs(os.path.dirname(paper_file), exist_ok=True)
+    from pathlib import Path as _Path
+    paper_context_dir = _Path.cwd() / ".claude" / "paper-context"
+    paper_context_dir.mkdir(parents=True, exist_ok=True)
+    paper_file = str(paper_context_dir / f"{uuid.uuid4().hex[:8]}.txt")
     with open(paper_file, 'w') as f:
         f.write(text)
 
