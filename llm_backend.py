@@ -263,6 +263,20 @@ def _call_claude_cli(model, prompt, max_tokens):
 
         try:
             stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Kill the stuck process to prevent poisoning subsequent calls
+            import os, signal as _signal_module
+            try:
+                os.killpg(os.getpgid(proc.pid), _signal_module.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass  # Process already terminated
+            try:
+                proc.communicate(timeout=2)  # Wait briefly for cleanup
+            except:
+                pass
+            raise RuntimeError(
+                f"Claude CLI timeout after {timeout}s (model={model}): "
+                f"communicate() timed out; process killed")
         finally:
             signal.alarm(0)  # cancel alarm
 
@@ -279,10 +293,6 @@ def _call_claude_cli(model, prompt, max_tokens):
                 f"Claude CLI error (rc={proc.returncode}, "
                 f"timeout={timeout}s): {stderr[:300]}")
         return stdout
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(
-            f"Claude CLI timeout after {timeout}s (model={model}): "
-            f"communicate() timed out")
 
 
 def _call_codex(model, prompt, max_tokens):

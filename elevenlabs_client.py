@@ -1776,6 +1776,16 @@ Topics discussed:
    institution, and year."""
 
     print(f"[Podcast]   Part 2/{num_parts}: {p2_label}...", file=sys.stderr)
+
+    # Write paper content to file for Part 2 (avoid inline text hang)
+    import uuid as _uuid_p2
+    from pathlib import Path as _Path_p2
+    p2_context_dir = _Path_p2.cwd() / ".claude" / "paper-context"
+    p2_context_dir.mkdir(parents=True, exist_ok=True)
+    p2_paper_file = str(p2_context_dir / f"part2-{_uuid_p2.uuid4().hex[:8]}.txt")
+    with open(p2_paper_file, 'w') as f:
+        f.write(text)
+
     p2 = f"""Generate PART 2 of {num_parts} of a podcast conversation.{' This is the FINAL part.' if num_parts == 2 else ''} Continues from Part 1.
 Last lines from Part 1:
 {_recap(p1_script)}
@@ -1802,8 +1812,8 @@ If nothing is genuinely funny in context, use ZERO jokes.
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
 
-Source content:
-{text[:10000]}"""
+Source content (read from file):
+{p2_paper_file}"""
 
     try:
         p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
@@ -1836,6 +1846,16 @@ Topics discussed in Part 2:
     # PART 3: Critical Analysis + References (skip for 2-part episodes)
     if num_parts >= 3:
       print(f"[Podcast]   Part 3/{num_parts}: Critical analysis...", file=sys.stderr)
+
+      # Write paper content to file for Part 3 (avoid inline text hang)
+      import uuid as _uuid_p3
+      from pathlib import Path as _Path_p3
+      p3_context_dir = _Path_p3.cwd() / ".claude" / "paper-context"
+      p3_context_dir.mkdir(parents=True, exist_ok=True)
+      p3_paper_file = str(p3_context_dir / f"part3-{_uuid_p3.uuid4().hex[:8]}.txt")
+      with open(p3_paper_file, 'w') as f:
+          f.write(text)
+
       p3 = f"""Generate PART 3 of {num_parts} of a podcast conversation.{' This is the FINAL part.' if num_parts == 3 else ''} Continues from Part 2.
 Last lines from Part 2:
 {_recap(p2_script)}
@@ -1875,8 +1895,8 @@ If nothing is genuinely funny in context, use ZERO jokes.
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
 
-Source content:
-{text[:10000]}"""
+Source content (read from file):
+{p3_paper_file}"""
 
       try:
           p3_script = llm_call(backend, model, p3, temperature=0.7, max_tokens=16000)
