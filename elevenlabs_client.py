@@ -1533,12 +1533,14 @@ ANTI-REPETITION RULES (STRICT — VIOLATION = FAILURE):
     # PART 1: Intro + Background Foundations
     print(f"[Podcast]   Part 1/{num_parts}: Intro + Background...", file=sys.stderr)
 
-    # Write paper content to temp file to avoid huge inline prompts
+    # Write paper content to file in project directory (claude-cli can't read /tmp)
     # (claude-cli hangs on 32KB inline text + SOUL context)
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    import uuid
+    paper_file = f".claude/paper-context/{uuid.uuid4().hex[:8]}.txt"
+    import os
+    os.makedirs(os.path.dirname(paper_file), exist_ok=True)
+    with open(paper_file, 'w') as f:
         f.write(text)
-        paper_file = f.name
 
     p1 = f"""Generate PART 1 of {num_parts} of a podcast conversation.
 
@@ -1574,8 +1576,7 @@ Only output the JSON array.
 Source paper (read from file):
 {paper_file}"""
 
-    try:
-        p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
+    p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
     print(f"[DEBUG] Part 1 LLM raw response type: {type(p1_script)}", file=sys.stderr)
     print(f"[DEBUG] Part 1 LLM raw response: {str(p1_script)[:500]}", file=sys.stderr)
     if not isinstance(p1_script, list):
