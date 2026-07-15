@@ -680,8 +680,73 @@ Output as JSON:
 }}
 Only output JSON.
 
-Paper content:
+Paper content (read from file):
 {text[:8000]}"""
+
+    import uuid
+    paper_file = f".claude/paper-context/pass2-{uuid.uuid4().hex[:8]}.txt"
+    os.makedirs(os.path.dirname(paper_file), exist_ok=True)
+    with open(paper_file, 'w') as f:
+        f.write(text)
+
+    prompt = f"""You are a research analyst preparing a podcast about an AI/ML paper or report.
+
+BACKGROUND RESEARCH already done on new topics:
+{bg_text if bg_text else "(all topics previously covered)"}
+
+Now analyze the specific paper/report and identify:
+
+1. CRITICAL QUESTIONS a skeptical, well-informed reader should ask.
+   Generate questions that are SPECIFIC and RELEVANT to this particular work.
+
+   DO NOT ask generic boilerplate questions. In particular:
+   - Do NOT ask "has anyone adopted this?" for technologies that are ALREADY widely
+     deployed (e.g., LLM reasoning, transformers, attention mechanisms, fine-tuning,
+     RLHF, chain-of-thought). Only ask about adoption for genuinely niche or
+     unproven methods.
+   - Do NOT ask "does this scale?" for methods already running at scale.
+   - DO ask about methodology: Are the claims well-supported by the data? Are there
+     confounding factors? Is the sample representative? Are the baselines fair?
+   - DO scrutinize EXPERIMENTAL SCALE: What models/datasets were actually tested?
+     Are the experiments at toy scale (e.g., GPT-2 124M) while claiming general applicability?
+     Does fine-tuning at 8B prove the method works for pretraining at 8B? Be specific about
+     what was tested vs what is claimed. If a paper says "memory efficient training" but only
+     tests on small models or only fine-tuning, that's a critical gap worth discussing.
+   - DO ask about what's missing: What perspectives or data are absent?
+   - DO challenge assumptions specific to THIS work.
+
+2. ADDITIONAL REFERENCES from the paper's citations or related work that deserve discussion.
+   For each, give title, authors, year, and why it matters.
+
+3. BLIND SPOT ANALYSIS — The paper focuses on one framing. Think about what it IGNORES:
+   - Are there other uses of the artifacts/components this paper modifies?
+     (e.g., if a paper quantizes optimizer states, who else uses those states for
+     pruning, merging, continual learning, inference, etc.?)
+   - Does the paper's optimization break something downstream it doesn't discuss?
+   - What implicit assumptions does the paper make about how its components are used?
+   - Are there recent papers (2024-2026) that give NEW value to what this paper treats
+     as disposable or unimportant?
+   Generate 1-3 blind spot questions that a reviewer would raise.
+
+4. SCOPE vs CLAIMS — Compare what the paper CLAIMS (title, abstract, introduction) vs
+   what it ACTUALLY TESTS (experiments section). Identify any gap between the two.
+   Be specific: list claimed scope and actual experimental scope side by side.
+
+Output as JSON:
+{{
+  "critical_questions": ["..."],
+  "additional_references": [{{"title": "...", "authors": "...", "year": "...", "relevance": "..."}}],
+  "blind_spots": ["..."],
+  "scope_vs_claims": {{
+    "claimed_scope": "...",
+    "actual_experimental_scope": "...",
+    "gap_assessment": "..."
+  }}
+}}
+Only output JSON.
+
+Paper content (read from file):
+{paper_file}"""
 
     return llm_call(backend, model, prompt)
 
