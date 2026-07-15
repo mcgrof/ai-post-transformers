@@ -242,9 +242,14 @@ def _call_claude_cli(model, prompt, max_tokens):
     # for most LLM calls; token budget doesn't directly correlate to latency.
     prompt_factor = min(60, len(prompt) // 5000 * 30)  # ~30s per 5K chars, capped at 60s
     timeout = max(60, prompt_factor + 60)  # base 60s + prompt adjustment, min 60s, max 120s
-    result = subprocess.run(
-        cmd, input=prompt, capture_output=True,
-        text=True, env=env, timeout=timeout)
+    try:
+        result = subprocess.run(
+            cmd, input=prompt, capture_output=True,
+            text=True, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Claude CLI timeout after {timeout}s (model={model}): "
+            f"subprocess did not complete within deadline")
     stdout = result.stdout.strip()
     # Claude CLI may put errors on stdout instead of stderr
     if stdout.startswith("Error:") or not stdout:
