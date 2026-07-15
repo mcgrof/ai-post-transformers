@@ -246,21 +246,21 @@ def _call_claude_cli(model, prompt, max_tokens):
     timeout = max(60, prompt_factor + 60)  # base 60s + prompt adjustment, min 60s, max 120s
 
     # Use Popen + signal.alarm for harder timeout (subprocess.run timeout doesn't work)
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, env=env)
+
+    # Set alarm signal for hard timeout
+    def timeout_handler(signum, frame):
+        proc.kill()
+        raise RuntimeError(
+            f"Claude CLI timeout after {timeout}s (model={model}): "
+            f"hard kill via signal.alarm")
+
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout + 5)  # add 5s buffer
+
     try:
-        proc = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, env=env)
-
-        # Set alarm signal for hard timeout
-        def timeout_handler(signum, frame):
-            proc.kill()
-            raise RuntimeError(
-                f"Claude CLI timeout after {timeout}s (model={model}): "
-                f"hard kill via signal.alarm")
-
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(timeout + 5)  # add 5s buffer
-
         try:
             stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -293,6 +293,9 @@ def _call_claude_cli(model, prompt, max_tokens):
                 f"Claude CLI error (rc={proc.returncode}, "
                 f"timeout={timeout}s): {stderr[:300]}")
         return stdout
+    except Exception:
+        signal.alarm(0)  # ensure alarm is cancelled on any error
+        raise
 
 
 def _call_codex(model, prompt, max_tokens):
