@@ -1537,7 +1537,6 @@ ANTI-REPETITION RULES (STRICT — VIOLATION = FAILURE):
     # (claude-cli hangs on 32KB inline text + SOUL context)
     import uuid
     paper_file = f".claude/paper-context/{uuid.uuid4().hex[:8]}.txt"
-    import os
     os.makedirs(os.path.dirname(paper_file), exist_ok=True)
     with open(paper_file, 'w') as f:
         f.write(text)

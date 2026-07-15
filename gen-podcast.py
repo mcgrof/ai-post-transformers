@@ -26,7 +26,6 @@ from pathlib import Path
 
 from sources.hf_daily import fetch_hf_daily_papers
 from sources.semantic import enrich_papers
-from interests import InterestScorer
 from db import (
     get_connection, init_db, paper_exists, upsert_paper,
     get_podcast_arxiv_ids,
@@ -116,6 +115,7 @@ def run_digest(config):
     papers = enrich_papers(papers)
 
     # 4. Score against interest profile
+    from interests import InterestScorer
     scorer = InterestScorer(config, podcasted_ids=podcasted_ids)
     papers = scorer.score_papers(papers)
 
