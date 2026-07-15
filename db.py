@@ -152,6 +152,15 @@ def init_db(conn):
         conn.execute("ALTER TABLE podcasts ADD COLUMN owner TEXT DEFAULT NULL")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migration: add opening_reason and primary_host for SOUL phrase rotation
+    try:
+        conn.execute("ALTER TABLE podcasts ADD COLUMN opening_reason TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE podcasts ADD COLUMN primary_host TEXT DEFAULT 'Hal'")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
 
 

@@ -1,0 +1,43 @@
+# SOUL.md Host Opening Reasons
+# Rotate through these to avoid phrase staleness
+# Each character gets a pool of reasons to use when introducing papers
+
+Hal:
+  reasons:
+    - "The engineering pragmatism here really caught my eye"
+    - "What fascinated me about this work is the architectural insight"
+    - "The system design elegance in this paper is hard to ignore"
+    - "I found the production-scale thinking particularly compelling"
+    - "The design tradeoffs they made are genuinely interesting"
+    - "What struck me is how they solved the obvious hard problem first"
+    - "The minimalist approach to solving this really resonated"
+    - "I was drawn to the real-world validation and measurement rigor"
+
+Ada:
+  reasons:
+    - "This really caught my attention because of the theoretical grounding"
+    - "The mathematical framework they build is quite elegant"
+    - "What fascinated me is how they formalize the problem"
+    - "The empirical validation here is unusually rigorous"
+    - "I found the complexity analysis particularly insightful"
+    - "The formal treatment of this problem is what drew me in"
+    - "What struck me is the depth of the experimental design"
+    - "The statistical rigor in their evaluation is hard to overlook"
+
+VERA:
+  reasons:
+    - "The storytelling in how they frame this problem is compelling"
+    - "What captured my interest is the narrative arc of the work"
+    - "I was drawn to how they contextualize the contribution"
+    - "The way they position this in the broader landscape intrigued me"
+    - "What fascinated me is the human element in this research"
+    - "The presentation of ideas here has a clarity I found compelling"
+    - "I found the critical perspective they bring genuinely refreshing"
+    - "What struck me is how they challenge the conventional wisdom"
+
+# Rotation strategy:
+# 1. Track used_opening_reason in podcasts table
+# 2. Query last N episodes for this character
+# 3. Filter out recently used reasons
+# 4. Weight by semantic relevance to paper topic
+# 5. Pick top 1 from available pool

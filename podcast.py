@@ -21,6 +21,7 @@ from image_gen import generate_episode_image
 from local_cover import render_title_cover
 from pdf_utils import download_and_extract
 from rss import generate_feed
+from soul_reasons import select_opening_reason, track_opening_reason
 
 
 def _make_episode_stem(title, date_str, urls=None):
@@ -550,9 +551,14 @@ def generate_podcast(config, arxiv_id=None):
     # Get previously covered topics for context
     covered_topics = get_covered_topics(conn)
 
+    # Select opening reason for the primary host (Ada by default)
+    primary_host = "Ada"  # TODO: configure from SOUL.md
+    opening_reason = select_opening_reason(primary_host, title="", abstract=text[:500])
+    print(f"[Podcast] Opening reason: {opening_reason}", file=sys.stderr)
+
     # Create podcast via ElevenLabs TTS (multi-pass pipeline)
-    tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
-        text, config, covered_topics
+    tmpdir, list_file, segments, sources, topic_names, script, opening_reason_used = create_podcast(
+        text, config, covered_topics, opening_reason=opening_reason
     )
     try:
         finalize_podcast(tmpdir, list_file, str(audio_file))
@@ -643,6 +649,14 @@ def generate_podcast(config, arxiv_id=None):
         description=description,
         image_file=image_file,
     )
+
+    # Track opening reason for phrase rotation
+    try:
+        track_opening_reason(conn, podcast_id, opening_reason_used, primary_host)
+        print(f"[Podcast] Tracked opening reason for {primary_host}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Failed to track opening reason: {e}", file=sys.stderr)
+
     link_podcast_paper(conn, podcast_id, paper["arxiv_id"])
 
     # Assign revision tracking
@@ -875,9 +889,14 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
     init_db(conn)
     covered_topics = get_covered_topics(conn)
 
+    # Select opening reason for the primary host (Ada by default)
+    primary_host = "Ada"  # TODO: configure from SOUL.md
+    opening_reason = select_opening_reason(primary_host, title="", abstract=source_text[:500])
+    print(f"[Podcast] Opening reason: {opening_reason}", file=sys.stderr)
+
     # Create podcast via ElevenLabs (multi-pass pipeline)
-    tmpdir, list_file, segments, sources, topic_names, script = create_podcast(
-        source_text, config, covered_topics
+    tmpdir, list_file, segments, sources, topic_names, script, opening_reason_used = create_podcast(
+        source_text, config, covered_topics, opening_reason=opening_reason
     )
     try:
         finalize_podcast(tmpdir, list_file, str(audio_file))
@@ -965,6 +984,13 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
         description=description,
         image_file=image_file,
     )
+
+    # Track opening reason for phrase rotation
+    try:
+        track_opening_reason(conn, podcast_id, opening_reason_used, primary_host)
+        print(f"[Podcast] Tracked opening reason for {primary_host}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Failed to track opening reason: {e}", file=sys.stderr)
 
     # Assign revision tracking
     ep_key, rev, superseded = detect_revision(conn, title,

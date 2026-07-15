@@ -1119,11 +1119,19 @@ Only output JSON."""
 # Pass 3: Script Generation
 # ---------------------------------------------------------------------------
 
-def generate_podcast_script(text, config, covered_topics=None):
+def generate_podcast_script(text, config, covered_topics=None, opening_reason=None, primary_host="Ada"):
     """Multi-pass podcast script generation with topic awareness and critical review.
 
-    Returns (script, sources, topic_names) where script is a list of {speaker, text} dicts
-    and sources is a list of {title, authors, year, url} dicts for all referenced works.
+    Args:
+        text: Paper content/metadata
+        config: Config dict
+        covered_topics: Set of previously covered topics
+        opening_reason: Opening phrase to use (e.g., "This really caught my attention")
+        primary_host: Which host opens (Ada or Hal)
+
+    Returns (script, sources, topic_names, opening_reason_used) where script is a list
+    of {speaker, text} dicts, sources is a list of {title, authors, year, url} dicts,
+    and opening_reason_used is the actual reason string used.
     """
     from fun_facts import get_podcast_context
     from db import get_connection, init_db, mark_facts_used
@@ -1668,7 +1676,10 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
    - Institution(s): {', '.join(paper_institutions) if paper_institutions else '(not specified)'}
    - Publication date: July 6, 2026
    Hal should say "First Author et al." with the total co-author count, and mention
-   the institution(s). Ada jumps in with why it caught her attention.
+   the institution(s). {primary_host} jumps in with why it caught their attention.
+   IMPORTANT: {primary_host} should open with THIS specific phrase when introducing the paper:
+   "{opening_reason or 'This really caught my attention.'}"
+   Do NOT paraphrase this opening reason—use it exactly as stated.
    This is the ONLY time authors and full title should be stated.
 {intro_joke_text}
 
@@ -1703,12 +1714,13 @@ Source paper (read from file):
     if not p1_script:
         print(f"[Podcast]     WARNING: Part 1 returned no segments; "
               "injecting fallback intro", file=sys.stderr)
+        speaker_name = "Ada" if primary_host == "Ada" else "Hal"
         p1_script = [
             {"speaker": "A", "text": intro},
             {"speaker": "B", "text": (f"Thanks Hal! So today we're diving into "
                                       f'"{paper_title}" by {paper_authors[0]} et al. '
                                       f"from {paper_institutions[0] if paper_institutions else 'an interesting group'}. "
-                                      f"This one really caught my attention.")}
+                                      f"{opening_reason or 'This one really caught my attention.'}")}
         ]
         p1_words = sum(len(s["text"].split()) for s in p1_script)
         print(f"[Podcast]     Injected {len(p1_script)} fallback segments, "
@@ -2030,13 +2042,20 @@ FULL TRANSCRIPT:
             seen_titles.add(title)
             merged_sources.append(s)
 
-    return script, merged_sources, topic_names
+    # Return opening_reason so it can be tracked in the database
+    return script, merged_sources, topic_names, (opening_reason or "This one really caught my attention.")
 
 
-def create_podcast(text, config, covered_topics=None):
+def create_podcast(text, config, covered_topics=None, opening_reason=None):
     """Create a podcast by generating script + stitching TTS segments.
 
-    Returns (tmpdir, list_file, segment_files, sources, topic_names).
+    Args:
+        text: Paper content/metadata
+        config: Config dict
+        covered_topics: Set of previously covered topics
+        opening_reason: Opening phrase to use (e.g., "This really caught my attention")
+
+    Returns (tmpdir, list_file, segment_files, sources, topic_names, opening_reason_used).
     """
     import subprocess
     import tempfile
@@ -2058,7 +2077,9 @@ def create_podcast(text, config, covered_topics=None):
             voice_b = guest["voice_id"]
 
     print("[Podcast] Generating conversation script...", file=sys.stderr)
-    script, sources, topic_names = generate_podcast_script(text, config, covered_topics)
+    script, sources, topic_names, opening_reason_used = generate_podcast_script(
+        text, config, covered_topics, opening_reason=opening_reason
+    )
 
     # Count interrupts
     interrupt_segs = sum(1 for s in script if s.get("interrupt"))
@@ -2188,7 +2209,7 @@ def create_podcast(text, config, covered_topics=None):
         for sf in final_segment_files:
             f.write(f"file '{sf}'\n")
 
-    return tmpdir, list_file, segment_files, sources, topic_names, script
+    return tmpdir, list_file, segment_files, sources, topic_names, script, opening_reason_used
 
 
 def _get_segment_duration(filepath):
