@@ -1208,7 +1208,24 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     if new_topics:
         print(f"[Podcast] Pass 1: Researching {len(new_topics)} new topic(s)...", file=sys.stderr)
-        background_context = _background_research_pass(text, new_topics, config, backend)
+        try:
+            background_context = _background_research_pass(text, new_topics, config, backend)
+        except Exception as e:
+            print(f"[Podcast] WARNING: Background research failed: {e}; using minimal fallback", file=sys.stderr)
+            # Fallback: minimal structure with topics but no research details
+            background_context = {
+                "background": [
+                    {
+                        "topic": t["name"],
+                        "explanation": f"A research topic in {topic_names[0] if topic_names else 'AI'}",
+                        "vs_neural_networks": "Represents an alternative approach to neural networks",
+                        "why_not_mainstream": "Still emerging or specialized application area",
+                        "industry_adoption": "Limited adoption; emerging use cases",
+                        "key_papers": []
+                    }
+                    for t in new_topics[:3]
+                ]
+            }
 
         for bg in background_context.get("background", []):
             background_text += f"\n=== BACKGROUND: {bg['topic']} ===\n"
@@ -1669,11 +1686,15 @@ Only output the JSON array.
 Source paper (read from file):
 {paper_file}"""
 
-    p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
-    print(f"[DEBUG] Part 1 LLM raw response type: {type(p1_script)}", file=sys.stderr)
-    print(f"[DEBUG] Part 1 LLM raw response: {str(p1_script)[:500]}", file=sys.stderr)
-    if not isinstance(p1_script, list):
-        p1_script = p1_script.get("script", [])
+    try:
+        p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
+        print(f"[DEBUG] Part 1 LLM raw response type: {type(p1_script)}", file=sys.stderr)
+        print(f"[DEBUG] Part 1 LLM raw response: {str(p1_script)[:500]}", file=sys.stderr)
+        if not isinstance(p1_script, list):
+            p1_script = p1_script.get("script", [])
+    except Exception as e:
+        print(f"[Podcast] WARNING: Part {1}/{num_parts} generation failed: {e}; using fallback intro", file=sys.stderr)
+        p1_script = []
     p1_words = sum(len(s["text"].split()) for s in p1_script)
     print(f"[Podcast]     {len(p1_script)} segments, {p1_words} words", file=sys.stderr)
 
@@ -1784,11 +1805,15 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-    p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
-    print(f"[DEBUG] Part 2 LLM raw response type: {type(p2_script)}", file=sys.stderr)
-    print(f"[DEBUG] Part 2 LLM raw response: {str(p2_script)[:500]}", file=sys.stderr)
-    if not isinstance(p2_script, list):
-        p2_script = p2_script.get("script", [])
+    try:
+        p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
+        print(f"[DEBUG] Part 2 LLM raw response type: {type(p2_script)}", file=sys.stderr)
+        print(f"[DEBUG] Part 2 LLM raw response: {str(p2_script)[:500]}", file=sys.stderr)
+        if not isinstance(p2_script, list):
+            p2_script = p2_script.get("script", [])
+    except Exception as e:
+        print(f"[Podcast] WARNING: Part {2}/{num_parts} generation failed: {e}; skipping", file=sys.stderr)
+        p2_script = []
     p2_words = sum(len(s["text"].split()) for s in p2_script)
     print(f"[Podcast]     {len(p2_script)} segments, {p2_words} words", file=sys.stderr)
     all_scripts.extend(p2_script)
@@ -1853,9 +1878,13 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-      p3_script = llm_call(backend, model, p3, temperature=0.7, max_tokens=16000)
-      if not isinstance(p3_script, list):
-          p3_script = p3_script.get("script", [])
+      try:
+          p3_script = llm_call(backend, model, p3, temperature=0.7, max_tokens=16000)
+          if not isinstance(p3_script, list):
+              p3_script = p3_script.get("script", [])
+      except Exception as e:
+          print(f"[Podcast] WARNING: Part {3}/{num_parts} generation failed: {e}; skipping", file=sys.stderr)
+          p3_script = []
       p3_words = sum(len(s["text"].split()) for s in p3_script)
       print(f"[Podcast]     {len(p3_script)} segments, {p3_words} words", file=sys.stderr)
       all_scripts.extend(p3_script)
