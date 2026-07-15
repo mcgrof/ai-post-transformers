@@ -237,11 +237,11 @@ def _call_claude_cli(model, prompt, max_tokens):
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions
-    # Scale timeout with prompt size and max_tokens: large prompts
-    # (editorial pass, multi-paper scripts) need more time
-    prompt_factor = len(prompt) // 5000 * 30  # ~30s per 5K chars
-    token_factor = max_tokens // 20
-    timeout = max(300, prompt_factor + token_factor + 300)
+    # Scale timeout with prompt size: large prompts need more time
+    # (editorial pass, multi-paper scripts). Cap at 120 seconds reasonable
+    # for most LLM calls; token budget doesn't directly correlate to latency.
+    prompt_factor = min(60, len(prompt) // 5000 * 30)  # ~30s per 5K chars, capped at 60s
+    timeout = max(60, prompt_factor + 60)  # base 60s + prompt adjustment, min 60s, max 120s
     result = subprocess.run(
         cmd, input=prompt, capture_output=True,
         text=True, env=env, timeout=timeout)

@@ -1158,13 +1158,31 @@ def generate_podcast_script(text, config, covered_topics=None):
 
     # Pass 2: Concept analysis
     print("[Podcast] Pass 2: Analyzing concepts and critical questions...", file=sys.stderr)
-    analysis = _concept_analysis_pass(text, background_context, config, backend)
+    try:
+        analysis = _concept_analysis_pass(text, background_context, config, backend)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Pass 2 concept analysis failed: {e}", file=sys.stderr)
+        # Fallback: empty analysis structure
+        analysis = {
+            "critical_questions": [],
+            "additional_references": [],
+            "blind_spots": [],
+            "scope_vs_claims": {}
+        }
 
     # Pass 2.5a: Local adversarial search (our own prior episodes)
-    local_adversarial = _local_adversarial_search(text, analysis, config, backend)
+    try:
+        local_adversarial = _local_adversarial_search(text, analysis, config, backend)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Pass 2.5a adversarial search failed: {e}", file=sys.stderr)
+        local_adversarial = {"prior_episodes": []}
 
     # Pass 2.5b: External adversarial search (Google Scholar)
-    adversarial = _adversarial_search_pass(text, analysis, config, backend)
+    try:
+        adversarial = _adversarial_search_pass(text, analysis, config, backend)
+    except Exception as e:
+        print(f"[Podcast] WARNING: Pass 2.5b adversarial search failed: {e}", file=sys.stderr)
+        adversarial = {"adversarial_findings": [], "new_critical_questions": []}
 
     questions_text = "\n".join([f"- {q}" for q in analysis.get("critical_questions", [])])
 
@@ -1555,6 +1573,8 @@ Source content:
 {text[:10000]}"""
 
     p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
+    print(f"[DEBUG] Part 1 LLM raw response type: {type(p1_script)}", file=sys.stderr)
+    print(f"[DEBUG] Part 1 LLM raw response: {str(p1_script)[:500]}", file=sys.stderr)
     if not isinstance(p1_script, list):
         p1_script = p1_script.get("script", [])
     p1_words = sum(len(s["text"].split()) for s in p1_script)
@@ -1668,6 +1688,8 @@ Source content:
 {text[:10000]}"""
 
     p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
+    print(f"[DEBUG] Part 2 LLM raw response type: {type(p2_script)}", file=sys.stderr)
+    print(f"[DEBUG] Part 2 LLM raw response: {str(p2_script)[:500]}", file=sys.stderr)
     if not isinstance(p2_script, list):
         p2_script = p2_script.get("script", [])
     p2_words = sum(len(s["text"].split()) for s in p2_script)
