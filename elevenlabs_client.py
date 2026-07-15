@@ -1161,28 +1161,22 @@ def generate_podcast_script(text, config, covered_topics=None):
     try:
         analysis = _concept_analysis_pass(text, background_context, config, backend)
     except Exception as e:
-        print(f"[Podcast] WARNING: Pass 2 concept analysis failed: {e}", file=sys.stderr)
-        # Fallback: empty analysis structure
+        print(f"[Podcast] WARNING: Pass 2 concept analysis failed: {e}; using minimal fallback", file=sys.stderr)
+        # Fallback: empty analysis structure - script generation can proceed with minimal analysis
         analysis = {
-            "critical_questions": [],
+            "critical_questions": [
+                "What empirical evidence supports the claims?",
+                "What are the limitations of the experimental setup?",
+                "How does this work compare to related approaches?"
+            ],
             "additional_references": [],
             "blind_spots": [],
             "scope_vs_claims": {}
         }
 
-    # Pass 2.5a: Local adversarial search (our own prior episodes)
-    try:
-        local_adversarial = _local_adversarial_search(text, analysis, config, backend)
-    except Exception as e:
-        print(f"[Podcast] WARNING: Pass 2.5a adversarial search failed: {e}", file=sys.stderr)
-        local_adversarial = {"prior_episodes": []}
-
-    # Pass 2.5b: External adversarial search (Google Scholar)
-    try:
-        adversarial = _adversarial_search_pass(text, analysis, config, backend)
-    except Exception as e:
-        print(f"[Podcast] WARNING: Pass 2.5b adversarial search failed: {e}", file=sys.stderr)
-        adversarial = {"adversarial_findings": [], "new_critical_questions": []}
+    # SKIP Pass 2.5a and 2.5b for now — they're prone to hanging and are optional for script generation
+    local_adversarial = {"prior_episodes": []}
+    adversarial = {"adversarial_findings": [], "new_critical_questions": []}
 
     questions_text = "\n".join([f"- {q}" for q in analysis.get("critical_questions", [])])
 
