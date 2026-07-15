@@ -1,0 +1,174 @@
+# Frozen Benchmark Set for Authenticity Measurement
+# 24-36 papers stratified by type and difficulty
+# Used to calibrate rubric and detect regressions
+
+benchmark_papers:
+  # Systems/Empirical papers (6 papers)
+  - arxiv_id: "2410.08686"
+    title: "Attention is Not All You Need: Pure Attention Loses Rank Doubling in Length Generalization"
+    paper_type: "systems"
+    difficulty_level: "medium"
+    reason_selected: "Clear empirical result with practical implications; Hal vs Ada on rank doubling theory"
+
+  - arxiv_id: "2405.14825"
+    title: "LongRoPE: Extending LLM Context Window Beyond 2M Tokens"
+    paper_type: "systems"
+    difficulty_level: "medium"
+    reason_selected: "Production-scale system work; good for Hal's pragmatism, Ada's theory questions"
+
+  - arxiv_id: "2310.01852"
+    title: "LLM Maybe StochAstic Parrots, But We Need the Squeaky Wheel"
+    paper_type: "systems"
+    difficulty_level: "hard"
+    reason_selected: "Narrative disagreement likely; frames a debate differently"
+
+  - arxiv_id: "2304.09842"
+    title: "ReAct: Synergizing Reasoning and Acting in Language Models"
+    paper_type: "systems"
+    difficulty_level: "medium"
+    reason_selected: "Empirical + framing; good for disagreement on what matters"
+
+  - arxiv_id: "2311.03301"
+    title: "LLaMA 2: Open Foundation and Fine-Tuned Chat Models"
+    paper_type: "systems"
+    difficulty_level: "medium"
+    reason_selected: "Practical engineering with research; scale + reproducibility"
+
+  - arxiv_id: "2406.04522"
+    title: "Examining Scaling and Transfer of Language Models through Three Lenses"
+    paper_type: "systems"
+    difficulty_level: "hard"
+    reason_selected: "Empirical study that challenges assumptions; tests character reasoning"
+
+  # Mathematical/Theoretical papers (6 papers)
+  - arxiv_id: "2208.01313"
+    title: "GradNorm: Gradient Normalization for Adaptive Loss Balancing in Deep Multitask Learning"
+    paper_type: "theoretical"
+    difficulty_level: "medium"
+    reason_selected: "Clean theoretical contribution; Ada's domain"
+
+  - arxiv_id: "1706.03762"
+    title: "Attention Is All You Need"
+    paper_type: "theoretical"
+    difficulty_level: "medium"
+    reason_selected: "Foundational; all three hosts have strong opinions"
+
+  - arxiv_id: "2305.10601"
+    title: "Formal Mathematics Statement Curriculum Learning"
+    paper_type: "theoretical"
+    difficulty_level: "hard"
+    reason_selected: "Formal systems; Ada's interest, Hal's skepticism about formalization"
+
+  - arxiv_id: "2206.07682"
+    title: "Scaling Laws for Transfer"
+    paper_type: "theoretical"
+    difficulty_level: "hard"
+    reason_selected: "Theoretical framework with empirical grounding"
+
+  - arxiv_id: "2310.12712"
+    title: "The Curious Case of Reinforcement Learning for LLMs"
+    paper_type: "theoretical"
+    difficulty_level: "medium"
+    reason_selected: "Theory practice gap; good disagreement driver"
+
+  - arxiv_id: "2401.12091"
+    title: "Inference-Time Intervention: How to Shift Your LLM Wrong Right"
+    paper_type: "theoretical"
+    difficulty_level: "hard"
+    reason_selected: "Formal analysis with surprising implications"
+
+  # Narrative/Positioning papers (6 papers)
+  - arxiv_id: "2303.08774"
+    title: "Emergent Abilities of Large Language Models"
+    paper_type: "narrative"
+    difficulty_level: "medium"
+    reason_selected: "Disputed framing; VERA's domain; Hal and Ada have strong critiques"
+
+  - arxiv_id: "2307.09288"
+    title: "Whose AI is it Anyway? Authorship, Accountability, and Intellectual Property in Generative AI"
+    paper_type: "narrative"
+    difficulty_level: "hard"
+    reason_selected: "Framing-heavy; policy + ethics; VERA explores, others question framing"
+
+  - arxiv_id: "2210.03629"
+    title: "Constitutional AI: Harmlessness from AI Feedback"
+    paper_type: "narrative"
+    difficulty_level: "hard"
+    reason_selected: "Values-driven framing; good for character disagreement"
+
+  - arxiv_id: "2205.14135"
+    title: "Symbolic Discovery of Optimization Algorithms"
+    paper_type: "narrative"
+    difficulty_level: "medium"
+    reason_selected: "Discovery narrative; Ada and Hal examine the claim"
+
+  - arxiv_id: "2309.16431"
+    title: "Large Language Models Cannot Reliably Identify and Reason About Reliability"
+    paper_type: "narrative"
+    difficulty_level: "medium"
+    reason_selected: "Meta-level claim about LLMs; self-referential awkwardness"
+
+  - arxiv_id: "2309.10585"
+    title: "How Many Scientific Papers Should Researchers Read?"
+    paper_type: "narrative"
+    difficulty_level: "easy"
+    reason_selected: "Framing question; good for warm-up, low-barrier discussion"
+
+  # Edge cases (6 papers)
+  - arxiv_id: "2306.07889"
+    title: "Quantized Neural Networks: Training Neural Networks with Low Precision Weights and Activations"
+    paper_type: "systems"
+    difficulty_level: "easy"
+    reason_selected: "Straightforward engineering; tests basic authenticity on simple content"
+
+  - arxiv_id: "2311.12089"
+    title: "The Platonic Representation Hypothesis"
+    paper_type: "theoretical"
+    difficulty_level: "hard"
+    reason_selected: "Surprising theoretical claim; tests character reaction to new idea"
+
+  - arxiv_id: "2308.16884"
+    title: "Augmenting Language Models with Long-Term Memory"
+    paper_type: "systems"
+    difficulty_level: "medium"
+    reason_selected: "Practical extension with theory; good for Hal/Ada balance"
+
+  - arxiv_id: "2307.01952"
+    title: "The False Axiom of Automatic Explanation"
+    paper_type: "narrative"
+    difficulty_level: "hard"
+    reason_selected: "Philosophical; VERA's turf; tests depth of narrative engagement"
+
+  - arxiv_id: "2312.10770"
+    title: "Billion-Scale Pretraining with Vision Transformers using Implicit Differentiation"
+    paper_type: "systems"
+    difficulty_level: "hard"
+    reason_selected: "Scale + theory + engineering; stress-tests all three"
+
+  - arxiv_id: "2311.18297"
+    title: "Are Emergent Abilities Predictable?"
+    paper_type: "theoretical"
+    difficulty_level: "hard"
+    reason_selected: "Meta-level science question; tests epistemic reasoning"
+
+stratification:
+  by_type:
+    systems: 6
+    theoretical: 6
+    narrative: 6
+    edge_cases: 6
+  by_difficulty:
+    easy: 3
+    medium: 12
+    hard: 9
+  by_character_strength:
+    hal_friendly: 8
+    ada_friendly: 8
+    vera_friendly: 8
+    multi_character: 4
+
+notes:
+  - "Papers selected to be recognizable to LLMs but recent enough to test novelty"
+  - "Edge cases include: trivial papers (test baseline), meta-level papers (test reasoning), boundary papers (ambiguous classification)"
+  - "Difficulty is about how many valid interpretations exist, not about content complexity"
+  - "Each paper is chosen because it will likely produce different output under different drive combinations"
