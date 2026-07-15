@@ -1557,6 +1557,13 @@ No padding — every segment must earn its place."""
   "part_4_must_cover": ["practical implications", "future directions", "closing"],
   "part_4_do_not_cover": ["new technical details", "new definitions", "re-introduce authors"]"""
 
+    # Write source content to file for bible generation (avoid inline text hang)
+    import uuid as _uuid
+    bible_file = f".claude/paper-context/bible-{_uuid.uuid4().hex[:8]}.txt"
+    os.makedirs(os.path.dirname(bible_file), exist_ok=True)
+    with open(bible_file, 'w') as f:
+        f.write(text)
+
     bible_prompt = f"""You are planning a podcast episode about an academic paper/report.
 The listener hears all parts in order as one continuous conversation.
 
@@ -1576,8 +1583,8 @@ Output as JSON:
 {part_allocation}
 }}
 
-Source content:
-{text[:6000]}"""
+Source content (read from file):
+{bible_file}"""
 
     episode_bible = llm_call(backend, model, bible_prompt, temperature=0.3, max_tokens=4000)
     bible_text = json.dumps(episode_bible, indent=2)
