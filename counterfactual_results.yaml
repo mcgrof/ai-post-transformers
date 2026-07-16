@@ -1,0 +1,50 @@
+batch_end: '2026-07-16T14:46:27.548827'
+batch_size: 2
+batch_start: '2026-07-16T14:46:16.716487'
+pairs:
+- arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
+  control:
+    arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
+    drives_enabled: false
+    error: openai backend requires the 'openai' Python package; install requirements.txt
+      into the worker venv
+    generated_at: '2026-07-16T14:46:22.101020'
+    mode: control_baseline
+    paper_id: '2410.08686'
+    status: ERROR
+  control_status: ERROR
+  generated_at: '2026-07-16T14:46:26.791329'
+  paper_id: '2410.08686'
+  treatment:
+    arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
+    drives_enabled: true
+    error: openai backend requires the 'openai' Python package; install requirements.txt
+      into the worker venv
+    generated_at: '2026-07-16T14:46:26.791317'
+    mode: treatment_with_drives
+    paper_id: '2410.08686'
+    status: ERROR
+  treatment_status: ERROR
+- arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
+  control:
+    arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
+    drives_enabled: false
+    error: openai backend requires the 'openai' Python package; install requirements.txt
+      into the worker venv
+    generated_at: '2026-07-16T14:46:27.272317'
+    mode: control_baseline
+    paper_id: '2405.14825'
+    status: ERROR
+  control_status: ERROR
+  generated_at: '2026-07-16T14:46:27.548822'
+  paper_id: '2405.14825'
+  treatment:
+    arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
+    drives_enabled: true
+    error: openai backend requires the 'openai' Python package; install requirements.txt
+      into the worker venv
+    generated_at: '2026-07-16T14:46:27.548812'
+    mode: treatment_with_drives
+    paper_id: '2405.14825'
+    status: ERROR
+  treatment_status: ERROR
