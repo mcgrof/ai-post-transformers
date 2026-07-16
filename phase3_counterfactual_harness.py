@@ -13,7 +13,7 @@ from typing import Dict, Tuple
 from soul_loader import get_soul_profile
 from elevenlabs_client import generate_podcast_script
 from db import get_connection, init_db, insert_podcast, list_podcasts
-from pdf_utils import extract_text_from_url
+from pdf_utils import download_and_extract
 import json
 
 
@@ -66,7 +66,7 @@ def extract_paper_content(url: str) -> str:
         Extracted text or metadata
     """
     try:
-        text = extract_text_from_url(url)
+        text = download_and_extract(url)
         if len(text) > 3000:
             # Return first 3000 chars of abstract/intro
             return text[:3000]

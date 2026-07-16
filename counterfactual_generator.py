@@ -19,8 +19,6 @@ from datetime import datetime
 from typing import Dict, List
 
 from soul_loader import get_soul_profile
-from llm_critic_grader import grade_episode_full
-from frozen_benchmark_set import load_benchmark_set
 import yaml
 
 
@@ -161,9 +159,9 @@ def cmd_generate_batch(count: int = 3):
     }
 
     # Load generation config
-    import config as config_module
     try:
-        gen_config = config_module.load_config().get("podcast", {})
+        from gen_podcast import load_config
+        gen_config = load_config().get("podcast", {})
     except:
         gen_config = {"llm_model": "claude-opus-4-8"}
 
