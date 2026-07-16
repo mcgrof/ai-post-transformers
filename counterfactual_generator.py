@@ -60,70 +60,47 @@ Don't announce them; just think the way {character} thinks.
 
 
 def generate_episode_with_drives(paper_id: str, arxiv_url: str,
-                                 drives_enabled: bool = False) -> Dict:
+                                 drives_enabled: bool = False, config: Dict = None) -> Dict:
     """Generate episode transcript (control or treatment).
 
     Args:
         paper_id: Paper ID from benchmark set
         arxiv_url: arXiv URL to generate from
         drives_enabled: If True, inject SOUL drive instructions
+        config: Generation config (uses default if None)
 
     Returns:
         Dict with transcript, metadata, and generation params
     """
-    # TODO: Wire into actual gen-podcast.py generation
-    # For now, return a placeholder structure
+    # Wire into actual generation pipeline
+    from phase3_counterfactual_harness import generate_episode_with_drives as harness_generate
 
-    timestamp = datetime.now().isoformat()
-    mode = "treatment_with_drives" if drives_enabled else "control_baseline"
-
-    generation_params = {
-        "paper_id": paper_id,
-        "arxiv_url": arxiv_url,
-        "drives_enabled": drives_enabled,
-        "generated_at": timestamp,
-    }
-
-    if drives_enabled:
-        generation_params["drive_prompts"] = {
-            "hal": build_drive_prompt_segment("Hal"),
-            "ada": build_drive_prompt_segment("Ada"),
-            "vera": build_drive_prompt_segment("VERA"),
+    if config is None:
+        # Load default config
+        config = {
+            "podcast": {
+                "llm_model": "claude-opus-4-8",
+                "max_words": 3000,
+            }
         }
 
-    return {
-        "mode": mode,
-        "generation_params": generation_params,
-        "transcript": "[PLACEHOLDER: Full episode transcript]",
-        "status": "NOT_YET_IMPLEMENTED",
-    }
+    return harness_generate(arxiv_url, config, drives_enabled, paper_id)
 
 
-def generate_pair(paper_id: str, arxiv_url: str) -> Dict:
+def generate_pair(paper_id: str, arxiv_url: str, config: Dict = None) -> Dict:
     """Generate control and treatment versions of a paper.
 
     Args:
         paper_id: Paper ID
         arxiv_url: arXiv URL
+        config: Generation config
 
     Returns:
         Dict with control and treatment transcripts
     """
-    print(f"\nGenerating pair for {paper_id}...")
+    from phase3_counterfactual_harness import generate_counterfactual_pair
 
-    control = generate_episode_with_drives(paper_id, arxiv_url, drives_enabled=False)
-    print(f"  Control: generated")
-
-    treatment = generate_episode_with_drives(paper_id, arxiv_url, drives_enabled=True)
-    print(f"  Treatment: generated with drives")
-
-    return {
-        "paper_id": paper_id,
-        "arxiv_url": arxiv_url,
-        "generated_at": datetime.now().isoformat(),
-        "control": control,
-        "treatment": treatment,
-    }
+    return generate_counterfactual_pair(paper_id, arxiv_url, config or {})
 
 
 def grade_pair(paper_id: str, pair: Dict,
@@ -138,34 +115,9 @@ def grade_pair(paper_id: str, pair: Dict,
     Returns:
         Dict with scores for both versions
     """
-    print(f"  Grading pair (blinded)...")
+    from phase3_counterfactual_harness import compare_pair
 
-    control_tx = pair["control"].get("transcript", "")
-    treatment_tx = pair["treatment"].get("transcript", "")
-
-    if not control_tx or "[PLACEHOLDER" in control_tx:
-        print(f"    Skipping: placeholders in transcripts")
-        return {
-            "paper_id": paper_id,
-            "control_score": None,
-            "treatment_score": None,
-            "status": "PLACEHOLDER",
-        }
-
-    # Grade control (blinded)
-    control_grades = grade_episode_full(control_tx, backend_config)
-    print(f"    Control: {control_grades['aggregate_score']:.1f}")
-
-    # Grade treatment (blinded)
-    treatment_grades = grade_episode_full(treatment_tx, backend_config)
-    print(f"    Treatment: {treatment_grades['aggregate_score']:.1f}")
-
-    return {
-        "paper_id": paper_id,
-        "control": control_grades,
-        "treatment": treatment_grades,
-        "delta": treatment_grades['aggregate_score'] - control_grades['aggregate_score'],
-    }
+    return compare_pair(pair, backend_config)
 
 
 def cmd_generate_pair(paper_id: str, arxiv_url: str):
@@ -179,11 +131,11 @@ def cmd_generate_pair(paper_id: str, arxiv_url: str):
     print(f"✓ Saved pair to {COUNTERFACTUAL_RESULTS_PATH}")
 
 
-def cmd_generate_batch(count: int = 5):
+def cmd_generate_batch(count: int = 3):
     """Command: Generate batch of pairs from benchmark set.
 
     Args:
-        count: Number of pairs to generate
+        count: Number of pairs to generate (default 3 for testing)
     """
     # Load benchmark papers
     benchmark_path = Path(__file__).parent / "frozen_benchmark_set.yaml"
@@ -200,13 +152,20 @@ def cmd_generate_batch(count: int = 5):
         print(f"No papers found in benchmark set")
         sys.exit(1)
 
-    print(f"Generating {len(papers)} pairs from frozen benchmark set...\n")
+    print(f"Generating {len(papers)} control/treatment pairs from frozen benchmark set...\n")
 
     results = {
         "batch_start": datetime.now().isoformat(),
         "batch_size": len(papers),
         "pairs": [],
     }
+
+    # Load generation config
+    import config as config_module
+    try:
+        gen_config = config_module.load_config().get("podcast", {})
+    except:
+        gen_config = {"llm_model": "claude-opus-4-8"}
 
     for i, paper in enumerate(papers, 1):
         arxiv_id = paper.get("arxiv_id", "")
@@ -220,7 +179,7 @@ def cmd_generate_batch(count: int = 5):
 
         print(f"  [{i:2d}] {arxiv_id}: {title}")
 
-        pair = generate_pair(arxiv_id, arxiv_url)
+        pair = generate_pair(arxiv_id, arxiv_url, gen_config)
         results["pairs"].append(pair)
 
     results["batch_end"] = datetime.now().isoformat()
@@ -229,7 +188,8 @@ def cmd_generate_batch(count: int = 5):
     with open(COUNTERFACTUAL_RESULTS_PATH, 'w') as f:
         yaml.dump(results, f, default_flow_style=False)
 
-    print(f"\n✓ Saved {len(results['pairs'])} pairs to {COUNTERFACTUAL_RESULTS_PATH}")
+    print(f"\n✓ Generated {len(results['pairs'])} pairs")
+    print(f"✓ Saved to {COUNTERFACTUAL_RESULTS_PATH}")
     print(f"\nNext: python counterfactual_generator.py compare-batch")
 
 
@@ -273,63 +233,79 @@ def cmd_compare_batch():
 def cmd_report():
     """Command: Generate comparison report."""
     if not COUNTERFACTUAL_RESULTS_PATH.exists():
-        print(f"Results file not found")
+        print(f"Results file not found. Run: generate-batch")
         sys.exit(1)
 
     with open(COUNTERFACTUAL_RESULTS_PATH) as f:
         data = yaml.safe_load(f)
 
+    pairs = data.get("pairs", [])
     results = data.get("comparison_results", [])
 
-    if not results or all(r.get("status") == "PLACEHOLDER" for r in results):
-        print("=" * 70)
-        print("COUNTERFACTUAL TEST RIG — CONFIGURATION")
-        print("=" * 70)
-        print(f"\nStatus: Awaiting real episode generation\n")
-        print("Framework ready:")
-        print("  • Evidence graph extraction: Designed")
-        print("  • Drive-activated prompts: Built (build_drive_prompt_segment)")
-        print("  • Paired generation harness: Built (generate_pair)")
-        print("  • Blind comparison: Built (grade_pair)")
-        print("  • Statistical analysis: Ready\n")
-        print("Next: Wire into gen-podcast.py to generate real episodes\n")
+    print("\n" + "=" * 70)
+    print("PHASE 3: COUNTERFACTUAL TEST RESULTS")
+    print("=" * 70)
+
+    print(f"\nGenerated: {len(pairs)} control/treatment pairs")
+    print(f"Generation date: {data.get('batch_start', '')}\n")
+
+    if not results:
+        print("No comparison results yet. Run: compare-batch")
         print("=" * 70)
         return
 
-    # Real results
-    print("=" * 70)
-    print("COUNTERFACTUAL TEST RIG — RESULTS")
-    print("=" * 70)
-
-    print(f"\nBatch size: {len(results)} pairs")
-    print(f"Comparison date: {data.get('comparison_at', '')}\n")
-
-    print("Results (Treatment vs Control):\n")
+    print(f"Comparison Results:\n")
 
     deltas = []
-    for result in results:
-        paper = result.get("paper_id", "")
-        delta = result.get("delta", 0)
-        status = result.get("status", "SCORED")
+    evidence_deltas = []
+    character_deltas = []
+    passes = 0
 
-        if status == "PLACEHOLDER":
-            print(f"  {paper:20s} [PLACEHOLDER]")
-        else:
-            bar = "→" if delta >= 0 else "←"
-            print(f"  {paper:20s} {bar:1s} {delta:+.2f}")
+    for i, result in enumerate(results, 1):
+        paper = result.get("paper_id", "")
+        status = result.get("status", "ERROR")
+
+        if status != "ERROR":
+            control = result.get("control_avg", 0)
+            treatment = result.get("treatment_avg", 0)
+            delta = result.get("delta", 0)
+            decision = result.get("decision", "FAIL")
+
+            bar = "↑" if delta > 0 else "↓" if delta < 0 else "→"
+            print(f"  {paper:20s} {control:.1f} → {treatment:.1f} {bar} {delta:+.2f} [{decision}]")
+
             deltas.append(delta)
+            evidence_deltas.append(result.get("evidence_delta", 0))
+            character_deltas.append(result.get("character_delta", 0))
+
+            if decision == "PASS":
+                passes += 1
+        else:
+            print(f"  {paper:20s} ERROR: {result.get('error', 'Unknown')}")
+
+    print()
 
     if deltas:
         avg_delta = sum(deltas) / len(deltas)
-        print(f"\n  Average delta: {avg_delta:+.2f}")
-        print(f"  Median delta:  {sorted(deltas)[len(deltas)//2]:+.2f}")
+        avg_evidence = sum(evidence_deltas) / len(evidence_deltas) if evidence_deltas else 0
+        avg_character = sum(character_deltas) / len(character_deltas) if character_deltas else 0
 
-        if avg_delta > 0.5:
-            print(f"\n✓ PASS: Drives improve authenticity (δ > 0.5)")
+        print(f"Summary Statistics:")
+        print(f"  Average aggregate delta:      {avg_delta:+.2f}")
+        print(f"  Average evidence delta:       {avg_evidence:+.2f}")
+        print(f"  Average character delta:      {avg_character:+.2f}")
+        print(f"  Pairs with improvement:       {passes}/{len(deltas)}")
+
+        print(f"\nDecision:")
+        if avg_delta > 0.5 and avg_evidence > 0.3 and avg_character > 0.3:
+            print(f"✓ PASS: Drives significantly improve authenticity")
+            print(f"  → Promote SOUL drives to production")
         elif avg_delta > 0:
-            print(f"\n⚠ MARGINAL: Drives help slightly (δ = {avg_delta:.2f})")
+            print(f"⚠ MARGINAL: Drives help slightly")
+            print(f"  → Iterate prompts and retest")
         else:
-            print(f"\n✗ FAIL: Drives don't improve (δ ≤ 0)")
+            print(f"✗ FAIL: Drives don't improve authenticity")
+            print(f"  → Diagnose: evidence graphs? prompts? calibration?")
 
         print("\n" + "=" * 70)
 
