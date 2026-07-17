@@ -1,0 +1,69 @@
+avg_score: 1.6428571428571428
+episode_id: 547
+failure_tags:
+- PAPER_SUBSTITUTABLE
+- GENERIC_OPENER
+measured_at: '2026-07-16T18:16:17.722766'
+publish_date: '2026-07-16'
+scores:
+  agency_score: 2
+  anti_caricature_score: 2
+  belief_score: 2
+  character_score: 1.5
+  conversation_score: 2
+  evidence_score: 0
+  naturalism_score: 2
+severity_count: 2
+title: 'Hypic: Position-Independent Caching for Hybrid-Attention LLM Serving'
+---
+avg_score: 1.6428571428571428
+episode_id: 547
+failure_tags:
+- PAPER_SUBSTITUTABLE
+- GENERIC_OPENER
+measured_at: '2026-07-16T18:16:48.701415'
+publish_date: '2026-07-16'
+scores:
+  agency_score: 2
+  anti_caricature_score: 2
+  belief_score: 2
+  character_score: 1.5
+  conversation_score: 2
+  evidence_score: 0
+  naturalism_score: 2
+severity_count: 2
+title: 'Hypic: Position-Independent Caching for Hybrid-Attention LLM Serving'
+---
+avg_score: 2.0
+episode_id: 546
+failure_tags: []
+measured_at: '2026-07-16T18:16:48.710859'
+publish_date: '2026-07-16'
+scores:
+  agency_score: 2
+  anti_caricature_score: 2
+  belief_score: 2
+  character_score: 2
+  conversation_score: 2
+  evidence_score: 2
+  naturalism_score: 2
+severity_count: 0
+title: "Huxley-G\xF6del Machine: Rethinking Self-Improving Coding Agents"
+---
+avg_score: 1.7142857142857142
+episode_id: 545
+failure_tags:
+- PAPER_SUBSTITUTABLE
+measured_at: '2026-07-16T18:16:48.723809'
+publish_date: '2026-07-15'
+scores:
+  agency_score: 2
+  anti_caricature_score: 2
+  belief_score: 2
+  character_score: 2
+  conversation_score: 2
+  evidence_score: 0
+  naturalism_score: 2
+severity_count: 1
+title: Catalog-Driven NL to PromQL for Cloud Observability
+---
