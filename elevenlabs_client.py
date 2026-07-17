@@ -1674,7 +1674,9 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
    - Title: {paper_title}
    - Authors: {', '.join(paper_authors)} (total: {len(paper_authors)} authors)
    - Institution(s): {', '.join(paper_institutions) if paper_institutions else '(not specified)'}
-   - Publication date: July 6, 2026
+   - Publication date: state it from the paper itself (e.g. the arXiv
+     submission date printed on the PDF). If the paper does not state a
+     date, omit it — do NOT guess a date or a publication venue.
    Hal should say "First Author et al." with the total co-author count, and mention
    the institution(s). {primary_host} jumps in with why this paper stands out.
    Angle to convey (paraphrase it naturally in {primary_host}'s own voice — do
