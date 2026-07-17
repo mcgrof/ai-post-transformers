@@ -1696,36 +1696,37 @@ Only output the JSON array.
 Source paper (read from file):
 {paper_file}"""
 
-    try:
-        p1_script = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
-        print(f"[DEBUG] Part 1 LLM raw response type: {type(p1_script)}", file=sys.stderr)
-        print(f"[DEBUG] Part 1 LLM raw response: {str(p1_script)[:500]}", file=sys.stderr)
-        if not isinstance(p1_script, list):
-            p1_script = p1_script.get("script", [])
-    except Exception as e:
-        print(f"[Podcast] WARNING: Part {1}/{num_parts} generation failed: {e}; using fallback intro", file=sys.stderr)
-        p1_script = []
+    # The intro sets up the whole episode: title, authors, opening
+    # angle, and any goal-directed framing (e.g. a prior-episode
+    # reference requested via --goal). A canned fallback intro can't
+    # do that job, so Part 1 gets one retry and then fails the whole
+    # generation loudly rather than shipping a degraded episode.
+    part_seg_counts = []
+    p1_script = []
+    p1_error = None
+    for attempt in (1, 2):
+        try:
+            raw = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
+            print(f"[DEBUG] Part 1 LLM raw response type: {type(raw)}", file=sys.stderr)
+            print(f"[DEBUG] Part 1 LLM raw response: {str(raw)[:500]}", file=sys.stderr)
+            p1_script = raw if isinstance(raw, list) else raw.get("script", [])
+        except Exception as e:
+            p1_error = e
+            p1_script = []
+        if p1_script:
+            break
+        print(f"[Podcast] WARNING: Part 1/{num_parts} attempt {attempt} "
+              f"returned no segments ({p1_error}); "
+              f"{'retrying' if attempt == 1 else 'giving up'}",
+              file=sys.stderr)
+    if not p1_script:
+        raise RuntimeError(
+            f"Part 1 (intro) generation failed after 2 attempts: {p1_error}")
     p1_words = sum(len(s["text"].split()) for s in p1_script)
     print(f"[Podcast]     {len(p1_script)} segments, {p1_words} words", file=sys.stderr)
 
-    # Fallback: if Part 1 (intro) returned 0 segments, inject the
-    # intro manually so the episode isn't missing its opening.
-    if not p1_script:
-        print(f"[Podcast]     WARNING: Part 1 returned no segments; "
-              "injecting fallback intro", file=sys.stderr)
-        speaker_name = "Ada" if primary_host == "Ada" else "Hal"
-        p1_script = [
-            {"speaker": "A", "text": intro},
-            {"speaker": "B", "text": (f"Thanks Hal! So today we're diving into "
-                                      f'"{paper_title}" by {paper_authors[0]} et al. '
-                                      f"from {paper_institutions[0] if paper_institutions else 'an interesting group'}. "
-                                      f"This paper explores some fundamental questions in AI.")}
-        ]
-        p1_words = sum(len(s["text"].split()) for s in p1_script)
-        print(f"[Podcast]     Injected {len(p1_script)} fallback segments, "
-              f"{p1_words} words", file=sys.stderr)
-
     all_scripts.extend(p1_script)
+    part_seg_counts.append(len(p1_script))
 
     # Extract questions and key concepts from a script part for the coverage memo
     def _extract_questions(segs):
@@ -1838,6 +1839,7 @@ Source content (read from file):
     p2_words = sum(len(s["text"].split()) for s in p2_script)
     print(f"[Podcast]     {len(p2_script)} segments, {p2_words} words", file=sys.stderr)
     all_scripts.extend(p2_script)
+    part_seg_counts.append(len(p2_script))
 
     # Update coverage memo
     p2_questions = _extract_questions(p2_script)
@@ -1919,6 +1921,7 @@ Source content (read from file):
       p3_words = sum(len(s["text"].split()) for s in p3_script)
       print(f"[Podcast]     {len(p3_script)} segments, {p3_words} words", file=sys.stderr)
       all_scripts.extend(p3_script)
+      part_seg_counts.append(len(p3_script))
 
       # Update coverage memo
       p3_questions = _extract_questions(p3_script)
@@ -1974,6 +1977,7 @@ Source content:
       p4_words = sum(len(s["text"].split()) for s in p4_script)
       print(f"[Podcast]     {len(p4_script)} segments, {p4_words} words", file=sys.stderr)
       all_scripts.extend(p4_script)
+      part_seg_counts.append(len(p4_script))
 
     # --- EDITORIAL PASS: Review full script for repetitions and flow ---
     print("[Podcast]   Editorial pass: reviewing full script for repetitions...", file=sys.stderr)
@@ -2055,6 +2059,10 @@ FULL TRANSCRIPT:
     # segments. When the LLM passes fail, only fallback stubs remain —
     # refuse to synthesize a 40-second episode and fail the submission
     # loudly instead of uploading a broken draft that looks successful.
+    if part_seg_counts and part_seg_counts[-1] == 0:
+        raise RuntimeError(
+            f"Final part {len(part_seg_counts)}/{num_parts} produced no "
+            "segments — episode would end without a conclusion")
     total_words = sum(len(s.get("text", "").split()) for s in script)
     min_words = podcast_config.get("min_script_words", 600)
     if total_words < min_words or len(script) < 6:
