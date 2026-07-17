@@ -62,7 +62,18 @@ def measure_episode(episode_id: int, episode_data: dict = None) -> dict:
         print(f"Episode {episode_id} not found")
         return None
 
-    transcript = episode_data.get("description", "")
+    # Score the real dialogue transcript (the .txt sibling of the audio
+    # file). The description is a summary blurb with no dialogue in it,
+    # so scoring it made conversation-level dimensions meaningless and
+    # every episode came out a flat ~1.7 regardless of quality.
+    transcript = ""
+    audio_file = episode_data.get("audio_file", "") or ""
+    if audio_file:
+        txt_path = Path(audio_file).with_suffix(".txt")
+        if txt_path.exists():
+            transcript = txt_path.read_text()
+    if not transcript:
+        transcript = episode_data.get("description", "")
     if not transcript:
         return None
 
