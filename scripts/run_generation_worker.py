@@ -452,7 +452,7 @@ def _run_generation_with_heartbeat(cmd, *, bucket, client, claim_token, key):
 
     while True:
         try:
-            proc.wait(timeout=HEARTBEAT_INTERVAL_SECONDS)
+            out_b, err_b = proc.communicate(timeout=HEARTBEAT_INTERVAL_SECONDS)
         except subprocess.TimeoutExpired:
             renewed = _heartbeat_submission(
                 bucket, client, key, claim_token,
@@ -470,9 +470,11 @@ def _run_generation_with_heartbeat(cmd, *, bucket, client, claim_token, key):
                 return False, "Claim lost to another worker"
             continue
 
-        # Process finished
-        stdout = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
-        stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+        # Process finished. communicate() drained the pipes while
+        # waiting, which also prevents the child from blocking once
+        # its stderr exceeds the ~64KB pipe buffer.
+        stdout = out_b.decode("utf-8", errors="replace") if out_b else ""
+        stderr = err_b.decode("utf-8", errors="replace") if err_b else ""
 
         class _Result:
             pass
@@ -498,7 +500,7 @@ def _run_generation_with_heartbeat_store(cmd, *, store, claim_token, key):
 
     while True:
         try:
-            proc.wait(timeout=HEARTBEAT_INTERVAL_SECONDS)
+            out_b, err_b = proc.communicate(timeout=HEARTBEAT_INTERVAL_SECONDS)
         except subprocess.TimeoutExpired:
             renewed = store.heartbeat_submission(key, claim_token)
             if renewed is None:
@@ -514,8 +516,8 @@ def _run_generation_with_heartbeat_store(cmd, *, store, claim_token, key):
                 return False, "Claim lost to another worker"
             continue
 
-        stdout = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
-        stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+        stdout = out_b.decode("utf-8", errors="replace") if out_b else ""
+        stderr = err_b.decode("utf-8", errors="replace") if err_b else ""
 
         class _Result:
             pass
@@ -531,7 +533,7 @@ def _parse_generation_result(result):
     """Extract success/failure and draft stem from a completed process."""
     if result.returncode != 0:
         err_lines = (result.stderr or "").strip().splitlines()
-        err_msg = "\n".join(err_lines[-5:]) if err_lines else "Unknown error"
+        err_msg = "\n".join(err_lines[-25:]) if err_lines else "Unknown error"
         return False, err_msg
 
     draft_stem = None
@@ -540,6 +542,15 @@ def _parse_generation_result(result):
         output_lines.extend((result.stdout or "").strip().splitlines())
     if result.stderr:
         output_lines.extend((result.stderr or "").strip().splitlines())
+
+    # Surface generation warnings in the worker log even on success.
+    # Part failures inside gen-podcast.py used to be invisible: the
+    # run "succeeded", stderr was dropped, and the only symptom was a
+    # mysteriously short episode.
+    warnings = [l for l in output_lines
+                if "WARNING" in l or "ANTI-PATTERN" in l]
+    for line in warnings[-10:]:
+        print(f"[gen-worker] {line}")
 
     for line in reversed(output_lines):
         if "drafts/" in line:
