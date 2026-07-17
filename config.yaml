@@ -122,8 +122,8 @@ podcast:
   # claude-cli, anthropic = Claude CLI (subscription) or Anthropic API.
   # WARNING: do NOT set this to "openai" unless you intend to spend
   # API credits — gpt-5.4 reasoning calls can cost $15-30 per episode.
-  llm_backend: claude-cli
-  llm_model: opus
+  llm_backend: anthropic
+  llm_model: claude-opus-4-20250514
   analysis_model: opus
   hosts:
     a:
