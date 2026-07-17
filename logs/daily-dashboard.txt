@@ -1,0 +1,19 @@
+
+======================================================================
+AUTHENTICITY MONITORING DASHBOARD
+======================================================================
+
+Measurements: 4 episodes tracked
+
+Dimension Performance:
+(Sorted by mean score, ascending)
+
+  Evidence                       ░░░░ 0.5 → +0.0
+  Character                      █░░░ 1.8 ↑ +0.5
+  Agency                         ██░░ 2.0 → +0.0
+  Anti Caricature                ██░░ 2.0 → +0.0
+  Belief                         ██░░ 2.0 → +0.0
+  Conversation                   ██░░ 2.0 → +0.0
+  Naturalism                     ██░░ 2.0 → +0.0
+
+======================================================================

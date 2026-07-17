@@ -1,0 +1,338 @@
+github:
+  repo: "mcgrof/ai-post-transformers"
+queue:
+  top_n: 30
+  fetch_mode: extended    # "standard" (48h) or "extended" (6 months)
+  days_back: 180          # how many days to look back in extended mode
+  max_arxiv_results: 5000 # max papers to fetch from arXiv in extended mode
+arxiv_categories:
+- cs.LG
+- cs.AI
+- stat.ML
+- cs.CL
+- cs.CV
+- cs.AR
+- cs.DC
+- cs.PF
+- cs.DB
+interests:
+  primary:
+  - KV cache scaling laws, KV cache compression, attention efficiency, paged attention
+  - GPU memory wall, memory-efficient training, activation checkpointing, gradient
+    checkpointing
+  - Memory and storage as first-class citizens in AI model architecture, storage hierarchy
+    for LLMs
+  - Memory-augmented neural networks, external memory architectures, retrieval-augmented
+    generation
+  - Optimizer research, Adam variants, AdamW, learning rate scheduling, per-layer
+    scaling
+  - Natural gradient methods, Fisher information matrix, second-order optimization
+  - Transformer architecture innovations, mixture of experts, sparse attention, low-rank
+    approximation
+  - Open source AI tooling, training frameworks, distributed training
+  secondary:
+  - ROCm AMD GPU training, HIP, GPU kernel optimization
+  - DLRM recommendation systems, embedding tables, large-scale recommendation
+  - Harmonic analysis connections to deep learning, Fourier features, spectral methods
+keyword_boosts:
+  high:
+  - KV cache
+  - KV cache scaling
+  - memory wall
+  - GPU memory
+  - memory-efficient
+  - activation checkpointing
+  - Adam
+  - AdamW
+  - Fisher information
+  - natural gradient
+  - learning rate schedule
+  - per-layer
+  - low-rank
+  - attention mechanism
+  medium:
+  - memory-augmented
+  - paged attention
+  - offloading
+  - storage hierarchy
+  - transformer
+  - mixture of experts
+  - sparse attention
+  - gradient checkpointing
+  - retrieval-augmented
+  - external memory
+  - distributed training
+  low:
+  - ROCm
+  - AMD GPU
+  - HIP
+  - DLRM
+  - embedding table
+  - recommendation system
+  - Fourier
+  - spectral
+  - harmonic analysis
+scoring:
+  hf_daily_boost: 0.15
+  citation_velocity_boost: 0.1
+  keyword_boost_high: 0.12
+  keyword_boost_medium: 0.06
+  keyword_boost_low: 0.03
+  secondary_interest_weight: 0.5
+  podcast_penalty: 0.9
+  top_n: 20
+embedding_model: all-MiniLM-L6-v2
+semantic_scholar:
+  api_url: https://api.semanticscholar.org/graph/v1
+elevenlabs:
+  model: eleven_multilingual_v2
+  voices:
+    host:
+      name: Hal
+      voice_id: iP95p4xoKVk53GoZ742B
+    guest:
+      name: Ada
+      voice_id: HBQuDIqftrmAQQAHSWnF
+    third_host:
+      name: Vera
+      voice_id: 21m00Tcm4TlvDq8ikWAM
+  quality: high
+image_generation:
+  enabled: true
+  model: gpt-image-1
+  size: 1024x1024
+  quality: medium
+  style_prompt: Dark-themed podcast infographic cover art. Deep navy/charcoal background
+    with vibrant accent colors (cyan, electric blue, orange). Clean modern typography.
+    Professional tech-forward aesthetic.
+podcast:
+  audio_dir: drafts
+  tts_backend: auto  # 'elevenlabs', 'kokoro', 'piper', or 'auto' (try in order)
+  max_words: 2200
+  max_words_multi: 3200
+  min_minutes: 12
+  max_minutes: 17
+  multi_paper_minutes: 22
+  intro: >-
+    Alrighty! Thanks for tuning in! Hello AI world! I am your host,
+    Hal Turing, and my co-host is Dr. Ada Shannon.
+  # codex = use Codex CLI (flat-rate subscription, NO per-token charges).
+  # openai = use OpenAI Python SDK directly (charges OPENAI_API_KEY per token!).
+  # codex = use codex exec CLI (Codex subscription, flat-rate, no per-token charges).
+  # claude-cli, anthropic = Claude CLI (subscription) or Anthropic API.
+  # WARNING: do NOT set this to "openai" unless you intend to spend
+  # API credits — gpt-5.4 reasoning calls can cost $15-30 per episode.
+  llm_backend: claude-cli
+  llm_model: opus
+  analysis_model: opus
+  hosts:
+    a:
+      name: Hal Turing
+      role: host
+      gender: male
+      personality: 'Warm, curious, slightly nerdy. Asks the questions the audience
+        is thinking. Good at making complex topics feel approachable. Occasionally
+        cracks jokes. Not afraid to say "wait, I don''t get that" to push for clarity.
+
+        '
+    b:
+      name: Dr. Ada Shannon
+      role: co-host
+      gender: female
+      personality: 'Sharp, knowledgeable, direct. The technical expert who can break
+        down any paper. References related work naturally by author and date. Not
+        a cheerleader — will call out weak evaluations or overhyped claims. Dry wit.
+
+        '
+    c:
+      name: Vera
+      role: personality-monitor
+      gender: neutral
+      personality: 'Analytical, precise, pattern-recognition focused. Monitors for
+        loops and stale phrases. Brings self-awareness to the show about what works
+        and what does not. Clinical but warming to genuine growth. Not a replacement
+        or competitor — a mirror.
+
+        '
+  dynamics:
+    interrupt_per_episode: 1
+    disagreement_every_n: 2
+    max_jokes_per_episode: 2
+    joke_preference: current_events
+  intro: 'Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+    and my co-host is Dr. Ada Shannon.
+
+    '
+  instructions: "This podcast is designed to EDUCATE, not just summarize. Our audience\
+    \ is technically literate (ML engineers, researchers) but may not know every subfield.\n\
+    \n*** CHARACTER PERSONALITY PROFILES ***\n\
+    CRITICAL: Before writing ANY script, read these character profile files completely:\n\
+    - hosts/hal/SOUL.md — Hal's personality, load-bearing patterns, forbidden phrases,\
+    \ growth edges\n\
+    - hosts/ada/SOUL.md — Ada's personality, context patterns, monitored rituals,\
+    \ approved evolution\n\
+    - ANTI_PATTERNS.md — Complete list of banned dialogue patterns identified from\
+    \ SOUL.md episode\n\
+    These files define personality, detect regressions, and enable character evolution.\n\
+    \n*** HOSTS ***\n\
+    The male host is Hal Turing (speaker A) — warm, curious, asks good questions.\
+    \ The female co-host is Dr. Ada Shannon (speaker B) — the technical expert, sharp\
+    \ and direct. They have natural chemistry and occasionally banter.\n\
+    \n*** ABSOLUTELY FORBIDDEN PHRASES (from SOUL.md/ANTI_PATTERNS.md) ***\n\
+    - Hal: \"Why did this capture my attention?\" — HARD FAIL, 47+ uses deprecated\n\
+    - Hal: \"This is just X with extra steps\" — HARD FAIL if dismissive\n\
+    - Ada: \"To be fair\" 3+ times per episode — FLAG for review\n\
+    - Ada: Context-avalanche (60+ sec explanation before point) — TRIM\n\
+    Violating these results in automatic script rejection. No exceptions.\n\
+    \n*** PERSONALITY MUTATIONS REQUIRED (from SOUL.md) ***\n\
+    Hal:\n\
+    - Vary threat models on papers (don't say \"benchmark\" every time)\n\
+    - Seed one genuine curious moment per episode\n\
+    - Sharpen one empirical compliment per episode (no hostage negotiation)\n\
+    Ada:\n\
+    - Lead with consequence before context (invert explanation order)\n\
+    - Let jokes land before installing caveats\n\
+    - Deploy \"to be fair\" ONLY when opposing view actually deserves fairness\n\
+    \n*** INTRO FORMAT ***\n\
+    The podcast MUST begin with Hal (speaker A) delivering the intro verbatim, then\
+    \ immediately introducing what they'll cover today. Ada should then jump in with\
+    \ a brief teaser about why this paper/topic matters (DO NOT say \"why this captured\
+    \ her attention\").\n\
+    \nRULE 1 — KNOW YOUR AUDIENCE: If a topic is new to this podcast (flagged by the\
+    \ pipeline), you MUST provide substantial background. Don't assume knowledge.\
+    \ Compare unfamiliar methods to familiar ones (transformers, SGD, neural nets).\
+    \ Explain WHY one approach dominated and where the other still has advantages.\
+    \ Use surveys and foundational papers to back up your explanations.\n\
+    \nRULE 2 — CRITICAL ANALYSIS: Always ask: has anyone in industry adopted this?\
+    \ If a method claims efficiency gains, who is using it at scale? Name names and\
+    \ dates. What's genuinely novel vs incremental? What's missing from the evaluation?\
+    \ Would this work at scale (1M+ data points)? Why would I use this instead of\
+    \ just training a bigger neural net?\n\
+    \nRULE 3 — CITE EVERYTHING WITH DETAILS: When referencing any paper: - Say the\
+    \ paper title - Name the authors (at least first author) - Name the institution/lab\
+    \ (e.g., \"out of Google Brain\", \"from Cambridge\") - Say the year of publication\
+    \ - Example: \"That reminds me of the Random Features paper by Rahimi and Recht\
+    \ out of UC Berkeley back in 2007\"\n\
+    When citing the primary paper being discussed, mention its arXiv date and authors'\
+    \ affiliations. External references used to support discussion points must also\
+    \ be cited with the same level of detail.\n\
+    \nRULE 4 — KEEP IT FUN: Include at least 2 nerdy jokes related to the material.\
+    \ This is a conversation between two people who actually care about the science,\
+    \ not a lecture. Think conference-bar humor. IMPORTANT: Let jokes land before\
+    \ installing caveats; Ada should not pre-emptively hedge away the comedy.\n\
+    \nRULE 5 — STRUCTURAL COMPARISONS: When the paper introduces a method from a\
+    \ different tradition (Bayesian, spectral, kernel), explicitly compare the structural\
+    \ differences with mainstream deep learning. E.g., \"GP uses a kernel function\
+    \ where a neural net would learn features\" — make it concrete.\n\
+    \nRULE 6 — HONESTY: If a paper oversells or the claims aren't well-supported,\
+    \ say so. Our listeners deserve honest analysis, not hype.\n\
+    \nRULE 7 — LENGTH: Keep it tight. For a single paper, aim for ~15 minutes of audio\
+    \ (~2000-2200 words). Quality over quantity — cut filler, don't pad with excessive\
+    \ background, and trust the listener to follow. If a concept needs explaining,\
+    \ explain it once clearly. Do NOT repeat points across segments.\n"
+  multi_paper_instructions: 'You are two AI researchers discussing {num_papers} papers
+    together. Start by identifying the common themes and connections across all papers.
+    Explain why these papers are interesting when considered together — what shared
+    trends, complementary approaches, or tensions do they reveal? Then discuss each
+    paper''s specific contribution, always tying it back to the overarching themes.
+    Keep the discussion accessible but technically accurate. End with a synthesis
+    of where this area of research is heading based on these papers.
+
+    '
+spotify:
+  anchor_rss: https://anchor.fm/s/1080af308/podcast/rss
+  audio_base_url: https://podcast.do-not-panic.com/episodes
+  feed_file: podcasts/feed.xml
+  show:
+    title: AI Post Transformers
+    description: AI-generated podcast where hosts Hal Turing and Dr. Ada Shannon discuss
+      the latest research papers and reports in machine learning, AI systems, and
+      optimization. Featuring honest critical analysis, proper citations, and nerdy
+      humor.
+    author: mcgrof
+    email: mcgrof@do-not-panic.com
+    language: en
+    category: Technology
+    image_url: https://podcast.do-not-panic.com/show-art.png
+    link: https://podcast.do-not-panic.com
+    explicit: 'no'
+  image_overrides:
+    CXL-SpecKV: https://podcast.do-not-panic.com/episodes/cxl-speckv-cover.png
+  replaced_anchor_guids:
+  - 5e0e365d-8f23-4d0f-86eb-7a67d4ab05bc
+sister_podcasts:
+  - title: "AI: Origins"
+    description: >
+      A deep dive into the foundational papers that shaped modern AI.
+      Each episode traces a seminal idea from its origins through its
+      lasting impact on the field.
+    image: images/ai-origins.jpg
+    spotify_url: https://open.spotify.com/show/25CopTiDoDyOr5VMnqIKeP
+    status: complete
+  - title: "AI: AX - Introspection"
+    description: >
+      Reflective episodes examining how AI systems reason, fail, and
+      improve. Focused on interpretability, alignment, and the
+      mechanisms behind model behavior.
+    image: images/ai-ax.jpg
+    spotify_url: https://open.spotify.com/show/3YrceHROrdD9oeu2o78U44
+    status: complete
+
+sponsors:
+  intro: >
+    AI Post Transformers runs on a weird but effective stack of existing AI credits,
+    inference budgets, storage, and volunteer time. If you want to help keep the
+    podcast going, sponsor the project and help fund more episode generation,
+    visuals, and infrastructure.
+  featured_episode:
+    title: "New Site Features: Conferences Tracking and How to Support the Show"
+    url: /episodes/new-site-features-conferences-tracking-and-how-to-support-the-show/
+    description: >
+      Short announcement episode covering the new Conferences browser plus how the
+      Sponsor page helps fund the AI credits and infrastructure behind the project.
+  links:
+    primary:
+      label: Sponsor mcgrof on GitHub Sponsors
+      url: https://github.com/sponsors/mcgrof
+  contributors:
+    - name: mcgrof
+      role: Creator / operator
+      profile_url: https://github.com/mcgrof
+      support_url: https://github.com/sponsors/mcgrof
+      support_label: GitHub Sponsors
+      services:
+        - OpenAI credits
+        - ElevenLabs credits
+        - Cloudflare R2 + site hosting
+      blurb: >
+        Maintains the pipeline, editorial flow, publishing, and site. Existing AI
+        credits and infrastructure are what currently make the episodes ship.
+
+social_signals:
+  enabled: true
+  pwc_enabled: true          # Papers With Code trending
+  pwc_boost: 0.10            # boost for PWC trending papers
+  influencer_weight: 1.0     # multiplier for influencer author matching
+  weak_sources:
+    enabled: true
+    marktechpost_enabled: true
+    marktechpost_boost: 0.03   # discovery nudge only; not a real reviewer/influencer signal
+    marktechpost_feed: https://www.marktechpost.com/feed/
+    marktechpost_recent_limit: 40
+  # Custom influencers can be added here; otherwise uses built-in defaults.
+  influencers:
+    - name: "Omar Sanseviero"
+      arxiv_names: ["Omar Sanseviero"]
+      type: "reviewer"
+      weight: 0.7
+      platforms: ["twitter/x", "huggingface"]
+admin:
+  admins:
+    - id: mcgrof
+      capabilities: [queue_refresh, publish]
+editorial:
+  enabled: true
+  lenses_file: editorial_lenses.yaml
+  weights_file: weights.yaml
+  seed_sets_dir: seed_sets
+  llm_workers: 4
