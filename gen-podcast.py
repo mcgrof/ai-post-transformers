@@ -19,6 +19,7 @@ Examples:
 """
 
 import argparse
+import os
 import sys
 import yaml
 from datetime import datetime, timezone
