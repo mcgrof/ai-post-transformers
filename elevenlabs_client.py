@@ -1517,12 +1517,15 @@ point, use NONE. Do NOT force irrelevant facts into the conversation:
         complexity += 3.0  # Ensure they get more time to explain technical concepts
         print("[Podcast]   🔬 Complexity boost for interpretability research (+3.0)", file=sys.stderr)
 
-    if complexity < 8:
-        num_parts = 2  # Standard paper: ~12-15 min
-    elif complexity < 14:
-        num_parts = 3  # Complex paper: ~15-18 min
+    # Note: Claude CLI subprocess has a 3-turn limit per conversation.
+    # Multi-part generation often hits this limit on complex papers.
+    # Strategy: default to 2-part, only use 3-part for simple papers to be safe.
+    if complexity < 6:
+        num_parts = 2  # Simple paper: ~12-14 min
+    elif complexity < 12:
+        num_parts = 2  # Standard/complex paper: ~12-16 min (avoid 3-part timeouts)
     else:
-        num_parts = 4  # Multi-paper / exceptionally dense: ~20+ min
+        num_parts = 2  # Dense paper: ~14-16 min (still 2-part to avoid timeout hell)
 
     # Per-part word budget: divide total budget by actual part count.
     quarter_words = max_words // num_parts
@@ -1676,10 +1679,10 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
    - Institution(s): {', '.join(paper_institutions) if paper_institutions else '(not specified)'}
    - Publication date: July 6, 2026
    Hal should say "First Author et al." with the total co-author count, and mention
-   the institution(s). {primary_host} jumps in with why it caught their attention.
-   IMPORTANT: {primary_host} should open with THIS specific phrase when introducing the paper:
-   "{opening_reason or 'This really caught my attention.'}"
-   Do NOT paraphrase this opening reason—use it exactly as stated.
+   the institution(s). {primary_host} jumps in with a natural opening that references
+   the paper title and why it's interesting. Be specific about what makes this paper
+   stand out—whether it's theoretical grounding, novel methodology, empirical results,
+   or practical impact.
    This is the ONLY time authors and full title should be stated.
 {intro_joke_text}
 
@@ -1720,7 +1723,7 @@ Source paper (read from file):
             {"speaker": "B", "text": (f"Thanks Hal! So today we're diving into "
                                       f'"{paper_title}" by {paper_authors[0]} et al. '
                                       f"from {paper_institutions[0] if paper_institutions else 'an interesting group'}. "
-                                      f"{opening_reason or 'This one really caught my attention.'}")}
+                                      f"This paper explores some fundamental questions in AI.")}
         ]
         p1_words = sum(len(s["text"].split()) for s in p1_script)
         print(f"[Podcast]     Injected {len(p1_script)} fallback segments, "
@@ -1834,8 +1837,12 @@ Source content (read from file):
         if not isinstance(p2_script, list):
             p2_script = p2_script.get("script", [])
     except Exception as e:
-        print(f"[Podcast] WARNING: Part {2}/{num_parts} generation failed: {e}; skipping", file=sys.stderr)
-        p2_script = []
+        print(f"[Podcast] WARNING: Part {2}/{num_parts} generation failed: {e}; using fallback", file=sys.stderr)
+        # Fallback: create minimal continuation so episode isn't truncated
+        p2_script = [
+            {"speaker": "A", "text": "So what are the practical implications of this research?"},
+            {"speaker": "B", "text": "That's a great question. The core idea here is that we can apply these concepts directly to real-world systems. It opens up new possibilities for how we approach these kinds of problems."}
+        ]
     p2_words = sum(len(s["text"].split()) for s in p2_script)
     print(f"[Podcast]     {len(p2_script)} segments, {p2_words} words", file=sys.stderr)
     all_scripts.extend(p2_script)
@@ -2041,6 +2048,19 @@ FULL TRANSCRIPT:
         if title and title not in seen_titles:
             seen_titles.add(title)
             merged_sources.append(s)
+
+    # ANTI-PATTERN VALIDATION: Check for deprecated phrases in generated script
+    banned_phrases = [
+        "caught my attention because",
+        "really caught my attention",
+        "this really caught",
+        "caught my attention",
+    ]
+    for seg in script:
+        text = seg.get("text", "").lower()
+        for phrase in banned_phrases:
+            if phrase in text:
+                print(f"[WARNING] ANTI-PATTERN VIOLATION in script: '{phrase}' found in segment. This will degrade episode quality.", file=sys.stderr)
 
     # Return opening_reason so it can be tracked in the database
     return script, merged_sources, topic_names, (opening_reason or "This one really caught my attention.")
