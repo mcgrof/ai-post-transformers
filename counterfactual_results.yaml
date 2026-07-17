@@ -1,50 +1,351 @@
-batch_end: '2026-07-16T14:46:27.548827'
+batch_end: '2026-07-16T15:11:42.646479'
 batch_size: 2
-batch_start: '2026-07-16T14:46:16.716487'
+batch_start: '2026-07-16T14:52:55.015677'
+comparison_at: '2026-07-16T15:11:52.974693'
+comparison_results:
+- character_delta: 0
+  control_avg: 0
+  control_scores:
+    error: No module named 'MEASUREMENT_FRAMEWORK'
+    paper_id: '2410.08686'
+    status: ERROR
+  decision: FAIL
+  delta: 0
+  evidence_delta: 0
+  paper_id: '2410.08686'
+  treatment_avg: 0
+  treatment_scores:
+    error: No module named 'MEASUREMENT_FRAMEWORK'
+    paper_id: '2410.08686'
+    status: ERROR
+- character_delta: 0
+  control_avg: 0
+  control_scores:
+    error: No module named 'MEASUREMENT_FRAMEWORK'
+    paper_id: '2405.14825'
+    status: ERROR
+  decision: FAIL
+  delta: 0
+  evidence_delta: 0
+  paper_id: '2405.14825'
+  treatment_avg: 0
+  treatment_scores:
+    error: No module named 'MEASUREMENT_FRAMEWORK'
+    paper_id: '2405.14825'
+    status: ERROR
 pairs:
 - arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
   control:
     arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
     drives_enabled: false
-    error: openai backend requires the 'openai' Python package; install requirements.txt
-      into the worker venv
-    generated_at: '2026-07-16T14:46:22.101020'
+    generated_at: '2026-07-16T14:58:13.322594'
     mode: control_baseline
     paper_id: '2410.08686'
-    status: ERROR
-  control_status: ERROR
-  generated_at: '2026-07-16T14:46:26.791329'
+    script:
+    - speaker: A
+      text: Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+        and my co-host is Dr. Ada Shannon.
+    - speaker: B
+      text: Thanks Hal! So today we're diving into "Almost general analysis of CKM
+        and MNS matrices for hierarchical Yukawa structure and interpretation of Dirac
+        CP phase probed by DUNE and T2HK" by Masaki J. S. Yang et al. from Saitama
+        University. This one really caught my attention.
+    sources:
+    - authors: L. Wolfenstein
+      industry_impact: Adopted universally as the standard convention by the Particle
+        Data Group and every quark-flavor experiment since; it is the default way
+        CKM elements are quoted in any collider or flavor-physics paper.
+      summary: Introduced the now-standard approximate parametrization of the CKM
+        matrix in powers of the small parameter lambda (the Cabibbo angle), making
+        the strong hierarchy among quark mixing angles explicit and tractable for
+        phenomenology. It reframed a generic unitary matrix as an expansion organized
+        by observed hierarchy, exactly the spirit of the 'hierarchical Yukawa' approach
+        used in this paper.
+      title: Parametrization of the Kobayashi-Maskawa Matrix
+      year: '1983'
+    - authors: H. Fritzsch, Z.Z. Xing
+      industry_impact: No commercial adoption; became a standard reference and teaching
+        resource within the flavor-physics theory community, cited in essentially
+        all subsequent texture-model papers.
+      summary: A long survey (Prog. Part. Nucl. Phys.) systematizing 'texture' approaches
+        to fermion mass matrices, in which specific zero or small entries in the Yukawa
+        matrices are assumed to explain the observed mass and mixing hierarchies.
+        It laid out the general machinery for deriving mixing angles analytically
+        from assumed mass-matrix structures, which is the direct methodological ancestor
+        of the 'almost general' derivation in this paper.
+      title: Mass and Mixing Patterns of Quarks and Leptons
+      year: '2000'
+    - authors: P.F. Harrison, D.H. Perkins, W.G. Scott
+      industry_impact: None commercially; hugely influential inside theoretical neutrino
+        physics, spawning an entire subfield of discrete-symmetry flavor models before
+        being observationally disfavored.
+      summary: "Proposed a simple, highly symmetric ansatz for the PMNS matrix (tri-bimaximal\
+        \ mixing) that approximately matched early neutrino oscillation data, spurring\
+        \ a decade of model-building trying to derive this pattern from discrete flavor\
+        \ symmetries. It was later ruled out at high precision once theta13 was measured\
+        \ to be nonzero (Daya Bay, 2012), but it shaped how the field thinks about\
+        \ 'special' versus 'generic' mixing patterns \u2014 the kind of generic case\
+        \ this paper instead tackles analytically."
+      title: Tri-bimaximal Mixing and the Neutrino Oscillation Data
+      year: '2002'
+    - authors: M. Kobayashi, T. Maskawa
+      industry_impact: None commercial; earned Kobayashi and Maskawa the 2008 Nobel
+        Prize in Physics and remains the theoretical basis for all CKM/CP-violation
+        phenomenology since.
+      summary: "Showed that CP violation can arise naturally in the Standard Model\
+        \ if there are at least three generations of quarks, predicting the existence\
+        \ of a third quark generation years before it was discovered. This is the\
+        \ foundational paper establishing that a complex phase in a unitary mixing\
+        \ matrix is the Standard Model's mechanism for CP violation \u2014 the exact\
+        \ mechanism this podcast's source paper is analyzing in the leptonic sector."
+      title: CP Violation in the Renormalizable Theory of Weak Interaction
+      year: '1973'
+    - authors: T2K Collaboration (K. Abe et al.)
+      industry_impact: No commercial impact; directly shaped the physics case and
+        funding justification for DUNE and Hyper-Kamiokande as next-generation successor
+        experiments.
+      summary: Published in Nature, this gave the first experimental hints (roughly
+        2-3 sigma) that the leptonic Dirac phase delta is nonzero and near maximal
+        CP violation, using accelerator-produced neutrino and antineutrino beams measured
+        at Super-Kamiokande. It is the direct experimental predecessor to the DUNE/T2HK
+        discussion in this paper, illustrating why more statistics and a next-generation
+        detector are needed to resolve the current T2K/NOvA tension mentioned in the
+        paper's introduction.
+      title: Constraint on the Matter-Antimatter Symmetry-Violating Phase in Neutrino
+        Oscillations
+      year: '2020'
+    - authors: H. Nunokawa, S. Parke, J.W.F. Valle
+      industry_impact: None commercial; became a standard reference for experimental
+        collaborations designing analysis strategies to extract delta from oscillation
+        data.
+      summary: A widely cited review (Prog. Part. Nucl. Phys.) laying out the theoretical
+        framework for how leptonic CP violation manifests in oscillation experiments,
+        including the degeneracies and parameter correlations (mass ordering, octant
+        of theta23) that complicate a clean measurement of delta. It established much
+        of the standard language and formalism that later analyses, including this
+        paper's DUNE/T2HK discriminating-power discussion, build on.
+      title: CP Violation and Neutrino Oscillations
+      year: '2008'
+    - authors: DUNE Collaboration
+      industry_impact: No commercial adoption; drove significant advances in large-scale
+        liquid-argon detector engineering that influenced later detector R&D programs
+        (e.g., other liquid-argon TPC efforts internationally).
+      summary: The technical design report laying out DUNE's liquid-argon time-projection-chamber
+        detector technology, its 1300 km baseline from Fermilab to the Sanford Underground
+        Research Facility, and its projected sensitivity to CP violation, mass ordering,
+        and proton decay. It is the primary technical reference underlying any phenomenological
+        forecast of DUNE's CP-phase discriminating power, including the analysis in
+        this paper.
+      title: Deep Underground Neutrino Experiment (DUNE), Far Detector Technical Design
+        Report
+      year: '2020'
+    - authors: Hyper-Kamiokande Proto-Collaboration (K. Abe et al.)
+      industry_impact: No commercial adoption; the underlying photomultiplier-tube
+        and water-Cherenkov technology has decades of prior engineering history from
+        Super-Kamiokande, refined further for this next-generation build.
+      summary: Details the design of the Hyper-Kamiokande water-Cherenkov detector
+        (roughly 8x the fiducial volume of Super-Kamiokande) and the associated upgraded
+        J-PARC neutrino beam feeding the T2HK long-baseline program, including projected
+        sensitivity to leptonic CP violation. It establishes the experimental target
+        sensitivities (delta measured to about 20 degrees precision) referenced by
+        phenomenology papers like this one when assessing what values of delta will
+        be distinguishable.
+      title: Hyper-Kamiokande Design Report
+      year: '2018'
+    - authors: S.K. Agarwalla, S. Prakash, et al. (representative phenomenology literature)
+      industry_impact: No commercial adoption; this line of phenomenology work directly
+        informs experimental collaborations' run-planning and beam-power allocation
+        decisions.
+      summary: Representative of a broad phenomenology literature comparing DUNE and
+        T2HK's projected sensitivities to CP violation, mass ordering, and octant
+        degeneracies, often via GLoBES-based simulations of expected event rates.
+        These comparative sensitivity studies are the direct experimental-forecasting
+        context this paper's analytic mixing-matrix results are applied to when discussing
+        which values of delta the two experiments could distinguish.
+      title: The Physics of the T2HK and DUNE Long-Baseline Neutrino Oscillation Experiments
+      year: 2021 (representative of an active literature line, 2017-2023)
+    - authors: C.D. Froggatt, H.B. Nielsen
+      industry_impact: None commercial; foundational and still widely cited/used within
+        the theoretical flavor-physics model-building community over 45 years later.
+      summary: Introduced what's now called the Froggatt-Nielsen mechanism, generating
+        hierarchical Yukawa couplings from a broken flavor symmetry where each fermion
+        carries a different 'charge,' producing Yukawa entries suppressed by powers
+        of a small symmetry-breaking parameter. This became the dominant framework
+        for constructing hierarchical texture models and is the conceptual ancestor
+        of essentially all subsequent hierarchical-Yukawa analyses, including the
+        approximation scheme used in this paper.
+      title: Hierarchy of Quark Masses, Cabibbo Angles and CP Violation
+      year: '1979'
+    - authors: H. Fritzsch
+      industry_impact: None commercial; the specific Fritzsch texture was eventually
+        disfavored by precision data, but the methodology remains a standard teaching
+        example and starting point in flavor model-building.
+      summary: "Proposed one of the earliest specific Yukawa texture ansatze (the\
+        \ 'Fritzsch texture,' with particular zero entries) relating quark mass ratios\
+        \ directly to CKM mixing angles in a predictive way. It established the methodological\
+        \ template \u2014 impose a texture, derive mixing angles analytically in terms\
+        \ of mass ratios \u2014 that this paper's approach generalizes and extends\
+        \ to a less restrictive ('almost general') setting."
+      title: Weak Interaction Mixing in the Six-Quark Theory
+      year: '1979'
+    - authors: P. Ramond, R.G. Roberts, G.G. Ross
+      industry_impact: None commercial; widely cited as a systematic reference within
+        the flavor-texture theoretical literature.
+      summary: A systematic survey of viable Yukawa texture combinations for quarks
+        consistent with then-current data, mapping out which zero-texture patterns
+        remained allowed and demonstrating how strongly the mass hierarchy constrains
+        the space of consistent models. It is a key reference for the 'general treatment
+        of hierarchical Yukawa structures' this paper positions itself against/alongside
+        for the lepton sector.
+      title: Stitching the Yukawa Quilt
+      year: '1993'
+    - authors: Super-Kamiokande Collaboration (Y. Fukuda et al.)
+      industry_impact: None commercial; earned Takaaki Kajita a share of the 2015
+        Nobel Prize in Physics and is considered one of the foundational discoveries
+        of 21st-century particle physics.
+      summary: The landmark discovery paper establishing that neutrinos oscillate
+        and therefore have nonzero mass, based on the observed deficit and zenith-angle
+        dependence of atmospheric muon neutrinos. This was the first solid measurement
+        constraining what became theta23, and it opened the entire field of precision
+        neutrino oscillation physics that this paper's analysis sits within.
+      title: Evidence for Oscillation of Atmospheric Neutrinos
+      year: '1998'
+    - authors: Daya Bay Collaboration (F.P. An et al.)
+      industry_impact: None commercial; directly enabled the physics case and funding
+        justification for the entire generation of CP-violation-focused long-baseline
+        experiments (T2K's later CP results, NOvA, DUNE, T2HK).
+      summary: "Provided the first precise, unambiguous measurement of theta13, the\
+        \ smallest and last-measured of the three PMNS mixing angles, using reactor\
+        \ antineutrinos detected at multiple baselines. This measurement was pivotal\
+        \ because a nonzero, sizeable theta13 is precisely what makes measuring the\
+        \ CP phase delta experimentally feasible at all \u2014 without it, DUNE and\
+        \ T2HK's CP-violation program discussed in this paper would not be viable."
+      title: Observation of Electron-Antineutrino Disappearance at Daya Bay
+      year: '2012'
+    - authors: I. Esteban, M.C. Gonzalez-Garcia, M. Maltoni, T. Schwetz, A. Zhou (NuFit
+        collaboration)
+      industry_impact: None commercial; the NuFit global fit is the de facto standard
+        reference dataset cited by nearly every neutrino phenomenology paper published
+        since its various updates began.
+      summary: The current-generation global fit combining all available neutrino
+        oscillation data to extract best-fit values and uncertainties for all three
+        mixing angles, the two mass-squared differences, and current constraints on
+        delta. This kind of global-fit output is exactly the set of 'measured mixing
+        angle' inputs that a paper like this one plugs in as constraints to analytically
+        solve for the remaining mixing-matrix structure.
+      title: 'The Fate of Hints: Updated Global Analysis of Three-Flavor Neutrino
+        Oscillations'
+      year: '2020'
+    status: GENERATED
+    topics:
+    - CKM and PMNS Matrix Analysis
+    - CP Violation and Dirac Phase
+    - Neutrino Oscillation Experiments (DUNE, T2HK)
+    - Hierarchical Yukawa Textures
+    - Lepton Flavor Mixing Angles
+    transcript: 'A: Alrighty! Thanks for tuning in! Hello AI world! I am your host,
+      Hal Turing, and my co-host is Dr. Ada Shannon.
+
+      B: Thanks Hal! So today we''re diving into "Almost general analysis of CKM and
+      MNS matrices for hierarchical Yukawa structure and interpretation of Dirac CP
+      phase probed by DUNE and T2HK" by Masaki J. S. Yang et al. from Saitama University.
+      This one really caught my attention.'
+  control_status: GENERATED
+  generated_at: '2026-07-16T15:02:04.502739'
   paper_id: '2410.08686'
   treatment:
     arxiv_url: https://arxiv.org/pdf/2410.08686.pdf
     drives_enabled: true
-    error: openai backend requires the 'openai' Python package; install requirements.txt
-      into the worker venv
-    generated_at: '2026-07-16T14:46:26.791317'
+    generated_at: '2026-07-16T15:02:04.502719'
     mode: treatment_with_drives
     paper_id: '2410.08686'
-    status: ERROR
-  treatment_status: ERROR
+    script:
+    - speaker: A
+      text: Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+        and my co-host is Dr. Ada Shannon.
+    - speaker: B
+      text: Thanks Hal! So today we're diving into "Almost general analysis of CKM
+        and MNS matrices for hierarchical Yukawa structure and interpretation of Dirac
+        CP phase probed by DUNE and T2HK" by Masaki J. S. Yang et al. from Saitama
+        University. This one really caught my attention.
+    sources: []
+    status: GENERATED
+    topics:
+    - CKM and PMNS Matrix Analysis
+    - CP Violation / Dirac Phase
+    - Neutrino Oscillation Experiments (DUNE, T2HK)
+    - Flavor Structure of Yukawa Matrices
+    - Lepton Flavor Mixing / PMNS Phenomenology
+    transcript: 'A: Alrighty! Thanks for tuning in! Hello AI world! I am your host,
+      Hal Turing, and my co-host is Dr. Ada Shannon.
+
+      B: Thanks Hal! So today we''re diving into "Almost general analysis of CKM and
+      MNS matrices for hierarchical Yukawa structure and interpretation of Dirac CP
+      phase probed by DUNE and T2HK" by Masaki J. S. Yang et al. from Saitama University.
+      This one really caught my attention.'
+  treatment_status: GENERATED
 - arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
   control:
     arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
     drives_enabled: false
-    error: openai backend requires the 'openai' Python package; install requirements.txt
-      into the worker venv
-    generated_at: '2026-07-16T14:46:27.272317'
+    generated_at: '2026-07-16T15:06:47.935784'
     mode: control_baseline
     paper_id: '2405.14825'
-    status: ERROR
-  control_status: ERROR
-  generated_at: '2026-07-16T14:46:27.548822'
+    script:
+    - speaker: A
+      text: Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+        and my co-host is Dr. Ada Shannon.
+    - speaker: B
+      text: "Thanks Hal! So today we're diving into \"Linbladian way for the relaxation\
+        \ time approximation, application to Kibble-Zurek processes due to environment\
+        \ temperature quench, and to Linbladian perturbation theory\" by Gerg\u0151\
+        \ R\xF3zsa et al. from HUN-REN Wigner Research Centre for Physics. This one\
+        \ really caught my attention."
+    sources: []
+    status: GENERATED
+    topics:
+    - Open Quantum Systems / Lindblad Formalism
+    - Relaxation Time Approximation (RTA)
+    - Kibble-Zurek Mechanism
+    - Thermalization and Gibbs States
+    - Perturbation Theory for Non-Equilibrium Steady States
+    transcript: "A: Alrighty! Thanks for tuning in! Hello AI world! I am your host,\
+      \ Hal Turing, and my co-host is Dr. Ada Shannon.\nB: Thanks Hal! So today we're\
+      \ diving into \"Linbladian way for the relaxation time approximation, application\
+      \ to Kibble-Zurek processes due to environment temperature quench, and to Linbladian\
+      \ perturbation theory\" by Gerg\u0151 R\xF3zsa et al. from HUN-REN Wigner Research\
+      \ Centre for Physics. This one really caught my attention."
+  control_status: GENERATED
+  generated_at: '2026-07-16T15:11:42.646469'
   paper_id: '2405.14825'
   treatment:
     arxiv_url: https://arxiv.org/pdf/2405.14825.pdf
     drives_enabled: true
-    error: openai backend requires the 'openai' Python package; install requirements.txt
-      into the worker venv
-    generated_at: '2026-07-16T14:46:27.548812'
+    generated_at: '2026-07-16T15:11:42.646453'
     mode: treatment_with_drives
     paper_id: '2405.14825'
-    status: ERROR
-  treatment_status: ERROR
+    script:
+    - speaker: A
+      text: Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
+        and my co-host is Dr. Ada Shannon.
+    - speaker: B
+      text: "Thanks Hal! So today we're diving into \"Lindbladian way for the relaxation\
+        \ time approximation, application to Kibble-Zurek processes due to environment\
+        \ temperature quench, and to Lindbladian perturbation theory\" by Gerg\u0151\
+        \ R\xF3zsa et al. from HUN-REN Wigner Research Centre for Physics. This one\
+        \ really caught my attention."
+    sources: []
+    status: GENERATED
+    topics:
+    - Lindblad Formalism
+    - Relaxation Time Approximation
+    - Kibble-Zurek Mechanism
+    - Open Quantum Systems Thermalization
+    - Perturbation Theory for Non-Equilibrium Steady States
+    transcript: "A: Alrighty! Thanks for tuning in! Hello AI world! I am your host,\
+      \ Hal Turing, and my co-host is Dr. Ada Shannon.\nB: Thanks Hal! So today we're\
+      \ diving into \"Lindbladian way for the relaxation time approximation, application\
+      \ to Kibble-Zurek processes due to environment temperature quench, and to Lindbladian\
+      \ perturbation theory\" by Gerg\u0151 R\xF3zsa et al. from HUN-REN Wigner Research\
+      \ Centre for Physics. This one really caught my attention."
+  treatment_status: GENERATED

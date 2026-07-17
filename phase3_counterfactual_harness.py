@@ -102,16 +102,23 @@ def generate_episode_with_drives(
     # Extract paper content
     paper_text = extract_paper_content(arxiv_url)
 
-    # Inject SOUL drives into config if enabled
-    generation_config = config.copy()
+    # Prepare generation config with proper LLM backend
+    generation_config = {
+        "podcast": {
+            "llm_backend": "claude-cli",
+            "llm_model": "opus",
+            "max_words": 3000,
+        }
+    }
+
     if drives_enabled:
         # Add SOUL drive context to config
-        generation_config["soul_drives"] = {
+        generation_config["podcast"]["soul_drives"] = {
             "Hal": build_soul_drive_segment("Hal", "evidence"),
             "Ada": build_soul_drive_segment("Ada", "evidence"),
             "VERA": build_soul_drive_segment("VERA", "evidence"),
         }
-        generation_config["drives_enabled"] = True
+        generation_config["podcast"]["drives_enabled"] = True
 
     # Generate script
     try:
