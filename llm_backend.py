@@ -234,17 +234,25 @@ def _call_claude_cli(model, prompt, max_tokens):
     import os
     import contextlib
 
+    # The script prompts instruct the model to read files (SOUL host
+    # profiles, ANTI_PATTERNS.md, the paper context file) and every
+    # tool use consumes a turn. With --max-turns 3 the CLI exited with
+    # "Reached max turns (3)" before it could generate anything, so
+    # every script pass silently fell back to stub content while
+    # file-free calls (titles, summaries) kept working.
     cmd = ["claude", "-p",
            "--output-format", "text",
            "--model", model,
-           "--max-turns", "3"]
+           "--max-turns", "25"]
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions
 
-    # Scale timeout with prompt size: large prompts need more time
-    prompt_factor = min(90, len(prompt) // 5000 * 45)  # ~45s per 5K chars, capped at 90s
-    timeout = max(90, prompt_factor + 90)  # base 90s + prompt adjustment, min 90s, max 180s
+    # Scale timeout with prompt size: large prompts need more time.
+    # Script passes must read several files and then generate ~1000
+    # words of dialogue, which routinely needs minutes, not seconds.
+    prompt_factor = min(300, len(prompt) // 5000 * 45)  # ~45s per 5K chars
+    timeout = max(300, prompt_factor + 300)  # 300s floor, 600s ceiling
 
     # Create subprocess in isolated process group using start_new_session=True
     # This prevents os.killpg() from killing the parent process
