@@ -184,40 +184,115 @@ regenerates the RSS feed.
 
 ### Cleaning up stale drafts
 
-When draft episodes need to be deleted (rejected, superceded, or test
-iterations), remove them from THREE places atomically:
+**CRITICAL:** The admin UI displays drafts from submission records in
+`podcast-admin/submissions/`, NOT from `manifest.json` alone. Deleting
+from the manifest does NOT delete draft cards from the admin UI.
 
-1. **Database** — Delete from `papers.db`:
-   ```bash
-   sqlite3 papers.db "DELETE FROM podcasts WHERE title LIKE '%search%';"
-   ```
+The correct deletion sequence:
 
-2. **Manifest** — Remove entries from R2 `podcast-admin/manifest.json`:
-   ```bash
-   # Download manifest
-   aws s3api get-object --bucket podcast-admin --key "manifest.json" \
-     /tmp/manifest.json --endpoint-url "$AWS_ENDPOINT_URL"
-   
-   # Filter with Python (remove matching drafts from data['drafts'] list)
-   # Re-upload to R2
-   aws s3 cp /tmp/manifest.json s3://podcast-admin/manifest.json \
-     --endpoint-url "$AWS_ENDPOINT_URL"
-   ```
+**Step 1: Find the exact submission keys**
 
-3. **R2 draft files** — Delete draft audio/metadata from R2:
-   ```bash
-   aws s3 rm s3://ai-post-transformers/drafts/ --recursive \
-     --endpoint-url "$AWS_ENDPOINT_URL" \
-     --include "*search-term*"
-   ```
+Run this audit script to find which submissions need deletion:
 
-4. **Admin UI** — Restart the admin worker to reload manifest:
-   ```bash
-   systemctl --user restart podcast-worker.service
-   ```
+```bash
+source ~/.enhance-bash
+cd /home/mcgrof/devel/ai-post-transformers
 
-**CRITICAL:** Do all four steps. Skipping any leaves stale entries in the
-admin UI or database, causing confusion and duplicate work.
+python - <<'PY'
+import json
+from botocore.exceptions import ClientError
+from r2_upload import get_r2_client
+
+def matching_targets(value, search_terms):
+    blob = json.dumps(value, ensure_ascii=False).lower()
+    return any(term.lower() in blob for term in search_terms)
+
+client = get_r2_client()
+ADMIN_BUCKET = "podcast-admin"
+
+# Define search terms (arxiv_id, title keywords, etc)
+search_terms = ["2607.01299", "huxley", "2604.13048"]  # EDIT THIS
+
+submissions = client.get_paginator("list_objects_v2").paginate(
+    Bucket=ADMIN_BUCKET, Prefix="submissions/"
+)
+
+for page in submissions:
+    for obj in page.get("Contents", []):
+        key = obj["Key"]
+        response = client.get_object(Bucket=ADMIN_BUCKET, Key=key)
+        submission = json.loads(response["Body"].read())
+
+        if matching_targets(submission, search_terms):
+            print(f"Key: {key}")
+            print(f"  Status: {submission.get('status')}")
+            print(f"  Draft Stem: {submission.get('draft_stem')}")
+            print()
+PY
+```
+
+**Step 2: Delete from both R2 AND queue.db (critical)**
+
+```bash
+source ~/.enhance-bash
+
+# Stop worker to prevent re-sync during cleanup
+systemctl --user stop podcast-worker.timer
+systemctl --user stop podcast-worker.service
+sleep 2
+
+# Backup queue.db
+QUEUE_DB="${QUEUE_DB:-$HOME/.local/state/ai-post-transformers/queue.db}"
+cp -a "$QUEUE_DB" "$QUEUE_DB.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+
+# Delete from R2 (use EXACT keys from Step 1)
+python - <<'PY'
+from r2_upload import get_r2_client
+
+client = get_r2_client()
+keys_to_delete = [
+    "submissions/2026-07-16T03-08-52-078Z.json",  # EDIT: use exact keys
+    "submissions/2026-07-16T16-47-29-160Z.json",
+]
+
+for key in keys_to_delete:
+    client.delete_object(Bucket="podcast-admin", Key=key)
+    print(f"Deleted: {key}")
+PY
+
+# Delete from queue.db (use EXACT keys)
+sqlite3 "$QUEUE_DB" << 'SQL'
+DELETE FROM submissions WHERE key = 'submissions/2026-07-16T03-08-52-078Z.json';
+DELETE FROM submissions WHERE key = 'submissions/2026-07-16T16-47-29-160Z.json';
+SQL
+
+# Restart worker
+systemctl --user start podcast-worker.timer
+systemctl --user start podcast-worker.service
+```
+
+**Step 3: Verify deletion**
+
+```bash
+# Check R2 (should return "404 Not Found")
+aws s3api head-object --bucket podcast-admin \
+  --key "submissions/2026-07-16T03-08-52-078Z.json" \
+  --endpoint-url "$AWS_ENDPOINT_URL" 2>&1 | grep 404
+```
+
+**Step 4: Refresh admin UI**
+
+The stale draft cards will disappear once the page reloads.
+
+**WHY THIS MATTERS (the trap):**
+
+- Deleting from `manifest.json` alone leaves submission records intact
+- The Worker enumerates `podcast-admin/submissions/` and creates fallback
+  cards even when no manifest entry exists
+- Submission records survive in both R2 and `queue.db`; deleting only
+  one source causes re-sync to recreate the stale card
+- This is why naive deletion appears to work but cards reappear after
+  worker restart
 
 ### Directory layout
 
