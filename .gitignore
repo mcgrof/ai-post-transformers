@@ -23,3 +23,11 @@ legacy_manifest.json
 .cache/
 papers.db-shm
 papers.db-wal
+
+# Session debugging artifacts (do not commit).
+ADMIN_SYNC_STATUS.md
+EPISODE_REGEN_ISSUE.md
+STALE_DRAFTS_FOR_REGENERATION.md
+STALE_SUBMISSIONS_FIX.md
+vera_episode_generation_diagnostic_*.md
+dull.md
