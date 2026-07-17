@@ -650,6 +650,18 @@ def generate_podcast(config, arxiv_id=None):
         image_file=image_file,
     )
 
+    # Auto-measure authenticity (Phase 4)
+    if podcast_id:
+        try:
+            from phase4_active_optimization import measure_episode
+            measurement = measure_episode(podcast_id)
+            score = measurement.get("avg_score", 0)
+            print(f"[Optimization] Episode {podcast_id} measured: avg={score:.1f}", file=sys.stderr)
+        except ImportError:
+            pass  # Phase 4 not available
+        except Exception as e:
+            print(f"[Optimization] Measurement failed (non-blocking): {e}", file=sys.stderr)
+
     # Track opening reason for phrase rotation
     try:
         track_opening_reason(conn, podcast_id, opening_reason_used, primary_host)
@@ -984,6 +996,18 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
         description=description,
         image_file=image_file,
     )
+
+    # Auto-measure authenticity (Phase 4)
+    if podcast_id:
+        try:
+            from phase4_active_optimization import measure_episode
+            measurement = measure_episode(podcast_id)
+            score = measurement.get("avg_score", 0)
+            print(f"[Optimization] Episode {podcast_id} measured: avg={score:.1f}", file=sys.stderr)
+        except ImportError:
+            pass  # Phase 4 not available
+        except Exception as e:
+            print(f"[Optimization] Measurement failed (non-blocking): {e}", file=sys.stderr)
 
     # Track opening reason for phrase rotation
     try:
