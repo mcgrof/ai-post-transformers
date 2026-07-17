@@ -116,15 +116,15 @@ podcast:
   intro: >-
     Alrighty! Thanks for tuning in! Hello AI world! I am your host,
     Hal Turing, and my co-host is Dr. Ada Shannon.
+  # claude-cli = use Claude CLI (flat-rate subscription).
   # codex = use Codex CLI (flat-rate subscription, NO per-token charges).
   # openai = use OpenAI Python SDK directly (charges OPENAI_API_KEY per token!).
-  # codex = use codex exec CLI (Codex subscription, flat-rate, no per-token charges).
-  # claude-cli, anthropic = Claude CLI (subscription) or Anthropic API.
+  # anthropic = Anthropic Python SDK (requires ANTHROPIC_API_KEY).
   # WARNING: do NOT set this to "openai" unless you intend to spend
   # API credits — gpt-5.4 reasoning calls can cost $15-30 per episode.
-  llm_backend: anthropic
-  llm_model: claude-opus-4-20250514
-  analysis_model: opus
+  llm_backend: claude-cli
+  llm_model: sonnet
+  analysis_model: sonnet
   hosts:
     a:
       name: Hal Turing
