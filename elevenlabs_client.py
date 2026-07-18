@@ -418,8 +418,14 @@ def _infer_source_metadata(text):
     """
     source_meta = {}
 
-    # Check for transformer-circuits.pub
-    if "transformer-circuits.pub" in text.lower() or "circuits.pub" in text.lower():
+    # Check for transformer-circuits.pub. Extracted HTML pages usually
+    # carry the site header and byline rather than their own URL, so
+    # match those content markers too.
+    tl = text.lower()
+    header = tl[:2000]
+    if ("transformer-circuits.pub" in tl or "circuits.pub" in tl
+            or "anthropic interpretability team" in tl
+            or ("transformer circuits" in header and "anthropic" in tl)):
         source_meta = {
             "source_type": "Anthropic Interpretability Research",
             "affiliation": "Anthropic",
