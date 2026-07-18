@@ -410,7 +410,28 @@ def complete_job(job: dict) -> dict:
 
 
 def fail_job(job: dict, *, step: str, error: str) -> dict:
-    return fail_step(job, step, error)
+    """Error-path entry point: mark the job failed.
+
+    Runner exception handlers call this with their best guess of the
+    current step, which may not match the strict state machine — e.g.
+    a crash that lands after one step completed but before the next
+    started leaves no step in 'running'. The strict fail_step refusal
+    then propagated out of the publish phase every cycle, wedging the
+    whole queue behind one poisoned job (observed Jul 15-18: a stuck
+    claimed job blocked six approved jobs for three days). Force the
+    failed state when the strict transition refuses.
+    """
+    try:
+        return fail_step(job, step, error)
+    except ValueError:
+        job["state"] = "publish_failed"
+        job["error"] = {"step": step, "message": error,
+                        "timestamp": iso_now()}
+        job["lease_expires_at"] = None
+        job["last_heartbeat_at"] = None
+        _append_history(job, "step_failed", step=step, error=error,
+                        forced=True)
+        return job
 
 
 def claim_next_available(
