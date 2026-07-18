@@ -533,7 +533,7 @@ def _parse_generation_result(result):
     """Extract success/failure and draft stem from a completed process."""
     if result.returncode != 0:
         err_lines = (result.stderr or "").strip().splitlines()
-        err_msg = "\n".join(err_lines[-25:]) if err_lines else "Unknown error"
+        err_msg = "\n".join(err_lines[-60:]) if err_lines else "Unknown error"
         return False, err_msg
 
     draft_stem = None
