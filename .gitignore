@@ -8,7 +8,10 @@ papers.db
 queue/
 queue.yaml
 output/
-podcasts/
+# Generated feed/queue output — but queue2.html is a source template
+# read by generate_queue_html_v2(), so it must stay in the repo.
+podcasts/*
+!podcasts/queue2.html
 drafts/
 public/
 inputs/
