@@ -845,7 +845,7 @@ def _process_submission_store(sub, admin_id, *, store):
     else:
         store.update_submission(key, {
             "status": "generation_failed",
-            "error": result[:500] if result else "Unknown error",
+            "error": result[-3000:] if result else "Unknown error",
         })
         print(f"[gen-worker] Generation failed for {key}: {result[:200]}")
         return False
@@ -919,7 +919,7 @@ def process_submission(sub, admin_id, *, bucket=None, client=None,
     else:
         _update_submission(bucket, client, key, {
             "status": "generation_failed",
-            "error": result[:500] if result else "Unknown error",
+            "error": result[-3000:] if result else "Unknown error",
         })
         print(f"[gen-worker] Generation failed for {key}: {result[:200]}")
         return False
