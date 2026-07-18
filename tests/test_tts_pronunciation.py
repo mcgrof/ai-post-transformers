@@ -33,8 +33,11 @@ def test_llm_acronyms_get_spaced_out():
 
 
 def test_gpu_tpu_hbm_get_spaced_out():
-    assert "G P U" in _pronounce_for_tts("the GPU was busy")
-    assert "T P U" in _pronounce_for_tts("Google's TPU pod")
+    # GPU/TPU end in phonetic "you"/"yous": a literal "G P Us" gets
+    # voiced as "gee pee us" by some TTS engines.
+    assert "G P you" in _pronounce_for_tts("the GPU was busy")
+    assert "G P yous" in _pronounce_for_tts("many GPUs at once")
+    assert "T P you" in _pronounce_for_tts("Google's TPU pod")
     assert "H B M" in _pronounce_for_tts("HBM bandwidth")
 
 
