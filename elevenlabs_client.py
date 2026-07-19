@@ -694,7 +694,7 @@ Paper content (read from file):
     paper_context_dir = _Path.cwd() / ".claude" / "paper-context"
     paper_context_dir.mkdir(parents=True, exist_ok=True)
     paper_file = str(paper_context_dir / f"pass2-{uuid.uuid4().hex[:8]}.txt")
-    with open(paper_file, 'w') as f:
+    with open(paper_file, 'w', errors="replace") as f:
         f.write(text)
 
     prompt = f"""You are a research analyst preparing a podcast about an AI/ML paper or report.
@@ -1720,7 +1720,7 @@ ANTI-REPETITION RULES (STRICT — VIOLATION = FAILURE):
     paper_context_dir = _Path.cwd() / ".claude" / "paper-context"
     paper_context_dir.mkdir(parents=True, exist_ok=True)
     paper_file = str(paper_context_dir / f"{uuid.uuid4().hex[:8]}.txt")
-    with open(paper_file, 'w') as f:
+    with open(paper_file, 'w', errors="replace") as f:
         f.write(text)
 
     p1 = f"""Generate PART 1 of {num_parts} of a podcast conversation.
@@ -1909,7 +1909,7 @@ Topics discussed in Part 2:
       p3_context_dir = _Path_p3.cwd() / ".claude" / "paper-context"
       p3_context_dir.mkdir(parents=True, exist_ok=True)
       p3_paper_file = str(p3_context_dir / f"part3-{_uuid_p3.uuid4().hex[:8]}.txt")
-      with open(p3_paper_file, 'w') as f:
+      with open(p3_paper_file, 'w', errors="replace") as f:
           f.write(text)
 
       p3 = f"""Generate PART 3 of {num_parts} of a podcast conversation.{' This is the FINAL part.' if num_parts == 3 else ''} Continues from Part 2.

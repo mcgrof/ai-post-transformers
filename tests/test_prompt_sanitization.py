@@ -33,3 +33,16 @@ def test_idempotent():
     dirty = "x \ud800 y"
     once = _sanitize_prompt(dirty)
     assert _sanitize_prompt(once) == once
+
+
+def test_pdf_extraction_sanitizes_at_source():
+    # The May 2026 failure resurfaced one frame earlier once llm_call
+    # was guarded: staging the dirty paper text to a file crashed the
+    # same way. The canonical fix is sanitizing extraction output.
+    from pdf_utils import sanitize_text
+
+    dirty = "loss curve \ud83d\x00 anomaly"
+    clean = sanitize_text(dirty)
+    clean.encode("utf-8")
+    assert "loss curve" in clean and "anomaly" in clean
+    assert sanitize_text("Schrödinger 中文 🚀") == "Schrödinger 中文 🚀"

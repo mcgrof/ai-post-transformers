@@ -112,6 +112,18 @@ def download_pdf(url, timeout=60):
     return path
 
 
+def sanitize_text(text):
+    """Drop lone surrogate codepoints from extracted text.
+
+    pypdf can emit unpaired surrogates from malformed embedded fonts.
+    Such strings cannot be UTF-8 encoded, so any downstream file
+    write or subprocess pipe raises UnicodeEncodeError ("surrogates
+    not allowed"). Sanitize at the source so every consumer gets
+    valid text.
+    """
+    return text.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def extract_text(pdf_path):
     """Extract text from a PDF file using pypdf, with OCR fallback.
 
@@ -134,7 +146,7 @@ def extract_text(pdf_path):
         if text:
             pages_text.append(text)
 
-    full_text = "\n\n".join(pages_text)
+    full_text = sanitize_text("\n\n".join(pages_text))
     if full_text.strip():
         print(
             f"[PDF] Extracted {len(full_text)} chars from "
