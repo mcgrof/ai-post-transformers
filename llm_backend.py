@@ -78,6 +78,16 @@ def get_llm_backend(config):
     raise ValueError(f"Unknown llm_backend: {backend_type!r}")
 
 
+def _sanitize_prompt(prompt):
+    """Drop lone surrogate codepoints that break UTF-8 encoding.
+
+    PDF text extraction can emit unpaired surrogates; passing them to
+    subprocess stdin or an HTTP client raises UnicodeEncodeError
+    ("surrogates not allowed") and kills the whole generation.
+    """
+    return prompt.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def llm_call(backend, model, prompt, temperature=0.4,
              max_tokens=16000, json_mode=True):
     """Unified LLM call. Returns parsed JSON dict/list or plain text.
@@ -94,6 +104,7 @@ def llm_call(backend, model, prompt, temperature=0.4,
         json_mode: If True, parse response as JSON with repair logic.
                    If False, return raw text string.
     """
+    prompt = _sanitize_prompt(prompt)
     btype = backend["type"]
 
     if btype == "openai":
