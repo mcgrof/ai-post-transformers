@@ -1125,6 +1125,63 @@ Only output JSON."""
 # Pass 3: Script Generation
 # ---------------------------------------------------------------------------
 
+def _normalize_script_response(raw):
+    """Coerce an LLM response into a list of script segments.
+
+    Models occasionally return a single segment object instead of an
+    array, or wrap the array under a key other than "script".
+    Discarding those responses made whole parts vanish, which produced
+    "generation failed: None" and missing-conclusion errors.
+    """
+    def _is_segment(item):
+        return (isinstance(item, dict)
+                and isinstance(item.get("speaker"), str)
+                and isinstance(item.get("text"), str)
+                and item["text"].strip())
+
+    if isinstance(raw, list):
+        return [s for s in raw if _is_segment(s)]
+    if isinstance(raw, dict):
+        if _is_segment(raw):
+            return [raw]
+        for value in raw.values():
+            if isinstance(value, list):
+                segs = [s for s in value if _is_segment(s)]
+                if segs:
+                    return segs
+    return []
+
+
+def _generate_script_part(backend, model, prompt, part_no, num_parts,
+                          attempts=2):
+    """Generate one script part, normalizing the response and retrying.
+
+    Returns (segments, last_error); segments is [] when every attempt
+    produced nothing usable. The caller decides whether an empty part
+    is fatal (intro and final part) or skippable (middle parts).
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            raw = llm_call(backend, model, prompt, temperature=0.7,
+                           max_tokens=16000)
+            print(f"[DEBUG] Part {part_no} LLM raw response type: "
+                  f"{type(raw)}", file=sys.stderr)
+            print(f"[DEBUG] Part {part_no} LLM raw response: "
+                  f"{str(raw)[:500]}", file=sys.stderr)
+            segments = _normalize_script_response(raw)
+            if segments:
+                return segments, None
+            last_error = f"unusable response shape: {str(raw)[:300]}"
+        except Exception as e:
+            last_error = e
+        print(f"[Podcast] WARNING: Part {part_no}/{num_parts} attempt "
+              f"{attempt} returned no segments ({last_error}); "
+              f"{'retrying' if attempt < attempts else 'giving up'}",
+              file=sys.stderr)
+    return [], last_error
+
+
 def generate_podcast_script(text, config, covered_topics=None, opening_reason=None, primary_host="Ada"):
     """Multi-pass podcast script generation with topic awareness and critical review.
 
@@ -1710,23 +1767,8 @@ Source paper (read from file):
     # do that job, so Part 1 gets one retry and then fails the whole
     # generation loudly rather than shipping a degraded episode.
     part_seg_counts = []
-    p1_script = []
-    p1_error = None
-    for attempt in (1, 2):
-        try:
-            raw = llm_call(backend, model, p1, temperature=0.7, max_tokens=16000)
-            print(f"[DEBUG] Part 1 LLM raw response type: {type(raw)}", file=sys.stderr)
-            print(f"[DEBUG] Part 1 LLM raw response: {str(raw)[:500]}", file=sys.stderr)
-            p1_script = raw if isinstance(raw, list) else raw.get("script", [])
-        except Exception as e:
-            p1_error = e
-            p1_script = []
-        if p1_script:
-            break
-        print(f"[Podcast] WARNING: Part 1/{num_parts} attempt {attempt} "
-              f"returned no segments ({p1_error}); "
-              f"{'retrying' if attempt == 1 else 'giving up'}",
-              file=sys.stderr)
+    p1_script, p1_error = _generate_script_part(
+        backend, model, p1, 1, num_parts)
     if not p1_script:
         raise RuntimeError(
             f"Part 1 (intro) generation failed after 2 attempts: {p1_error}")
@@ -1835,15 +1877,8 @@ Only output the JSON array.
 Source content (read from file):
 {p2_paper_file}"""
 
-    try:
-        p2_script = llm_call(backend, model, p2, temperature=0.7, max_tokens=16000)
-        print(f"[DEBUG] Part 2 LLM raw response type: {type(p2_script)}", file=sys.stderr)
-        print(f"[DEBUG] Part 2 LLM raw response: {str(p2_script)[:500]}", file=sys.stderr)
-        if not isinstance(p2_script, list):
-            p2_script = p2_script.get("script", [])
-    except Exception as e:
-        print(f"[Podcast] WARNING: Part {2}/{num_parts} generation failed: {e}; skipping", file=sys.stderr)
-        p2_script = []
+    p2_script, _p2_error = _generate_script_part(
+        backend, model, p2, 2, num_parts)
     p2_words = sum(len(s["text"].split()) for s in p2_script)
     print(f"[Podcast]     {len(p2_script)} segments, {p2_words} words", file=sys.stderr)
     all_scripts.extend(p2_script)
@@ -1919,13 +1954,8 @@ Only output the JSON array.
 Source content (read from file):
 {p3_paper_file}"""
 
-      try:
-          p3_script = llm_call(backend, model, p3, temperature=0.7, max_tokens=16000)
-          if not isinstance(p3_script, list):
-              p3_script = p3_script.get("script", [])
-      except Exception as e:
-          print(f"[Podcast] WARNING: Part {3}/{num_parts} generation failed: {e}; skipping", file=sys.stderr)
-          p3_script = []
+      p3_script, _p3_error = _generate_script_part(
+          backend, model, p3, 3, num_parts)
       p3_words = sum(len(s["text"].split()) for s in p3_script)
       print(f"[Podcast]     {len(p3_script)} segments, {p3_words} words", file=sys.stderr)
       all_scripts.extend(p3_script)
@@ -1979,9 +2009,8 @@ Only output the JSON array.
 Source content:
 {text[:10000]}"""
 
-      p4_script = llm_call(backend, model, p4, temperature=0.7, max_tokens=16000)
-      if not isinstance(p4_script, list):
-          p4_script = p4_script.get("script", [])
+      p4_script, _p4_error = _generate_script_part(
+          backend, model, p4, 4, num_parts)
       p4_words = sum(len(s["text"].split()) for s in p4_script)
       print(f"[Podcast]     {len(p4_script)} segments, {p4_words} words", file=sys.stderr)
       all_scripts.extend(p4_script)
