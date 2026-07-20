@@ -39,6 +39,7 @@ from scholar_urls import (  # noqa: E402
     repair_description,
     repair_inline_urls,
     validate_description_urls,
+    extract_source_urls,
 )
 
 
@@ -286,6 +287,79 @@ def validate_all(db_path, drafts_dir, anchor):
     return bad_total
 
 
+def _gather_source_urls(db_path, drafts_dir):
+    """Collect every real source URL from DB rows and draft sidecars."""
+    urls = set()
+    conn = sqlite3.connect(db_path)
+    for (desc,) in conn.execute(
+            "SELECT description FROM podcasts WHERE description IS NOT NULL"):
+        urls |= extract_source_urls(desc)
+    conn.close()
+    for f in sorted(glob.glob(os.path.join(drafts_dir, "**", "*.json"),
+                              recursive=True)):
+        try:
+            urls |= extract_source_urls(
+                json.load(open(f, encoding="utf-8")).get("description", ""))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return urls
+
+
+# Codes that mean the resource EXISTS but blocks automated probes
+# (bot-walls, rate limits, method/range restrictions). Not dead links.
+_RESTRICTED_CODES = {401, 403, 405, 406, 416, 429}
+
+
+def _probe_url(url, timeout=15):
+    """Return (url, ok, detail). Tries HEAD, falls back to GET."""
+    import urllib.request
+    import urllib.error
+    ua = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, method=method,
+                                         headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return url, True, resp.status
+        except urllib.error.HTTPError as e:
+            if e.code in _RESTRICTED_CODES:
+                return url, True, f"{e.code} (restricted, exists)"
+            if method == "HEAD":  # retry once with GET
+                continue
+            return url, False, f"HTTP {e.code}"
+        except Exception as e:  # noqa: BLE001 - network is best-effort
+            if method == "HEAD":
+                continue
+            return url, False, type(e).__name__
+    return url, False, "unreachable"
+
+
+def check_links(db_path, drafts_dir, workers=12):
+    """HEAD/GET every real source URL and report the dead ones.
+
+    Warning-level audit — Scholar search links always resolve, so this
+    only probes real links (arXiv/DOI/publisher). Returns the count of
+    dead URLs. Does not modify anything.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    urls = sorted(_gather_source_urls(db_path, drafts_dir))
+    print(f"[links] probing {len(urls)} unique source URL(s)...")
+    dead = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for url, ok, detail in pool.map(_probe_url, urls):
+            if not ok:
+                dead.append((url, detail))
+    if not dead:
+        print(f"[links] OK: all {len(urls)} source URLs reachable")
+    else:
+        print(f"[links] {len(dead)} unreachable of {len(urls)}:")
+        for url, detail in sorted(dead):
+            print(f"    [{detail}] {url}")
+    return len(dead)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -304,6 +378,9 @@ def main():
                     help="repair legacy anchor_feed.xml (inline, protected)")
     ap.add_argument("--validate", action="store_true",
                     help="audit only: report malformed URLs, exit 1 if any")
+    ap.add_argument("--check-links", action="store_true",
+                    help="probe real source URLs for reachability (warns "
+                         "on dead links; does not fail the encoding gate)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0,
                     help="cap number of records changed (for verification)")
@@ -311,13 +388,21 @@ def main():
                     help="show before/after samples")
     args = ap.parse_args()
 
-    if args.validate:
-        bad = validate_all(
-            args.db_path,
-            args.drafts if args.drafts is not None else "drafts",
-            args.anchor,
-        )
-        sys.exit(1 if bad else 0)
+    if args.validate or args.check_links:
+        rc = 0
+        if args.validate:
+            bad = validate_all(
+                args.db_path,
+                args.drafts if args.drafts is not None else "drafts",
+                args.anchor,
+            )
+            rc = 1 if bad else rc
+        if args.check_links:
+            # Reachability is warning-level: report, but do not fail the
+            # gate on transient network / rate-limit blips.
+            check_links(args.db_path,
+                        args.drafts if args.drafts is not None else "drafts")
+        sys.exit(rc)
 
     if not any([args.db, args.drafts is not None, args.manifest, args.anchor]):
         ap.error("choose at least one target: --db / --drafts / --manifest / --anchor")

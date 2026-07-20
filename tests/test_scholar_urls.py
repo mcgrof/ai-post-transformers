@@ -17,6 +17,7 @@ from scholar_urls import (
     repair_description,
     repair_inline_urls,
     validate_description_urls,
+    extract_source_urls,
 )
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -188,6 +189,19 @@ def test_validator_catches_then_repair_clears():
     assert validate_description_urls(desc)          # broken before
     fixed, _ = repair_description(desc)
     assert validate_description_urls(fixed) == []   # clean after
+
+
+def test_extract_source_urls_excludes_scholar():
+    text = ("  1. A Paper — X, 2024\n"
+            "     https://arxiv.org/abs/2506.19143\n"
+            "  2. Another — Y, 2023\n"
+            "     https://scholar.google.com/scholar?q=Another\n"
+            "  3. Doi one — Z, 2022\n"
+            "     https://doi.org/10.1000/xyz.")
+    urls = extract_source_urls(text)
+    assert "https://arxiv.org/abs/2506.19143" in urls
+    assert "https://doi.org/10.1000/xyz" in urls   # trailing period stripped
+    assert not any("scholar.google" in u for u in urls)
 
 
 def test_no_naive_scholar_builder_reintroduced():

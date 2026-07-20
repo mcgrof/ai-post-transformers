@@ -137,6 +137,27 @@ _ANY_SCHOLAR_URL = re.compile(
     r'https://scholar\.google\.com/scholar\?q=(?P<q>[^\s<"]+)')
 
 
+_ANY_URL_RE = re.compile(r'https?://[^\s<>"\')\]]+')
+
+
+def extract_source_urls(text):
+    """Return the set of real (non-Scholar) http(s) URLs in a description.
+
+    Scholar search links are excluded — they always resolve to a search
+    page, so a reachability check only makes sense for the real source
+    links (arXiv, DOI, publisher, blog).
+    """
+    urls = set()
+    if not text:
+        return urls
+    for m in _ANY_URL_RE.finditer(text):
+        u = m.group(0).rstrip('.,);]')
+        if "scholar.google.com" in u:
+            continue
+        urls.add(u)
+    return urls
+
+
 def validate_description_urls(text):
     """Return the list of malformed Scholar URLs in a description.
 
