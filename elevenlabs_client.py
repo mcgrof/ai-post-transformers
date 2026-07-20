@@ -1182,6 +1182,78 @@ def _generate_script_part(backend, model, prompt, part_no, num_parts,
     return [], last_error
 
 
+# A properly-ended episode closes on a complete statement AND signs off.
+# The observed failure isn't a mid-word cutoff — the final part gets cut
+# at a segment boundary, so the episode ends on the other host's line
+# (a stray question, or a mid-conversation point) with the wrap-up host
+# never delivering the farewell. Every healthy episode ends with a
+# "thanks for listening / catch you next time / take care" sign-off, so
+# require one; its absence is the "hangs on a thought and dies" failure.
+_TERMINAL_PUNCT = tuple('.!"”’\')…')
+_FAREWELL_MARKERS = ("catch you next time", "take care", "until next time",
+                     "see you next time", "that's it for this",
+                     "thanks for joining")
+
+
+def _has_farewell(script):
+    """True if the final few segments contain a real sign-off."""
+    tail = " ".join((s.get("text") or "") for s in script[-3:]).lower()
+    if "listening" in tail and "thank" in tail:
+        return True
+    return any(m in tail for m in _FAREWELL_MARKERS)
+
+
+def _ends_properly(script):
+    """True if the script closes on a complete statement and signs off.
+
+    Rejects the two real failure modes: ending on an unanswered question
+    or a mid-conversation line (no farewell), and ending mid-word (no
+    terminal punctuation from a truncated response).
+    """
+    last = next(((s.get("text") or "").rstrip() for s in reversed(script)
+                 if (s.get("text") or "").strip()), "")
+    if not last or last.endswith("?") or not last.endswith(_TERMINAL_PUNCT):
+        return False
+    return _has_farewell(script)
+
+
+def _generate_closing(backend, model, script, host_block, common_style):
+    """Generate a short Hal-led closing so the episode ends cleanly.
+
+    Used when the assembled script was truncated or ends on an open
+    question. Returns a list of 2-4 segments, or [] on failure.
+    """
+    tail = "\n".join(f'{s["speaker"]}: {s["text"]}' for s in script[-6:])
+    prompt = f"""The following podcast conversation was cut off before it
+concluded. Write ONLY a short CLOSING (2 to 4 lines) that finishes it
+naturally from where it stops.
+
+{host_block}
+
+Last lines so far (each line is prefixed with its speaker label):
+{tail}
+
+CLOSING REQUIREMENTS:
+- The host who normally closes the show (Hal) delivers the wrap-up: one
+  or two sentences with the single key takeaway, then a simple, warm
+  farewell thanking the audience and the co-host. Use the SAME speaker
+  label ("A" or "B") that Hal already has in the lines above — do not
+  swap the voices.
+- End with a clear sign-off (for example "thanks for listening" and
+  "until next time").
+- Resolve — do NOT ask a new question, do NOT tease a future episode,
+  do NOT introduce a new topic. End on a complete statement.
+- Continue the exact conversation in progress; no re-introductions.
+
+{common_style}
+
+Output as a JSON array: [{{"speaker": "A", "text": "..."}}, ...]
+Only output the JSON array."""
+    segments, _err = _generate_script_part(backend, model, prompt,
+                                           "closing", 1, attempts=2)
+    return segments or []
+
+
 def generate_podcast_script(text, config, covered_topics=None, opening_reason=None, primary_host="Ada"):
     """Multi-pass podcast script generation with topic awareness and critical review.
 
@@ -2046,16 +2118,45 @@ FULL TRANSCRIPT:
     try:
         edited_script = llm_call(backend, model, edit_prompt, temperature=0.3, max_tokens=16000)
         if isinstance(edited_script, list) and len(edited_script) > 5:
-            removed = len(all_scripts) - len(edited_script)
-            edited_words = sum(len(s["text"].split()) for s in edited_script)
-            print(f"[Podcast]   Editorial: {len(edited_script)} segments ({removed:+d}), {edited_words} words", file=sys.stderr)
-            all_scripts = edited_script
+            # The editorial rewrite is a single big call; if it was
+            # truncated (token cutoff / capacity error mid-stream) it can
+            # come back short or ending mid-word and silently replace the
+            # good multi-part script. Reject a truncated/over-pruned edit.
+            too_short = len(edited_script) < 0.7 * len(all_scripts)
+            last_txt = (edited_script[-1].get("text") or "").rstrip()
+            truncated = not last_txt.endswith(_TERMINAL_PUNCT)
+            if too_short or truncated:
+                print(f"[Podcast]   Editorial result rejected "
+                      f"({len(edited_script)} vs {len(all_scripts)} segs, "
+                      f"ends_clean={not truncated}) — keeping original",
+                      file=sys.stderr)
+            else:
+                removed = len(all_scripts) - len(edited_script)
+                edited_words = sum(len(s["text"].split()) for s in edited_script)
+                print(f"[Podcast]   Editorial: {len(edited_script)} segments ({removed:+d}), {edited_words} words", file=sys.stderr)
+                all_scripts = edited_script
         else:
             print("[Podcast]   Editorial pass returned invalid result, using original", file=sys.stderr)
     except Exception as e:
         print(f"[Podcast]   Editorial pass failed ({e}), using original script", file=sys.stderr)
 
     script = all_scripts
+
+    # CONCLUSION REPAIR: a truncated final part (capacity/rate-limit error
+    # or token cutoff) leaves the episode ending mid-sentence or on an
+    # unanswered question — the "dies mid-thought" failure. Generate a
+    # real Hal-led closing rather than shipping a broken ending.
+    if script and not _ends_properly(script):
+        print("[Podcast]   Episode does not end on a conclusion — "
+              "generating a closing", file=sys.stderr)
+        closing = _generate_closing(backend, model, script,
+                                    host_block, common_style)
+        if closing:
+            script = script + closing
+            all_scripts = script
+            print(f"[Podcast]   Appended {len(closing)}-segment closing",
+                  file=sys.stderr)
+
     total_words = sum(len(s["text"].split()) for s in script)
     print(f"[Podcast]   Total: {len(script)} segments, {total_words} words (~{total_words/150:.0f} min)", file=sys.stderr)
 
@@ -2100,6 +2201,16 @@ FULL TRANSCRIPT:
         raise RuntimeError(
             f"Final part {len(part_seg_counts)}/{num_parts} produced no "
             "segments — episode would end without a conclusion")
+    # A non-empty final part can still be truncated mid-sentence. After
+    # closing repair the episode MUST end on a complete conclusion; if
+    # it still doesn't, fail loudly rather than ship a mid-thought death.
+    if script and not _ends_properly(script):
+        last_txt = next((s.get("text", "") for s in reversed(script)
+                         if (s.get("text") or "").strip()), "")
+        raise RuntimeError(
+            "episode does not end on a proper conclusion (final part "
+            "truncated mid-thought and closing repair failed) — refusing "
+            f"to ship; last line: {last_txt[-120:]!r}")
     total_words = sum(len(s.get("text", "").split()) for s in script)
     min_words = podcast_config.get("min_script_words", 600)
     if total_words < min_words or len(script) < 6:

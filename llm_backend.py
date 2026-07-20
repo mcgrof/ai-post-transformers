@@ -24,6 +24,50 @@ import os
 import re
 import subprocess
 import sys
+import time
+
+
+# Backend calls fail transiently all the time: the Claude CLI reports
+# "model at capacity" or exits rc=1 with no output, Codex hits 429/403
+# websocket errors, APIs return 500/503/overloaded. A single blip used
+# to hard-fail a whole generation (killing an early mandatory pass) or
+# truncate an episode mid-part. Retry these with backoff instead.
+_TRANSIENT_PATTERNS = (
+    "at capacity", "overloaded", "rate limit", "429", "too many requests",
+    "500", "502", "503", "504", "connection", "reset by peer",
+    "websocket", "reconnect", "temporarily", "try again",
+    "timeout", "timed out",  # slow/overloaded call — retried at most once
+    "rc=1",  # Claude CLI generic non-zero exit — usually environmental
+)
+
+
+def _is_transient_error(exc):
+    msg = str(exc).lower()
+    return any(p in msg for p in _TRANSIENT_PATTERNS)
+
+
+def _is_timeout_error(exc):
+    msg = str(exc).lower()
+    return "timeout" in msg or "timed out" in msg
+
+
+def _dispatch_backend(backend, model, prompt, temperature, max_tokens):
+    """Route a prompt to the configured backend and return raw output."""
+    btype = backend["type"]
+    if btype == "openai":
+        effective = max_tokens
+        if _is_reasoning_model(model) and effective < 32000:
+            effective = 32000
+        return _call_openai(backend["client"], model, prompt,
+                            temperature, effective)
+    if btype == "anthropic":
+        return _call_anthropic(backend["client"], model, prompt,
+                               temperature, max_tokens)
+    if btype == "claude-cli":
+        return _call_claude_cli(model, prompt, max_tokens)
+    if btype == "codex":
+        return _call_codex(model, prompt, max_tokens)
+    raise ValueError(f"Unknown backend type: {btype!r}")
 
 
 def get_llm_backend(config):
@@ -105,26 +149,29 @@ def llm_call(backend, model, prompt, temperature=0.4,
                    If False, return raw text string.
     """
     prompt = _sanitize_prompt(prompt)
-    btype = backend["type"]
 
-    if btype == "openai":
-        # Reasoning models budget reasoning + output against the same
-        # ceiling. Start with at least 32K headroom; auto-escalation
-        # in _call_openai handles further growth on length-truncation.
-        effective = max_tokens
-        if _is_reasoning_model(model) and effective < 32000:
-            effective = 32000
-        raw = _call_openai(backend["client"], model, prompt,
-                           temperature, effective)
-    elif btype == "anthropic":
-        raw = _call_anthropic(backend["client"], model, prompt,
-                              temperature, max_tokens)
-    elif btype == "claude-cli":
-        raw = _call_claude_cli(model, prompt, max_tokens)
-    elif btype == "codex":
-        raw = _call_codex(model, prompt, max_tokens)
-    else:
-        raise ValueError(f"Unknown backend type: {btype!r}")
+    # Retry transient backend failures (capacity, rate limits, rc=1)
+    # with exponential backoff so a momentary blip does not kill a
+    # mandatory pass or truncate an episode. Timeouts are expensive to
+    # re-run, so they get a single retry at most.
+    backoffs = [8, 20, 45]
+    raw = None
+    for attempt in range(len(backoffs) + 1):
+        try:
+            raw = _dispatch_backend(backend, model, prompt,
+                                    temperature, max_tokens)
+            break
+        except Exception as exc:  # noqa: BLE001 - classify then re-raise
+            last = attempt == len(backoffs)
+            timeout_exhausted = _is_timeout_error(exc) and attempt >= 1
+            if last or timeout_exhausted or not _is_transient_error(exc):
+                raise
+            delay = backoffs[attempt]
+            print(f"[llm] transient backend error "
+                  f"(attempt {attempt + 1}/{len(backoffs) + 1}): "
+                  f"{str(exc)[:160]}; retrying in {delay}s",
+                  file=sys.stderr)
+            time.sleep(delay)
 
     if not json_mode:
         return raw

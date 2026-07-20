@@ -307,3 +307,67 @@ def test_parse_json_retry_empty_output_gives_clear_error(monkeypatch):
 
     msg = str(exc.value)
     assert "All JSON parse attempts failed" in msg or "empty output" in msg
+
+
+# --- transient-error retry (capacity / rate-limit / rc=1) ---------------
+import llm_backend
+
+
+def test_is_transient_error_classification():
+    assert llm_backend._is_transient_error(
+        RuntimeError("Selected model is at capacity"))
+    assert llm_backend._is_transient_error(
+        RuntimeError("Claude CLI error (rc=1, timeout=525s): "))
+    assert llm_backend._is_transient_error(
+        RuntimeError("429 Too Many Requests"))
+    assert llm_backend._is_transient_error(RuntimeError("overloaded_error"))
+    # a genuine content/logic error is NOT transient
+    assert not llm_backend._is_transient_error(
+        ValueError("Unknown backend type: 'frobnicate'"))
+
+
+def test_llm_call_retries_transient_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(backend, model, prompt, temperature, max_tokens):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("Selected model is at capacity")
+        return '[{"speaker": "A", "text": "ok"}]'
+
+    monkeypatch.setattr(llm_backend, "_dispatch_backend", flaky)
+    monkeypatch.setattr(llm_backend.time, "sleep", lambda *_: None)
+
+    out = llm_backend.llm_call({"type": "claude-cli"}, "sonnet", "hi")
+    assert calls["n"] == 3
+    assert out == [{"speaker": "A", "text": "ok"}]
+
+
+def test_llm_call_does_not_retry_non_transient(monkeypatch):
+    calls = {"n": 0}
+
+    def boom(backend, model, prompt, temperature, max_tokens):
+        calls["n"] += 1
+        raise ValueError("bad prompt shape")
+
+    monkeypatch.setattr(llm_backend, "_dispatch_backend", boom)
+    monkeypatch.setattr(llm_backend.time, "sleep", lambda *_: None)
+
+    with pytest.raises(ValueError):
+        llm_backend.llm_call({"type": "claude-cli"}, "sonnet", "hi")
+    assert calls["n"] == 1  # no retries for a non-transient error
+
+
+def test_llm_call_timeout_retries_at_most_once(monkeypatch):
+    calls = {"n": 0}
+
+    def always_timeout(backend, model, prompt, temperature, max_tokens):
+        calls["n"] += 1
+        raise RuntimeError("Claude CLI timeout after 600s (model=sonnet)")
+
+    monkeypatch.setattr(llm_backend, "_dispatch_backend", always_timeout)
+    monkeypatch.setattr(llm_backend.time, "sleep", lambda *_: None)
+
+    with pytest.raises(RuntimeError):
+        llm_backend.llm_call({"type": "claude-cli"}, "sonnet", "hi")
+    assert calls["n"] == 2  # initial + one timeout retry, then give up
