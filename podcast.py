@@ -21,6 +21,7 @@ from image_gen import generate_episode_image
 from local_cover import render_title_cover
 from pdf_utils import download_and_extract
 from rss import generate_feed
+from scholar_urls import scholar_search_url
 from soul_reasons import select_opening_reason, track_opening_reason
 
 
@@ -621,7 +622,7 @@ def generate_podcast(config, arxiv_id=None):
             year_str = s.get('year', '?')
             url_str = s.get('url', '')
             if not url_str:
-                url_str = f"https://scholar.google.com/scholar?q={title_str.replace(' ', '+')}"
+                url_str = scholar_search_url(title_str)
             desc_lines.append(f"  {src_num}. {title_str} — {authors_str}, {year_str}")
             desc_lines.append(f"     {url_str}")
             src_num += 1
@@ -975,7 +976,7 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
             year_str = s.get('year', '?')
             url_str = s.get('url', '')
             if not url_str:
-                url_str = f"https://scholar.google.com/scholar?q={title_str.replace(' ', '+')}"
+                url_str = scholar_search_url(title_str)
             desc_lines.append(f"  {src_num}. {title_str} — {authors_str}, {year_str}")
             desc_lines.append(f"     {url_str}")
             src_num += 1
