@@ -8,13 +8,18 @@ produced wrong searches. These tests pin the correct encoding and the
 faithful, idempotent repair.
 """
 
+import pathlib
+import re
 import urllib.parse
 
 from scholar_urls import (
     scholar_search_url,
     repair_description,
     repair_inline_urls,
+    validate_description_urls,
 )
+
+_REPO = pathlib.Path(__file__).resolve().parent.parent
 
 
 # --- construction -------------------------------------------------------
@@ -159,3 +164,44 @@ def test_inline_repair_is_idempotent():
     once, n1 = repair_inline_urls(text)
     twice, n2 = repair_inline_urls(once)
     assert n2 == 0 and twice == once
+
+
+# --- proactive guard: validator + no-regression ------------------------
+def test_validator_flags_raw_special_chars():
+    for bad_q in ["Medusa:+Simple", "Better+&+Faster", "Conditional+[MASK]",
+                  "PagedAttention+/+vLLM", "Gödel+Machines"]:
+        text = f"  1. X — A, 2024\n     https://scholar.google.com/scholar?q={bad_q}"
+        assert validate_description_urls(text), bad_q
+
+
+def test_validator_passes_canonical_urls():
+    for title in ["Attention Is All You Need", "Medusa: Simple LLM Inference",
+                  "Better & Faster LLMs", "Gödel Machines", "REINFORCE++: Stable"]:
+        text = f"  1. {title} — A, 2024\n     {scholar_search_url(title)}"
+        assert validate_description_urls(text) == []
+
+
+def test_validator_catches_then_repair_clears():
+    title = "EAGLE: Speculative Sampling & [MASK]"
+    bad = "https://scholar.google.com/scholar?q=" + title.replace(" ", "+")
+    desc = _desc((title, bad))
+    assert validate_description_urls(desc)          # broken before
+    fixed, _ = repair_description(desc)
+    assert validate_description_urls(fixed) == []   # clean after
+
+
+def test_no_naive_scholar_builder_reintroduced():
+    # The bug was building the URL with title.replace(" ", "+"). Guard the
+    # whole codebase so it can never come back — Scholar URLs must be built
+    # only via scholar_search_url().
+    naive = re.compile(r"scholar\.google[^\n]*replace\(\s*['\"] ['\"]")
+    offenders = []
+    for py in _REPO.glob("*.py"):
+        if py.name == "scholar_urls.py":
+            continue
+        text = py.read_text(encoding="utf-8", errors="ignore")
+        if naive.search(text) or re.search(
+                r"replace\(\s*['\"] ['\"]\s*,\s*['\"]\+['\"]\)[^\n]*scholar",
+                text):
+            offenders.append(py.name)
+    assert offenders == [], f"naive scholar URL builder found in: {offenders}"

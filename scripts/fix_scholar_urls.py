@@ -35,7 +35,11 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scholar_urls import repair_description, repair_inline_urls  # noqa: E402
+from scholar_urls import (  # noqa: E402
+    repair_description,
+    repair_inline_urls,
+    validate_description_urls,
+)
 
 
 def _stamp():
@@ -238,6 +242,50 @@ def _scholar_diffs(old, new):
     return [(o, n) for o, n in zip(olds, news) if o != n]
 
 
+def validate_all(db_path, drafts_dir, anchor):
+    """Audit every stored description; exit non-zero if any URL is bad.
+
+    A proactive pre-publish gate: run this to prove no malformed Scholar
+    link is about to ship. Returns the total count of malformed URLs.
+    """
+    bad_total = 0
+
+    conn = sqlite3.connect(db_path)
+    for cid, desc in conn.execute(
+            "SELECT id, description FROM podcasts "
+            "WHERE description LIKE '%scholar.google%'"):
+        bad = validate_description_urls(desc)
+        if bad:
+            bad_total += len(bad)
+            print(f"    [db id={cid}] {len(bad)} malformed:")
+            for u in bad[:3]:
+                print(f"        {u}")
+    conn.close()
+
+    for f in sorted(glob.glob(os.path.join(drafts_dir, "**", "*.json"),
+                              recursive=True)):
+        try:
+            desc = json.load(open(f, encoding="utf-8")).get("description", "")
+        except (json.JSONDecodeError, OSError):
+            continue
+        bad = validate_description_urls(desc)
+        if bad:
+            bad_total += len(bad)
+            print(f"    [draft {os.path.basename(f)}] {len(bad)} malformed")
+
+    if anchor and os.path.exists(anchor):
+        bad = validate_description_urls(open(anchor, encoding="utf-8").read())
+        if bad:
+            bad_total += len(bad)
+            print(f"    [anchor] {len(bad)} malformed")
+
+    if bad_total == 0:
+        print("[validate] OK: every Scholar URL is canonically encoded")
+    else:
+        print(f"[validate] FAIL: {bad_total} malformed Scholar URL(s)")
+    return bad_total
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -254,12 +302,22 @@ def main():
                     help="repair a manifest.json")
     ap.add_argument("--anchor", metavar="FILE",
                     help="repair legacy anchor_feed.xml (inline, protected)")
+    ap.add_argument("--validate", action="store_true",
+                    help="audit only: report malformed URLs, exit 1 if any")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0,
                     help="cap number of records changed (for verification)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="show before/after samples")
     args = ap.parse_args()
+
+    if args.validate:
+        bad = validate_all(
+            args.db_path,
+            args.drafts if args.drafts is not None else "drafts",
+            args.anchor,
+        )
+        sys.exit(1 if bad else 0)
 
     if not any([args.db, args.drafts is not None, args.manifest, args.anchor]):
         ap.error("choose at least one target: --db / --drafts / --manifest / --anchor")

@@ -21,7 +21,7 @@ from image_gen import generate_episode_image
 from local_cover import render_title_cover
 from pdf_utils import download_and_extract
 from rss import generate_feed
-from scholar_urls import scholar_search_url
+from scholar_urls import scholar_search_url, repair_description
 from soul_reasons import select_opening_reason, track_opening_reason
 
 
@@ -628,6 +628,12 @@ def generate_podcast(config, arxiv_id=None):
             src_num += 1
 
     description = "\n".join(desc_lines)
+    # Safety net: canonicalize any Scholar link that slipped in raw (e.g.
+    # from an upstream source url) so a malformed URL is never stored.
+    description, _url_fixes = repair_description(description)
+    if _url_fixes:
+        print(f"[Podcast] Canonicalized {_url_fixes} source URL(s) in "
+              f"description", file=sys.stderr)
 
     # Generate episode cover image (uses description for infographic content)
     image_file = _generate_episode_image(
@@ -981,6 +987,12 @@ def generate_podcast_from_urls(urls, config, goal=None, description_guidance=Non
             desc_lines.append(f"     {url_str}")
             src_num += 1
     description = "\n".join(desc_lines)
+    # Safety net: canonicalize any Scholar link that slipped in raw (e.g.
+    # from an upstream source url) so a malformed URL is never stored.
+    description, _url_fixes = repair_description(description)
+    if _url_fixes:
+        print(f"[Podcast] Canonicalized {_url_fixes} source URL(s) in "
+              f"description", file=sys.stderr)
 
     # Generate episode cover image (uses summary for infographic content)
     image_file = _generate_episode_image(

@@ -129,6 +129,33 @@ def repair_description(text):
     return "\n".join(out), n_fixed
 
 
+# Characters that must be percent-encoded inside a Scholar q-value but
+# that the old naive builder left raw. A canonically encoded q-value
+# never contains any of these (spaces are '+', everything else is %XX).
+_RAW_BAD_IN_Q = re.compile(r"""[ :&\[\](){}/?#'"<>]|[^\x00-\x7F]""")
+_ANY_SCHOLAR_URL = re.compile(
+    r'https://scholar\.google\.com/scholar\?q=(?P<q>[^\s<"]+)')
+
+
+def validate_description_urls(text):
+    """Return the list of malformed Scholar URLs in a description.
+
+    A URL is malformed when its q-value still carries a raw character
+    that should have been percent-encoded (a colon, ``&``, bracket,
+    slash, quote, or non-ASCII byte). An empty list means every Scholar
+    link is canonically encoded. Use this as a pre-publish audit so a
+    broken link can never ship again.
+    """
+    bad = []
+    if not text or "scholar.google" not in text:
+        return bad
+    for m in _ANY_SCHOLAR_URL.finditer(text):
+        qval = m.group("q").split("&as_ylo", 1)[0]
+        if _RAW_BAD_IN_Q.search(qval):
+            bad.append(m.group(0))
+    return bad
+
+
 def _inline_title_before(text, pos):
     """Recover the source title for an inline URL ending at ``pos``.
 

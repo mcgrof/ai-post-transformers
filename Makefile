@@ -1,6 +1,6 @@
 PYTHON = .venv/bin/python
 
-.PHONY: queue publish publish-site gen-viz backfill-images test test-publish
+.PHONY: queue publish publish-site gen-viz backfill-images test test-publish validate-urls
 
 queue:
 	$(PYTHON) gen-podcast.py queue
@@ -14,6 +14,12 @@ endif
 
 publish-site:
 	$(PYTHON) gen-podcast.py publish-site
+
+# Pre-publish audit: fails if any stored description carries a
+# malformed Google Scholar link. Run before publishing.
+validate-urls:
+	$(PYTHON) scripts/fix_scholar_urls.py --validate \
+		--anchor podcasts/anchor_feed.xml
 
 gen-viz:
 	$(PYTHON) gen-podcast.py gen-viz
