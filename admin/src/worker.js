@@ -1374,6 +1374,29 @@ function buildSubmissionDraftDescription(sub) {
   return summary ? `${summary}\n\nSources:\n${sources.join('\n')}` : `Sources:\n${sources.join('\n')}`;
 }
 
+// Admin-only draft identifier badge: the numeric episode id (how we
+// refer to a draft when talking about it) plus the 6-char content hash
+// from its stem (which pins the exact regenerated version, so we can
+// tell whether the right version of a draft is up). This is never shown
+// on public output — only on the authenticated admin review page.
+function draftVersionTag(draft) {
+  const src = draft.key || draft.draft_stem || draft.draft_key
+    || draft.basename || draft.filename || '';
+  const m = String(src).match(/-([0-9a-f]{6})(?:\.[a-z0-9]+)?$/i);
+  const parts = [];
+  const id = draft.episodeId != null ? draft.episodeId
+    : (draft.id != null ? draft.id : null);
+  if (id !== null && id !== '') parts.push('ID ' + id);
+  if (m) parts.push(m[1]);
+  if (parts.length === 0) return '';
+  return ' <span style="font-family:ui-monospace,SFMono-Regular,monospace;'
+    + 'font-size:0.7rem;color:var(--text-secondary);'
+    + 'background:var(--bg-tertiary);border:1px solid var(--border-color);'
+    + 'border-radius:4px;padding:1px 6px;margin-left:6px" '
+    + 'title="admin-only draft id / version hash — never shown publicly">'
+    + parts.join(' · ') + '</span>';
+}
+
 function renderDraftActionButtons(draft) {
   const job = draft.publish_job || null;
   const state = job && job.state ? job.state : null;
@@ -1640,7 +1663,7 @@ function draftsPageWithData(data, subsData) {
         <div>
           <h3 style="margin:0 0 4px">${escapeHtml(displayTitle(d))}${d.revision && d.revision > 1 ? ` <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:normal">(v${d.revision})</span>` : ''}</h3>
           <div style="color:var(--text-secondary);font-size:0.813rem">
-            📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}
+            📅 ${d.date || 'Unknown'} · ⏱️ ${d.duration || '~25 min'}${draftVersionTag(d)}
           </div>
         </div>
         <span class="badge ${publishJobBadgeClass(d.publish_job && d.publish_job.state)}">${publishJobStateLabel(d.publish_job)}</span>
@@ -2689,7 +2712,9 @@ async function loadDrafts() {
     container.innerHTML = '<div class="draft-list">' + data.drafts.map(function(draft) {
       return '<div class="draft-item" data-key="' + draft.key + '">'
         + '<div class="draft-header"><div><div class="draft-title">' + (draft.title || 'Untitled') + '</div>'
-        + '<div class="draft-meta"><span>📅 ' + (draft.date || 'Unknown date') + '</span><span>⏱️ ' + (draft.duration || 'Unknown duration') + '</span></div>'
+        + '<div class="draft-meta"><span>📅 ' + (draft.date || 'Unknown date') + '</span><span>⏱️ ' + (draft.duration || 'Unknown duration') + '</span>'
+        + (function(dr){var s=dr.key||dr.draft_stem||dr.draft_key||dr.basename||'';var mm=String(s).match(/-([0-9a-f]{6})(?:\.[a-z0-9]+)?$/i);var p=[];var id=dr.episodeId!=null?dr.episodeId:(dr.id!=null?dr.id:null);if(id!==null&&id!=='')p.push('ID '+id);if(mm)p.push(mm[1]);return p.length?'<span style="font-family:monospace;font-size:0.7rem;color:var(--text-secondary);background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;padding:1px 6px;margin-left:6px" title="admin-only draft id / version hash">'+p.join(' · ')+'</span>':'';})(draft)
+        + '</div>'
         + '</div></div>'
         + '<div class="draft-description" style="line-height:1.55">'
         + '<div class="desc-preview">' + formatDraftDescription(draft.description || 'No description available', true) + '</div>'
@@ -3863,6 +3888,7 @@ export {
   updatePrivateDraft, deletePrivateDraft,
   listPrivatePodcasts, deletePrivatePodcast,
   deriveSourceIdentities, dedupeSubmissionsForUi,
+  draftVersionTag,
   ADMIN_CANONICAL_HOST, WORKERS_DEV_SUFFIX, DEV_HOSTS,
 };
 

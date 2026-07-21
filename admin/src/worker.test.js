@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
 import worker, {
+  draftVersionTag,
   displayTitle, humanizeSlug, OPAQUE_ID_RE,
   hasPrivateDrafts, listPrivateDrafts, createPrivateDraft,
   updatePrivateDraft, deletePrivateDraft,
@@ -4954,4 +4955,30 @@ test('Drafts page filters submission cards whose draft is already published', as
     'submission whose draft_stem matches a published episode must be filtered');
   assert.ok(html.includes('real-pending'),
     'genuinely pending submission must still appear');
+});
+
+test('draftVersionTag shows the numeric id and version hash for admins', () => {
+  const tag = draftVersionTag({
+    episodeId: 586,
+    key: 'drafts/2026/07/2026-07-21-thought-anchors-which-sentences-drive-llm-reasoning-e30415.mp3',
+  });
+  assert.match(tag, /ID 586/);
+  assert.match(tag, /e30415/);
+  assert.match(tag, /never shown publicly/);
+});
+
+test('draftVersionTag falls back to draft_stem and id fields', () => {
+  const tag = draftVersionTag({ id: 585, draft_stem: 'drafts/2026/07/x-abc123' });
+  assert.match(tag, /ID 585/);
+  assert.match(tag, /abc123/);
+});
+
+test('draftVersionTag is empty when there is no id and no hash', () => {
+  assert.equal(draftVersionTag({ title: 'x' }), '');
+});
+
+test('draftVersionTag renders id alone when the stem has no hash', () => {
+  const tag = draftVersionTag({ episodeId: 42, key: 'drafts/no-hash-here.mp3' });
+  assert.match(tag, /ID 42/);
+  assert.doesNotMatch(tag, /[0-9a-f]{6}/);
 });
