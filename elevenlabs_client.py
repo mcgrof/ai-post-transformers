@@ -1153,14 +1153,21 @@ def _normalize_script_response(raw):
 
 
 def _generate_script_part(backend, model, prompt, part_no, num_parts,
-                          attempts=2):
+                          attempts=2, min_segments=1):
     """Generate one script part, normalizing the response and retrying.
 
+    Retries when the response is unusable OR collapses to fewer than
+    ``min_segments`` segments. A middle part that comes back with one
+    tiny segment (seen: Part 2 returned "1 segment, 16 words") drops the
+    content it was supposed to carry and orphans the hand-off at the end
+    of the previous part, so a too-short part is treated as a failure
+    worth retrying. The best under-target attempt is kept as a fallback.
+
     Returns (segments, last_error); segments is [] when every attempt
-    produced nothing usable. The caller decides whether an empty part
-    is fatal (intro and final part) or skippable (middle parts).
+    produced nothing usable.
     """
     last_error = None
+    best = []
     for attempt in range(1, attempts + 1):
         try:
             raw = llm_call(backend, model, prompt, temperature=0.7,
@@ -1170,16 +1177,20 @@ def _generate_script_part(backend, model, prompt, part_no, num_parts,
             print(f"[DEBUG] Part {part_no} LLM raw response: "
                   f"{str(raw)[:500]}", file=sys.stderr)
             segments = _normalize_script_response(raw)
-            if segments:
+            if len(segments) >= max(1, min_segments):
                 return segments, None
-            last_error = f"unusable response shape: {str(raw)[:300]}"
+            if len(segments) > len(best):
+                best = segments  # keep the fullest under-target attempt
+            last_error = (f"only {len(segments)} segment(s), need "
+                          f"{min_segments}" if segments
+                          else f"unusable response shape: {str(raw)[:300]}")
         except Exception as e:
             last_error = e
         print(f"[Podcast] WARNING: Part {part_no}/{num_parts} attempt "
-              f"{attempt} returned no segments ({last_error}); "
+              f"{attempt} under target ({last_error}); "
               f"{'retrying' if attempt < attempts else 'giving up'}",
               file=sys.stderr)
-    return [], last_error
+    return best, last_error
 
 
 # A properly-ended episode closes on a complete statement AND signs off.
@@ -1201,6 +1212,24 @@ def _has_farewell(script):
     if "listening" in tail and "thank" in tail:
         return True
     return any(m in tail for m in _FAREWELL_MARKERS)
+
+
+def _speaker_run_count(script):
+    """Count adjacent same-speaker turns (each one is a dropped hand-off).
+
+    A healthy two-host dialogue alternates speakers. Two segments in a
+    row from the same speaker mean a turn was dropped or mislabeled —
+    e.g. one host says "walk us through it" and then speaks again while
+    the co-host's answer is missing.
+    """
+    runs = 0
+    prev = None
+    for seg in script:
+        sp = seg.get("speaker")
+        if sp is not None and sp == prev:
+            runs += 1
+        prev = sp
+    return runs
 
 
 def _ends_properly(script):
@@ -1250,7 +1279,8 @@ CLOSING REQUIREMENTS:
 Output as a JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array."""
     segments, _err = _generate_script_part(backend, model, prompt,
-                                           "closing", 1, attempts=2)
+                                           "closing", 1, attempts=2,
+                                           min_segments=2)
     return segments or []
 
 
@@ -1840,7 +1870,7 @@ Source paper (read from file):
     # generation loudly rather than shipping a degraded episode.
     part_seg_counts = []
     p1_script, p1_error = _generate_script_part(
-        backend, model, p1, 1, num_parts)
+        backend, model, p1, 1, num_parts, attempts=3, min_segments=4)
     if not p1_script:
         raise RuntimeError(
             f"Part 1 (intro) generation failed after 2 attempts: {p1_error}")
@@ -1950,7 +1980,7 @@ Source content (read from file):
 {p2_paper_file}"""
 
     p2_script, _p2_error = _generate_script_part(
-        backend, model, p2, 2, num_parts)
+        backend, model, p2, 2, num_parts, attempts=3, min_segments=4)
     p2_words = sum(len(s["text"].split()) for s in p2_script)
     print(f"[Podcast]     {len(p2_script)} segments, {p2_words} words", file=sys.stderr)
     all_scripts.extend(p2_script)
@@ -2027,7 +2057,7 @@ Source content (read from file):
 {p3_paper_file}"""
 
       p3_script, _p3_error = _generate_script_part(
-          backend, model, p3, 3, num_parts)
+          backend, model, p3, 3, num_parts, attempts=3, min_segments=4)
       p3_words = sum(len(s["text"].split()) for s in p3_script)
       print(f"[Podcast]     {len(p3_script)} segments, {p3_words} words", file=sys.stderr)
       all_scripts.extend(p3_script)
@@ -2082,7 +2112,7 @@ Source content:
 {text[:10000]}"""
 
       p4_script, _p4_error = _generate_script_part(
-          backend, model, p4, 4, num_parts)
+          backend, model, p4, 4, num_parts, attempts=3, min_segments=4)
       p4_words = sum(len(s["text"].split()) for s in p4_script)
       print(f"[Podcast]     {len(p4_script)} segments, {p4_words} words", file=sys.stderr)
       all_scripts.extend(p4_script)
@@ -2125,10 +2155,15 @@ FULL TRANSCRIPT:
             too_short = len(edited_script) < 0.7 * len(all_scripts)
             last_txt = (edited_script[-1].get("text") or "").rstrip()
             truncated = not last_txt.endswith(_TERMINAL_PUNCT)
-            if too_short or truncated:
+            # Reject an edit that drops a turn (introduces new adjacent
+            # same-speaker segments the original did not have).
+            added_runs = (_speaker_run_count(edited_script)
+                          > _speaker_run_count(all_scripts))
+            if too_short or truncated or added_runs:
                 print(f"[Podcast]   Editorial result rejected "
                       f"({len(edited_script)} vs {len(all_scripts)} segs, "
-                      f"ends_clean={not truncated}) — keeping original",
+                      f"ends_clean={not truncated}, "
+                      f"added_speaker_runs={added_runs}) — keeping original",
                       file=sys.stderr)
             else:
                 removed = len(all_scripts) - len(edited_script)
@@ -2192,6 +2227,15 @@ FULL TRANSCRIPT:
             if phrase in seg_text:
                 print(f"[WARNING] ANTI-PATTERN in script: '{phrase}'",
                       file=sys.stderr)
+
+    # DIALOGUE CONTINUITY: surface any dropped hand-offs (adjacent
+    # same-speaker turns), so a broken exchange doesn't pass unnoticed.
+    runs = _speaker_run_count(script)
+    if runs:
+        for i in range(1, len(script)):
+            if script[i].get("speaker") == script[i - 1].get("speaker"):
+                print(f"[WARNING] dropped turn: segments {i-1}->{i} both "
+                      f"speaker {script[i].get('speaker')!r}", file=sys.stderr)
 
     # QUALITY GATE: a healthy episode is 1200+ words across 15+
     # segments. When the LLM passes fail, only fallback stubs remain —

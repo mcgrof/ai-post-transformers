@@ -65,3 +65,27 @@ def test_truncated_midword_ending_is_rejected():
 
 def test_empty_script_is_not_proper():
     assert not _ends_properly([])
+
+
+# --- dropped-turn / speaker-continuity detection ------------------------
+from elevenlabs_client import _speaker_run_count
+
+
+def test_alternating_dialogue_has_no_runs():
+    script = [_seg("A", "one"), _seg("B", "two"),
+              _seg("A", "three"), _seg("B", "four")]
+    assert _speaker_run_count(script) == 0
+
+
+def test_dropped_turn_is_detected():
+    # The real episode-584 bug: Hal hands off, then Hal speaks again.
+    script = [_seg("B", "Here are the three methods."),
+              _seg("A", "Alright — Ada, walk us through it."),
+              _seg("A", "So here's what's been nagging me, Ada.")]
+    assert _speaker_run_count(script) == 1
+
+
+def test_multiple_runs_counted():
+    script = [_seg("A", "1"), _seg("A", "2"), _seg("A", "3"),
+              _seg("B", "4"), _seg("B", "5")]
+    assert _speaker_run_count(script) == 3
