@@ -1300,6 +1300,7 @@ def _generate_conference_pages(episodes, show_title, output_dir):
         "announcements": {
             "name": "Announcements",
             "episode_urls": [
+                "/episodes/soulmd-or-severance-host-staleness-intervention/",
                 "/episodes/cognizant-new-work-new-world-2026/",
                 "/episodes/were-open-source-new-home-visualizations-and-how-to-shape-our-queue/",
                 "/episodes/new-voices-same-nerds-the-kokoro-tts-episode/",
