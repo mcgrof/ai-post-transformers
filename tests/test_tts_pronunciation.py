@@ -56,3 +56,14 @@ def test_acronyms_dont_break_normal_words():
 def test_empty_and_none():
     assert _pronounce_for_tts("") == ""
     assert _pronounce_for_tts(None) is None
+
+
+def test_baseten_becomes_base_ten():
+    # The company "Baseten" is pronounced "base ten", not "basiton".
+    assert _pronounce_for_tts("a paper from Baseten") == "a paper from base ten"
+    assert _pronounce_for_tts("Baseten's new model") == "base ten's new model"
+    # "Baseton" spelling is a safety net; both map to "base ten"
+    assert _pronounce_for_tts("from Baseton") == "from base ten"
+    # case-insensitive, word-boundary only
+    assert "base ten" in _pronounce_for_tts("BASETEN released it")
+    assert _pronounce_for_tts("Basetenia") == "Basetenia"

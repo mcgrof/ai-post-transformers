@@ -47,6 +47,11 @@ _PRONUNCIATION_FIXES = [
     # Host names: ensure they're pronounced as words, not spelled
     # VERA (new host) must be pronounced as "Vera" not "V-E-R-A"
     (_re.compile(r"\bVERA\b"), "Vera"),
+    # Company names: "Baseten" is pronounced "base ten", not "basiton".
+    # The transcripts spell it "Baseten"; the "Baseton" spelling is a
+    # safety net. Matches the possessive too ("Baseten's" -> "base
+    # ten's"). Add more firms here as they come up.
+    (_re.compile(r"\bBaset[eo]n\b", _re.IGNORECASE), "base ten"),
     # Acronyms: spell out so TTS pronounces letter-by-letter rather
     # than mangling them as syllables.
     (_re.compile(r"\bLLMs\b"), "L L Ms"),
