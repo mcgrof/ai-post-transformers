@@ -329,7 +329,7 @@ def test_is_transient_error_classification():
 def test_llm_call_retries_transient_then_succeeds(monkeypatch):
     calls = {"n": 0}
 
-    def flaky(backend, model, prompt, temperature, max_tokens):
+    def flaky(backend, model, prompt, temperature, max_tokens, use_tools=True):
         calls["n"] += 1
         if calls["n"] < 3:
             raise RuntimeError("Selected model is at capacity")
@@ -346,7 +346,7 @@ def test_llm_call_retries_transient_then_succeeds(monkeypatch):
 def test_llm_call_does_not_retry_non_transient(monkeypatch):
     calls = {"n": 0}
 
-    def boom(backend, model, prompt, temperature, max_tokens):
+    def boom(backend, model, prompt, temperature, max_tokens, use_tools=True):
         calls["n"] += 1
         raise ValueError("bad prompt shape")
 
@@ -361,7 +361,7 @@ def test_llm_call_does_not_retry_non_transient(monkeypatch):
 def test_llm_call_timeout_retries_at_most_once(monkeypatch):
     calls = {"n": 0}
 
-    def always_timeout(backend, model, prompt, temperature, max_tokens):
+    def always_timeout(backend, model, prompt, temperature, max_tokens, use_tools=True):
         calls["n"] += 1
         raise RuntimeError("Claude CLI timeout after 600s (model=sonnet)")
 

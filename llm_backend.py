@@ -51,7 +51,8 @@ def _is_timeout_error(exc):
     return "timeout" in msg or "timed out" in msg
 
 
-def _dispatch_backend(backend, model, prompt, temperature, max_tokens):
+def _dispatch_backend(backend, model, prompt, temperature, max_tokens,
+                      use_tools=True):
     """Route a prompt to the configured backend and return raw output."""
     btype = backend["type"]
     if btype == "openai":
@@ -64,7 +65,7 @@ def _dispatch_backend(backend, model, prompt, temperature, max_tokens):
         return _call_anthropic(backend["client"], model, prompt,
                                temperature, max_tokens)
     if btype == "claude-cli":
-        return _call_claude_cli(model, prompt, max_tokens)
+        return _call_claude_cli(model, prompt, max_tokens, use_tools=use_tools)
     if btype == "codex":
         return _call_codex(model, prompt, max_tokens)
     raise ValueError(f"Unknown backend type: {btype!r}")
@@ -133,7 +134,7 @@ def _sanitize_prompt(prompt):
 
 
 def llm_call(backend, model, prompt, temperature=0.4,
-             max_tokens=16000, json_mode=True):
+             max_tokens=16000, json_mode=True, use_tools=True):
     """Unified LLM call. Returns parsed JSON dict/list or plain text.
 
     Args:
@@ -147,6 +148,9 @@ def llm_call(backend, model, prompt, temperature=0.4,
             budget is bumped to give the model headroom.
         json_mode: If True, parse response as JSON with repair logic.
                    If False, return raw text string.
+        use_tools: claude-cli only. When False the CLI runs a single
+            tool-free turn — required for pure text/HTML generation so
+            it emits the content instead of trying to write a file.
     """
     prompt = _sanitize_prompt(prompt)
 
@@ -159,7 +163,8 @@ def llm_call(backend, model, prompt, temperature=0.4,
     for attempt in range(len(backoffs) + 1):
         try:
             raw = _dispatch_backend(backend, model, prompt,
-                                    temperature, max_tokens)
+                                    temperature, max_tokens,
+                                    use_tools=use_tools)
             break
         except Exception as exc:  # noqa: BLE001 - classify then re-raise
             last = attempt == len(backoffs)
@@ -287,7 +292,7 @@ def _call_anthropic(client, model, prompt, temperature, max_tokens):
     return text.strip()
 
 
-def _call_claude_cli(model, prompt, max_tokens):
+def _call_claude_cli(model, prompt, max_tokens, use_tools=True):
     import signal
     import os
     import contextlib
@@ -298,10 +303,28 @@ def _call_claude_cli(model, prompt, max_tokens):
     # "Reached max turns (3)" before it could generate anything, so
     # every script pass silently fell back to stub content while
     # file-free calls (titles, summaries) kept working.
-    cmd = ["claude", "-p",
-           "--output-format", "text",
-           "--model", model,
-           "--max-turns", "25"]
+    # Pure-generation callers (use_tools=False) must NOT get the agentic
+    # tool loop: given a prompt that asks for an HTML file, the CLI would
+    # try to Write the file, hit an approval wall, and return commentary
+    # ("The Write tool call needs approval") instead of the HTML — which
+    # then got saved as a broken viz page. With tools disabled and a
+    # single turn it just emits the requested text.
+    if use_tools:
+        cmd = ["claude", "-p",
+               "--output-format", "text",
+               "--model", model,
+               "--max-turns", "25"]
+    else:
+        # No tools at all, but allow 2 turns: a long HTML document can
+        # need more than a single inference pass to finish, which showed
+        # up as "Reached max turns (1)" on the biggest transcripts. With
+        # --allowedTools "" the model still cannot touch the filesystem
+        # regardless of turn count, so this stays purely generative.
+        cmd = ["claude", "-p",
+               "--output-format", "text",
+               "--model", model,
+               "--max-turns", "2",
+               "--allowedTools", ""]
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions

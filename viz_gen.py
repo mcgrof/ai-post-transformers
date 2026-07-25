@@ -38,6 +38,18 @@ def _parse_srt(srt_path):
     return " ".join(text_lines)
 
 
+def _looks_like_html(text):
+    """True only for a real HTML document, not a stray chat reply.
+
+    Guards against saving agentic backend commentary (e.g. "The Write
+    tool call needs approval") as a viz page.
+    """
+    if not text:
+        return False
+    head = text.lstrip()[:200].lower()
+    return head.startswith("<!doctype html") and "</html>" in text.lower()
+
+
 def _build_viz_prompt(title, description, transcript, arxiv_ids):
     """Build the LLM prompt for generating a visualization HTML page."""
     arxiv_section = ""
@@ -195,15 +207,33 @@ def generate_viz(episode_id, config):
 
     backend = get_llm_backend(config)
     model = config.get("podcast", {}).get("llm_model", "sonnet")
-    html_content = llm_call(backend, model, prompt,
-                            temperature=0.4, max_tokens=16000,
-                            json_mode=False)
 
-    # Strip any markdown fences the LLM may have wrapped around the HTML
-    html_content = re.sub(r'^```(?:html)?\n?', '', html_content,
-                          flags=re.MULTILINE)
-    html_content = re.sub(r'\n?```\s*$', '', html_content,
-                          flags=re.MULTILINE).strip()
+    # use_tools=False: this is pure HTML generation with the transcript
+    # already inline, so the claude-cli backend must NOT get the agentic
+    # tool loop (it would try to Write the file and return commentary
+    # like "The Write tool call needs approval" that then got saved as a
+    # broken viz page). Validate the result really is an HTML document
+    # and never persist a stray chat response.
+    html_content = ""
+    for attempt in range(1, 3):
+        raw = llm_call(backend, model, prompt,
+                       temperature=0.4, max_tokens=16000,
+                       json_mode=False, use_tools=False)
+        cleaned = re.sub(r'^```(?:html)?\n?', '', raw, flags=re.MULTILINE)
+        cleaned = re.sub(r'\n?```\s*$', '', cleaned,
+                         flags=re.MULTILINE).strip()
+        if _looks_like_html(cleaned):
+            html_content = cleaned
+            break
+        print(f"{_c('31', '[Viz]')} attempt {attempt}: output was not "
+              f"HTML ({raw[:80]!r}); "
+              f"{'retrying' if attempt < 2 else 'aborting'}",
+              file=sys.stderr)
+
+    if not _looks_like_html(html_content):
+        print(f"{_c('31', '[Viz]')} Refusing to save non-HTML output for "
+              f"episode {episode_id}", file=sys.stderr)
+        return None
 
     # Derive slug from audio filename
     audio_stem = os.path.splitext(os.path.basename(audio))[0]
