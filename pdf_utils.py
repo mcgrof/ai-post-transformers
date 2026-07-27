@@ -24,6 +24,14 @@ _OPENREVIEW_FORUM_RE = re.compile(
     r"https?://openreview\.net/forum\?(.*&)?id=([A-Za-z0-9_-]+)(?:&.*)?$"
 )
 
+# GitHub file pages (github.com/{owner}/{repo}/blob/{ref}/{path}) serve
+# an HTML viewer, not the file. The bytes live on
+# raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}. The "/raw/"
+# form also works, but the raw host is the canonical direct download.
+_GITHUB_BLOB_RE = re.compile(
+    r"https?://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/(.+)$"
+)
+
 
 def _normalize_pdf_url(url):
     """Normalize common paper URLs into direct PDF URLs when possible."""
@@ -35,6 +43,12 @@ def _normalize_pdf_url(url):
     match = _OPENREVIEW_FORUM_RE.match(raw)
     if match:
         return f"https://openreview.net/pdf?id={match.group(2)}"
+    # GitHub blob/raw page -> raw.githubusercontent.com direct bytes.
+    match = _GITHUB_BLOB_RE.match(raw)
+    if match:
+        owner, repo, rest = match.groups()
+        rest = rest.split("#", 1)[0].split("?", 1)[0]
+        return f"https://raw.githubusercontent.com/{owner}/{repo}/{rest}"
     return raw
 
 

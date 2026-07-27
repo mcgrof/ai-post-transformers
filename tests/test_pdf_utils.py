@@ -272,3 +272,20 @@ def test_extract_text_returns_empty_when_ocr_tools_missing(monkeypatch, tmp_path
 
     text = extract_text(fake_pdf)
     assert text == ""
+
+
+def test_normalize_pdf_url_converts_github_blob_and_raw():
+    # GitHub blob pages are an HTML viewer; the bytes live on the raw host.
+    assert _normalize_pdf_url(
+        "https://github.com/MoonshotAI/Kimi-K3/blob/main/k3_tech_report.pdf"
+    ) == "https://raw.githubusercontent.com/MoonshotAI/Kimi-K3/main/k3_tech_report.pdf"
+    # /raw/ form and nested paths + query/fragment strip correctly.
+    assert _normalize_pdf_url(
+        "https://github.com/org/repo/raw/v1.2/docs/paper.pdf?raw=true#page=3"
+    ) == "https://raw.githubusercontent.com/org/repo/v1.2/docs/paper.pdf"
+    # Non-blob GitHub URLs and already-raw URLs pass through untouched.
+    assert _normalize_pdf_url("https://github.com/org/repo") == (
+        "https://github.com/org/repo")
+    assert _normalize_pdf_url(
+        "https://raw.githubusercontent.com/org/repo/main/p.pdf"
+    ) == "https://raw.githubusercontent.com/org/repo/main/p.pdf"
