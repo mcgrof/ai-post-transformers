@@ -371,3 +371,27 @@ def test_llm_call_timeout_retries_at_most_once(monkeypatch):
     with pytest.raises(RuntimeError):
         llm_backend.llm_call({"type": "claude-cli"}, "sonnet", "hi")
     assert calls["n"] == 2  # initial + one timeout retry, then give up
+
+
+def test_rc1_error_with_timeout_value_is_not_a_timeout(monkeypatch):
+    # The rc=1 error string carries "timeout=Ns" (the configured value),
+    # which must NOT demote it to the single-retry timeout path.
+    err = RuntimeError("Claude CLI error (rc=1, timeout=525s): ")
+    assert not llm_backend._is_timeout_error(err)
+    assert llm_backend._is_transient_error(err)  # still retried as transient
+
+    calls = {"n": 0}
+    def flaky(backend, model, prompt, temperature, max_tokens, use_tools=True):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("Claude CLI error (rc=1, timeout=525s): ")
+        return '[{"speaker": "A", "text": "ok"}]'
+    monkeypatch.setattr(llm_backend, "_dispatch_backend", flaky)
+    monkeypatch.setattr(llm_backend.time, "sleep", lambda *_: None)
+    out = llm_backend.llm_call({"type": "claude-cli"}, "sonnet", "hi")
+    assert calls["n"] == 3 and out == [{"speaker": "A", "text": "ok"}]
+
+
+def test_real_timeout_still_matches():
+    assert llm_backend._is_timeout_error(
+        RuntimeError("Claude CLI timeout after 600s (model=sonnet)"))

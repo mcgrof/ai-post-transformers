@@ -47,8 +47,12 @@ def _is_transient_error(exc):
 
 
 def _is_timeout_error(exc):
+    # Match an ACTUAL timeout ("... timeout after 600s ...", "timed
+    # out"), not the "timeout=525s" value that every Claude CLI error
+    # string reports. The bare substring "timeout" wrongly demoted a
+    # transient rc=1 (which carries "timeout=Ns") to a single retry.
     msg = str(exc).lower()
-    return "timeout" in msg or "timed out" in msg
+    return "timeout after" in msg or "timed out" in msg
 
 
 def _dispatch_backend(backend, model, prompt, temperature, max_tokens,
