@@ -77,3 +77,15 @@ def test_search_alias_terms_add_h2o_variants_and_arxiv_id():
     assert 'h20' in aliases
     assert 'heavy-hitter oracle' in aliases
     assert '2306.14048' in aliases
+
+
+def test_attenres_alias_for_attention_residuals():
+    from rss import _search_alias_terms
+    # The "Attention Residuals" (Kimi) episode should be findable by the
+    # short form "AttenRes", which is absent from its title/description.
+    aliases = _search_alias_terms(
+        "Rethinking Residual Connections. This paper on Attention "
+        "Residuals from Moonshot AI's Kimi team ...")
+    assert "attenres" in aliases
+    # unrelated text gets no AttenRes alias
+    assert "attenres" not in _search_alias_terms("A paper about KV caches")

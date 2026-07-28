@@ -195,6 +195,11 @@ def _search_alias_terms(text):
     if 'heavy-hitter oracle' in hay or re.search(r'h2o', hay):
         aliases.extend(['h2o', 'h20', 'heavy-hitter oracle', '2306.14048'])
 
+    # "Attention Residuals" (Moonshot AI / Kimi) — searchers use the
+    # short form "AttenRes", which appears nowhere in the title/desc.
+    if 'attention residual' in hay:
+        aliases.extend(['attenres', 'atten-res', 'atten res'])
+
     return ' '.join(dict.fromkeys(aliases))
 
 
