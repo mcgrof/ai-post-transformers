@@ -48,13 +48,39 @@ def get_recent_reasons(conn, character, lookback=DEFAULT_LOOKBACK_EPISODES):
     return {row["opening_reason"] for row in rows if row["opening_reason"]}
 
 
+def get_reason_last_used(conn, character):
+    """Map each used opening reason to the id of its most recent use.
+
+    Higher id == more recently used. Reasons never used are simply
+    absent from the map.
+    """
+    init_db(conn)
+    rows = conn.execute(
+        """
+        SELECT opening_reason, MAX(id) AS last_id FROM podcasts
+        WHERE primary_host = ? AND opening_reason IS NOT NULL
+        GROUP BY opening_reason
+        """,
+        (character,),
+    ).fetchall()
+    return {row["opening_reason"]: row["last_id"] for row in rows}
+
+
 def select_opening_reason(character, title="", abstract=""):
-    """Select an opening reason for a character, avoiding recent repetition.
+    """Select the least-recently-used opening reason for a character.
+
+    The old logic returned available_reasons[0] whenever every reason
+    had been used at least once — which, with a small pool, meant it got
+    permanently stuck on the first reason (Ada delivered "The theoretical
+    grounding is what sold me on this one" for ~50 episodes straight).
+    Rotate by staleness instead: a never-used reason (sentinel -1) wins
+    first, otherwise the reason whose most recent use is oldest; pool
+    order breaks ties.
 
     Args:
         character: Character name (Hal, Ada, VERA)
-        title: Paper title (for semantic matching, optional)
-        abstract: Paper abstract (for semantic matching, optional)
+        title: Paper title (reserved for future semantic ranking)
+        abstract: Paper abstract (reserved for future semantic ranking)
 
     Returns:
         Selected opening reason string, or None if no pool available
@@ -67,23 +93,17 @@ def select_opening_reason(character, title="", abstract=""):
     if not available_reasons:
         return None
 
-    # Get recently used reasons
     try:
         conn = get_connection()
-        recent = get_recent_reasons(conn, character)
+        last_used = get_reason_last_used(conn, character)
         conn.close()
     except Exception:
-        recent = set()
+        last_used = {}
 
-    # Filter out recently used
-    fresh_reasons = [r for r in available_reasons if r not in recent]
-
-    # If all reasons were recently used, cycle back to the oldest (full rotation)
-    if not fresh_reasons:
-        fresh_reasons = available_reasons
-
-    # For now, pick the first available (TODO: semantic ranking by paper content)
-    return fresh_reasons[0] if fresh_reasons else None
+    return min(
+        enumerate(available_reasons),
+        key=lambda iv: (last_used.get(iv[1], -1), iv[0]),
+    )[1]
 
 
 def track_opening_reason(conn, episode_id, reason, character):
