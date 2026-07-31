@@ -1848,9 +1848,15 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
      submission date printed on the PDF). If the paper does not state a
      date, omit it — do NOT guess a date or a publication venue.
    Hal should say "First Author et al." with the total co-author count, and mention
-   the institution(s). {primary_host} jumps in with why this paper stands out.
-   Angle to convey (paraphrase it naturally in {primary_host}'s own voice — do
-   NOT recite it verbatim): {opening_reason or 'what makes this paper genuinely interesting'}
+   the institution(s). Then move straight into the substance: the hosts react to
+   THIS paper's specific claim, result, or tension in their own words.
+   BANNED opening move: do NOT have any host announce a personal reason they
+   like the paper. In particular NEVER open with "what sold me / what drew me /
+   what fascinated me / what struck me / what grabbed me / what stood out",
+   "the theoretical grounding", "the mathematical framework", or any stock
+   "here's why I like this one" endorsement. Every episode using that beat sounds
+   identical. The hook must come from the concrete paper — a surprising number, a
+   bold claim, a real tension — not a reusable phrase about how much a host likes it.
    This is the ONLY time authors and full title should be stated.
 {intro_joke_text}
 
@@ -2223,9 +2229,15 @@ FULL TRANSCRIPT:
             seen_titles.add(title)
             merged_sources.append(s)
 
-    # ANTI-PATTERN VALIDATION: warn on deprecated phrases in the script
+    # ANTI-PATTERN VALIDATION: warn on deprecated phrases in the script.
+    # The "what sold/drew/fascinated me" family is the formulaic
+    # "here's why I like this paper" opener that made every episode's
+    # intro sound identical — flag it so a regression is visible.
     banned_phrases = ["caught my attention", "capture my attention",
-                      "captured my attention"]
+                      "captured my attention",
+                      "what sold me", "what drew me", "what fascinated me",
+                      "what struck me", "what grabbed me",
+                      "the theoretical grounding"]
     for seg in script:
         seg_text = seg.get("text", "").lower()
         for phrase in banned_phrases:
