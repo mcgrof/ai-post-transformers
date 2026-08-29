@@ -248,4 +248,17 @@ def test_qr_service_uses_flock(qr_service_unit: str):
 
 def test_qr_timer_interval_is_hours(qr_timer_unit: str):
     """Queue-refresh timer should fire on an hours-scale interval."""
-    assert "OnUnitInactiveSec=6h" in qr_timer_unit
+    assert "OnCalendar=0/6:00:00" in qr_timer_unit
+
+
+def test_qr_timer_uses_on_calendar(qr_timer_unit: str):
+    """Queue-refresh must not regress to the un-arming timer form.
+
+    OnUnitInactiveSec has no next elapse while the unit is active or
+    after a daemon-reload, so a single interrupted refresh leaves the
+    timer showing "Trigger: n/a" and the queue stops refreshing with
+    no error anywhere. podcast-worker.timer was fixed on 2026-06-10;
+    the queue-refresh lane kept the bug and stalled on 2026-08-25.
+    """
+    assert "OnCalendar=" in qr_timer_unit
+    assert "OnUnitInactiveSec=" not in qr_timer_unit

@@ -134,8 +134,13 @@ export function generateQueueRefreshTimer() {
 Description=Periodic trigger for queue-refresh
 
 [Timer]
+# Wall-clock cadence, for the same reason as podcast-worker.timer:
+# OnUnitInactiveSec has no next elapse while the service is active or
+# after a daemon-reload, so one hung or interrupted refresh leaves the
+# timer un-armed (Trigger: n/a) and the queue silently stops refreshing.
+# flock in the service prevents overlap if a refresh runs long.
 OnBootSec=5min
-OnUnitInactiveSec=6h
+OnCalendar=0/6:00:00
 AccuracySec=1min
 Persistent=true
 
