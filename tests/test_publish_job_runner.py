@@ -1,3 +1,4 @@
+import pytest
 import subprocess
 
 from scripts.publish_job_runner import process_job
@@ -746,3 +747,86 @@ def test_find_episode_returns_private_episodes(monkeypatch, tmp_path):
         "list_podcasts must be called with include_private=True — "
         "otherwise private rows are hidden from the publish runner"
     )
+
+
+def test_process_job_resumes_after_lease_expiry_without_redoing_steps(
+    monkeypatch, tmp_path
+):
+    """A reclaimed job must finish its remaining step, not restart.
+
+    Regression for pub_2026_08_26_020315: publish/viz/cover had
+    already completed when the lease expired mid-``site``. The retry
+    called ``start_step(job, "publish")`` unconditionally, which the
+    state machine rejects with "cannot start step publish from state
+    done" — turning a job that needed one more step into a permanent
+    publish_failed, and stranding its submission at
+    approved_for_publish.
+    """
+    store, path, job = _seed_job(tmp_path)
+    commands = []
+    artifacts = ArtifactSequence()
+
+    job["progress"]["publish"] = "done"
+    job["progress"]["viz"] = "done"
+    job["progress"]["cover"] = "done"
+    save_job(job, store=store)
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: commands.append(command),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._verify_local_artifacts",
+        lambda artifacts: {"ok": True},
+    )
+
+    finished = process_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"
+    assert commands == ["make publish-site"], (
+        "resume must run only the unfinished step"
+    )
+
+    loaded = load_job(path, store=store)
+    assert loaded["progress"] == {
+        "publish": "done",
+        "viz": "done",
+        "cover": "done",
+        "site": "done",
+        "verify": "done",
+    }
+
+
+def test_process_job_completes_when_every_step_already_done(monkeypatch, tmp_path):
+    """All steps done but the job never marked complete -> finish it."""
+    store, path, job = _seed_job(tmp_path)
+    artifacts = ArtifactSequence()
+
+    for step in ("publish", "viz", "cover", "site", "verify"):
+        job["progress"][step] = "done"
+    save_job(job, store=store)
+
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._run_shell_with_heartbeat",
+        lambda command, **kwargs: pytest.fail(f"unexpected shell run: {command}"),
+    )
+    monkeypatch.setattr("scripts.publish_job_runner._episode_artifacts", artifacts)
+    monkeypatch.setattr(
+        "scripts.publish_job_runner._verify_local_artifacts",
+        lambda artifacts: {"ok": True},
+    )
+
+    finished = process_job(
+        path,
+        admin_id="admin-1",
+        admin_name="mcgrof",
+        store=store,
+    )
+
+    assert finished["state"] == "publish_completed"

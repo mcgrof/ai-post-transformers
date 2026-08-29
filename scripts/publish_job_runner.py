@@ -333,6 +333,19 @@ def _running_step(job: dict) -> str | None:
     return None
 
 
+def _step_finished(job: dict, step: str) -> bool:
+    """Whether a step already reached a good terminal state.
+
+    A job reclaimed after its lease expired keeps the progress of the
+    steps that already succeeded. Re-running them is both wasteful and
+    illegal in the state machine — ``start_step`` rejects a step that
+    is already ``done`` — which is what turned a resumable job into a
+    hard ``publish_failed`` ("cannot start step publish from state
+    done") instead of finishing the one step that was left.
+    """
+    return job.get("progress", {}).get(step) in {"done", "skipped"}
+
+
 def process_job(
     job_path: str | Path,
     *,
@@ -372,22 +385,25 @@ def process_job(
         return job
 
     try:
-        start_step(job, "publish")
-        save_job(job, store=store)
-        publish_draft = _resolve_publish_draft(job)
-        _run_shell_with_heartbeat(
-            f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'",
-            job=job,
-            admin_id=admin_id,
-            lease_seconds=lease_seconds,
-            store=store,
-        )
-        complete_step(job, "publish", _episode_artifacts(job))
-        _update_job_with_heartbeat(
-            job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
-        )
+        if not _step_finished(job, "publish"):
+            start_step(job, "publish")
+            save_job(job, store=store)
+            publish_draft = _resolve_publish_draft(job)
+            _run_shell_with_heartbeat(
+                f".venv/bin/python gen-podcast.py publish --draft '{publish_draft}'",
+                job=job,
+                admin_id=admin_id,
+                lease_seconds=lease_seconds,
+                store=store,
+            )
+            complete_step(job, "publish", _episode_artifacts(job))
+            _update_job_with_heartbeat(
+                job, admin_id=admin_id, lease_seconds=lease_seconds, store=store
+            )
 
-        if job["requirements"].get("viz", True):
+        if _step_finished(job, "viz"):
+            pass
+        elif job["requirements"].get("viz", True):
             start_step(job, "viz")
             save_job(job, store=store)
             artifacts = _episode_artifacts(job)
@@ -408,7 +424,9 @@ def process_job(
             complete_step(job, "viz")
             save_job(job, store=store)
 
-        if job["requirements"].get("cover", True):
+        if _step_finished(job, "cover"):
+            pass
+        elif job["requirements"].get("cover", True):
             start_step(job, "cover")
             save_job(job, store=store)
             artifacts = _episode_artifacts(job)
@@ -429,7 +447,9 @@ def process_job(
             complete_step(job, "cover")
             save_job(job, store=store)
 
-        if job["requirements"].get("publish_site", True):
+        if _step_finished(job, "site"):
+            pass
+        elif job["requirements"].get("publish_site", True):
             start_step(job, "site")
             save_job(job, store=store)
             _run_shell_with_heartbeat(
@@ -447,8 +467,9 @@ def process_job(
             complete_step(job, "site")
             save_job(job, store=store)
 
-        start_step(job, "verify")
-        save_job(job, store=store)
+        if not _step_finished(job, "verify"):
+            start_step(job, "verify")
+            save_job(job, store=store)
         artifacts = _episode_artifacts(job)
         verification = _verify_publish_success(
             artifacts, requirements=job.get("requirements"),
@@ -459,7 +480,8 @@ def process_job(
             raise RuntimeError(
                 f"artifact verification failed: {verification}"
             )
-        complete_step(job, "verify", artifacts)
+        if job.get("progress", {}).get("verify") == "running":
+            complete_step(job, "verify", artifacts)
         complete_job(job)
         save_job(job, store=store)
         save_result(job, verification=verification, store=store)
