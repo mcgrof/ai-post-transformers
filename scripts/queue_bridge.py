@@ -18,6 +18,7 @@ reads and writes R2.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -36,6 +37,9 @@ from scripts.queue_store import SQLiteQueueStore, get_queue_store
 
 DEFAULT_ADMIN_BUCKET = os.environ.get("ADMIN_BUCKET_NAME", "podcast-admin")
 SUBMISSIONS_PREFIX = "submissions/"
+BRIDGE_SUBMISSIONS = "submissions"
+BRIDGE_PUBLISH_JOBS = "publish_jobs"
+BRIDGE_PUBLISH_RESULTS = "publish_results"
 
 
 def _parse_timestamp(value: str | None) -> datetime:
@@ -89,13 +93,63 @@ def _normalize_submission_for_r2(submission: dict) -> dict:
     return result
 
 
-def _list_submission_keys(*, bucket: str, client) -> list[str]:
+def _record_hash(record: dict) -> str:
+    """Return a stable digest for bridge-visible record content."""
+    value = deepcopy(record)
+    value.pop("_key", None)
+    payload = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _object_etag(obj: dict) -> str | None:
+    etag = obj.get("ETag") or obj.get("etag")
+    return str(etag) if etag else None
+
+
+def _bridge_states(store, record_type: str) -> dict[str, dict]:
+    if not hasattr(store, "list_bridge_states"):
+        return {}
+    return store.list_bridge_states(record_type)
+
+
+def _save_bridge_state(
+    store,
+    record_type: str,
+    record_key: str,
+    *,
+    remote_etag: str | None,
+    remote_hash: str,
+) -> None:
+    if not hasattr(store, "save_bridge_state"):
+        return
+    store.save_bridge_state(
+        record_type,
+        record_key,
+        remote_etag=remote_etag,
+        remote_hash=remote_hash,
+    )
+
+
+def _remote_object_unchanged(state: dict | None, obj: dict) -> bool:
+    etag = _object_etag(obj)
+    return bool(state and etag and state.get("remote_etag") == etag)
+
+
+def _list_submission_objects(*, bucket: str, client) -> list[dict]:
     paginator = client.get_paginator("list_objects_v2")
-    keys = []
+    objects = []
     for page in paginator.paginate(Bucket=bucket, Prefix=SUBMISSIONS_PREFIX):
-        for obj in page.get("Contents", []):
-            keys.append(obj["Key"])
-    return sorted(keys)
+        objects.extend(page.get("Contents", []))
+    return sorted(objects, key=lambda item: item["Key"])
+
+
+def _list_submission_keys(*, bucket: str, client) -> list[str]:
+    return [
+        obj["Key"]
+        for obj in _list_submission_objects(bucket=bucket, client=client)
+    ]
 
 
 def _read_submission(*, bucket: str, client, key: str) -> dict:
@@ -106,14 +160,15 @@ def _read_submission(*, bucket: str, client, key: str) -> dict:
     return json.loads(data)
 
 
-def _write_submission(*, bucket: str, client, key: str, submission: dict) -> str:
-    client.put_object(
+def _write_submission(*, bucket: str, client, key: str,
+                      submission: dict) -> dict:
+    response = client.put_object(
         Bucket=bucket,
         Key=key,
         Body=json.dumps(submission, indent=2, sort_keys=True) + "\n",
         ContentType="application/json",
     )
-    return key
+    return response or {}
 
 
 def sync_submissions_from_r2(
@@ -124,14 +179,23 @@ def sync_submissions_from_r2(
 ) -> dict:
     bucket = bucket or DEFAULT_ADMIN_BUCKET
     client = client or get_r2_client()
-    counts = {"scanned": 0, "imported": 0, "skipped": 0}
+    counts = {"scanned": 0, "read": 0, "imported": 0, "skipped": 0}
+    states = _bridge_states(store, BRIDGE_SUBMISSIONS)
 
-    for key in _list_submission_keys(bucket=bucket, client=client):
+    for obj in _list_submission_objects(bucket=bucket, client=client):
+        key = obj["Key"]
         counts["scanned"] += 1
+        state = states.get(key)
+        if _remote_object_unchanged(state, obj):
+            counts["skipped"] += 1
+            continue
+
         remote = _normalize_submission_for_store(
             key,
             _read_submission(bucket=bucket, client=client, key=key),
         )
+        counts["read"] += 1
+        remote_hash = _record_hash(remote)
         local_record = store.load_submission(key)
         if local_record is not None:
             local, _ = local_record
@@ -142,12 +206,22 @@ def sync_submissions_from_r2(
             if (local.get("status") == "published"
                     and remote.get("status") != "published"):
                 counts["skipped"] += 1
-                continue
-            if _record_updated_at(remote) <= _record_updated_at(local):
+            elif _record_updated_at(remote) <= _record_updated_at(local):
                 counts["skipped"] += 1
-                continue
-        store.save_submission(key, remote)
-        counts["imported"] += 1
+            else:
+                store.save_submission(key, remote)
+                counts["imported"] += 1
+        else:
+            store.save_submission(key, remote)
+            counts["imported"] += 1
+
+        _save_bridge_state(
+            store,
+            BRIDGE_SUBMISSIONS,
+            key,
+            remote_etag=_object_etag(obj),
+            remote_hash=remote_hash,
+        )
 
     return counts
 
@@ -160,7 +234,25 @@ def sync_submissions_to_r2(
 ) -> dict:
     bucket = bucket or DEFAULT_ADMIN_BUCKET
     client = client or get_r2_client()
-    counts = {"scanned": 0, "exported": 0, "skipped": 0, "orphaned": 0}
+    counts = {
+        "scanned": 0,
+        "read": 0,
+        "exported": 0,
+        "skipped": 0,
+        "orphaned": 0,
+    }
+    states = _bridge_states(store, BRIDGE_SUBMISSIONS)
+    pending = []
+
+    for submission in store.list_submissions():
+        counts["scanned"] += 1
+        local = _normalize_submission_for_r2(submission)
+        local_hash = _record_hash(local)
+        state = states.get(submission["_key"])
+        if state and state.get("remote_hash") == local_hash:
+            counts["skipped"] += 1
+            continue
+        pending.append((submission, local, local_hash, state))
 
     # Cache draft + published episode basenames so we only skip *truly*
     # orphaned submissions. An approved_for_publish/draft_generated record
@@ -168,29 +260,33 @@ def sync_submissions_to_r2(
     # NOT be treated as an orphan, or its status never reaches R2.
     draft_mp3_basenames = set()
     published_basenames = set()
-    try:
-        podcast_bucket = os.environ.get("BUCKET_NAME") or os.environ.get(
-            "PODCAST_BUCKET_NAME"
-        ) or "ai-post-transformers"
-        for prefix, dest in (
-            ("drafts/", draft_mp3_basenames),
-            ("episodes/", published_basenames),
-        ):
-            list_resp = client.list_objects_v2(
-                Bucket=podcast_bucket, Prefix=prefix, MaxKeys=2000
-            )
-            for obj in list_resp.get("Contents", []):
-                if obj["Key"].endswith(".mp3"):
-                    dest.add(
-                        obj["Key"].split("/")[-1].replace(".mp3", "")
-                    )
-    except Exception:
-        pass  # If this fails, continue without validation
+    needs_asset_validation = any(
+        local.get("status") in ("draft_generated", "approved_for_publish")
+        and local.get("draft_stem")
+        for _submission, local, _local_hash, _state in pending
+    )
+    if needs_asset_validation:
+        try:
+            podcast_bucket = os.environ.get("BUCKET_NAME") or os.environ.get(
+                "PODCAST_BUCKET_NAME"
+            ) or "ai-post-transformers"
+            for prefix, dest in (
+                ("drafts/", draft_mp3_basenames),
+                ("episodes/", published_basenames),
+            ):
+                list_resp = client.list_objects_v2(
+                    Bucket=podcast_bucket, Prefix=prefix, MaxKeys=2000
+                )
+                for obj in list_resp.get("Contents", []):
+                    if obj["Key"].endswith(".mp3"):
+                        dest.add(
+                            obj["Key"].split("/")[-1].replace(".mp3", "")
+                        )
+        except Exception:
+            pass  # If this fails, continue without validation
 
-    for submission in store.list_submissions():
-        counts["scanned"] += 1
+    for submission, local, local_hash, state in pending:
         key = submission["_key"]
-        local = _normalize_submission_for_r2(submission)
 
         # Skip orphaned submissions (draft_generated/approved_for_publish
         # without corresponding MP3 files) to prevent them from
@@ -212,16 +308,34 @@ def sync_submissions_to_r2(
 
         try:
             remote = _read_submission(bucket=bucket, client=client, key=key)
+            counts["read"] += 1
         except Exception as exc:
             if "NoSuchKey" not in str(exc) and "404" not in str(exc):
                 raise
             remote = None
 
-        if remote is not None and _record_updated_at(local) <= _record_updated_at(remote):
+        if (remote is not None
+                and _record_updated_at(local) <= _record_updated_at(remote)):
             counts["skipped"] += 1
+            _save_bridge_state(
+                store,
+                BRIDGE_SUBMISSIONS,
+                key,
+                remote_etag=state.get("remote_etag") if state else None,
+                remote_hash=_record_hash(remote),
+            )
             continue
 
-        _write_submission(bucket=bucket, client=client, key=key, submission=local)
+        response = _write_submission(
+            bucket=bucket, client=client, key=key, submission=local,
+        )
+        _save_bridge_state(
+            store,
+            BRIDGE_SUBMISSIONS,
+            key,
+            remote_etag=_object_etag(response),
+            remote_hash=local_hash,
+        )
         counts["exported"] += 1
 
     return counts
@@ -233,20 +347,40 @@ def sync_publish_jobs_from_r2(
     r2_store=None,
 ) -> dict:
     r2_store = r2_store or get_publish_job_store(mode="r2")
-    counts = {"scanned": 0, "imported": 0, "skipped": 0}
+    counts = {"scanned": 0, "read": 0, "imported": 0, "skipped": 0}
+    states = _bridge_states(store, BRIDGE_PUBLISH_JOBS)
 
-    for remote_job in r2_store.list_jobs():
+    for obj in r2_store.list_job_objects():
         counts["scanned"] += 1
+        key = obj["Key"]
+        job_id = Path(key).stem
+        state = states.get(job_id)
+        if _remote_object_unchanged(state, obj):
+            counts["skipped"] += 1
+            continue
+
+        remote_job = r2_store.load_job(key)
+        counts["read"] += 1
         remote = _normalize_job_for_store(remote_job)
+        remote_hash = _record_hash(remote)
         try:
             local = store.load_job(remote["job_id"])
         except KeyError:
             local = None
-        if local is not None and _record_updated_at(remote) <= _record_updated_at(local):
+        if (local is not None
+                and _record_updated_at(remote) <= _record_updated_at(local)):
             counts["skipped"] += 1
-            continue
-        store.save_job(remote)
-        counts["imported"] += 1
+        else:
+            store.save_job(remote)
+            counts["imported"] += 1
+
+        _save_bridge_state(
+            store,
+            BRIDGE_PUBLISH_JOBS,
+            remote["job_id"],
+            remote_etag=_object_etag(obj),
+            remote_hash=remote_hash,
+        )
 
     return counts
 
@@ -257,19 +391,46 @@ def sync_publish_jobs_to_r2(
     r2_store=None,
 ) -> dict:
     r2_store = r2_store or get_publish_job_store(mode="r2")
-    counts = {"scanned": 0, "exported": 0, "skipped": 0}
+    counts = {"scanned": 0, "read": 0, "exported": 0, "skipped": 0}
+    states = _bridge_states(store, BRIDGE_PUBLISH_JOBS)
 
     for local_job in store.list_jobs():
         counts["scanned"] += 1
         local = _normalize_job_for_store(local_job)
-        try:
-            remote = r2_store.load_job(local["job_id"])
-        except KeyError:
-            remote = None
-        if remote is not None and _record_updated_at(local) <= _record_updated_at(remote):
+        job_id = local["job_id"]
+        local_hash = _record_hash(local)
+        state = states.get(job_id)
+        if state and state.get("remote_hash") == local_hash:
             counts["skipped"] += 1
             continue
+        try:
+            remote = r2_store.load_job(job_id)
+            counts["read"] += 1
+        except Exception as exc:
+            if (not isinstance(exc, KeyError)
+                    and "NoSuchKey" not in str(exc)
+                    and "404" not in str(exc)):
+                raise
+            remote = None
+        if (remote is not None
+                and _record_updated_at(local) <= _record_updated_at(remote)):
+            counts["skipped"] += 1
+            _save_bridge_state(
+                store,
+                BRIDGE_PUBLISH_JOBS,
+                job_id,
+                remote_etag=state.get("remote_etag") if state else None,
+                remote_hash=_record_hash(remote),
+            )
+            continue
         r2_store.save_job(local)
+        _save_bridge_state(
+            store,
+            BRIDGE_PUBLISH_JOBS,
+            job_id,
+            remote_etag=None,
+            remote_hash=local_hash,
+        )
         counts["exported"] += 1
 
     return counts
@@ -281,22 +442,45 @@ def sync_publish_results_from_r2(
     r2_store=None,
 ) -> dict:
     r2_store = r2_store or get_publish_job_store(mode="r2")
-    counts = {"scanned": 0, "imported": 0, "skipped": 0}
+    counts = {"scanned": 0, "read": 0, "imported": 0, "skipped": 0}
+    states = _bridge_states(store, BRIDGE_PUBLISH_RESULTS)
 
-    for remote_result in r2_store.list_results():
+    for obj in r2_store.list_result_objects():
         counts["scanned"] += 1
+        key = obj["Key"]
+        job_id = Path(key).stem
+        state = states.get(job_id)
+        if _remote_object_unchanged(state, obj):
+            counts["skipped"] += 1
+            continue
+
+        remote_result = r2_store.load_result(job_id)
+        counts["read"] += 1
+        if remote_result is None:
+            counts["skipped"] += 1
+            continue
         job_id = remote_result.get("job_id")
         if not job_id:
             counts["skipped"] += 1
             continue
         remote = deepcopy(remote_result)
         remote.setdefault("updated_at", _record_iso_updated_at(remote))
+        remote_hash = _record_hash(remote)
         local = store.load_result(job_id)
-        if local is not None and _record_updated_at(remote) <= _record_updated_at(local):
+        if (local is not None
+                and _record_updated_at(remote) <= _record_updated_at(local)):
             counts["skipped"] += 1
-            continue
-        store.save_result(job_id, remote)
-        counts["imported"] += 1
+        else:
+            store.save_result(job_id, remote)
+            counts["imported"] += 1
+
+        _save_bridge_state(
+            store,
+            BRIDGE_PUBLISH_RESULTS,
+            job_id,
+            remote_etag=_object_etag(obj),
+            remote_hash=remote_hash,
+        )
 
     return counts
 
@@ -307,7 +491,8 @@ def sync_publish_results_to_r2(
     r2_store=None,
 ) -> dict:
     r2_store = r2_store or get_publish_job_store(mode="r2")
-    counts = {"scanned": 0, "exported": 0, "skipped": 0}
+    counts = {"scanned": 0, "read": 0, "exported": 0, "skipped": 0}
+    states = _bridge_states(store, BRIDGE_PUBLISH_RESULTS)
 
     for local_result in store.list_results():
         counts["scanned"] += 1
@@ -317,11 +502,32 @@ def sync_publish_results_to_r2(
             continue
         local = deepcopy(local_result)
         local.setdefault("updated_at", _record_iso_updated_at(local))
-        remote = r2_store.load_result(job_id)
-        if remote is not None and _record_updated_at(local) <= _record_updated_at(remote):
+        local_hash = _record_hash(local)
+        state = states.get(job_id)
+        if state and state.get("remote_hash") == local_hash:
             counts["skipped"] += 1
             continue
+        remote = r2_store.load_result(job_id)
+        counts["read"] += 1
+        if (remote is not None
+                and _record_updated_at(local) <= _record_updated_at(remote)):
+            counts["skipped"] += 1
+            _save_bridge_state(
+                store,
+                BRIDGE_PUBLISH_RESULTS,
+                job_id,
+                remote_etag=state.get("remote_etag") if state else None,
+                remote_hash=_record_hash(remote),
+            )
+            continue
         r2_store.save_result(job_id, local)
+        _save_bridge_state(
+            store,
+            BRIDGE_PUBLISH_RESULTS,
+            job_id,
+            remote_etag=None,
+            remote_hash=local_hash,
+        )
         counts["exported"] += 1
 
     return counts
@@ -557,7 +763,8 @@ def _summary_string(direction: str, summary: dict) -> str:
         changed = counts.get("imported", 0) + counts.get("exported", 0)
         parts.append(
             f"{section}: scanned={counts.get('scanned', 0)} "
-            f"changed={changed} skipped={counts.get('skipped', 0)}"
+            f"read={counts.get('read', 0)} changed={changed} "
+            f"skipped={counts.get('skipped', 0)}"
         )
     return f"[queue-bridge] {direction} :: " + ", ".join(parts)
 

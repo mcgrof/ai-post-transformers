@@ -7,6 +7,7 @@ the combined sync cycle.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -41,6 +42,9 @@ class FakeR2Client:
 
     def __init__(self):
         self._objects: dict[str, dict[str, bytes]] = {}
+        self.get_calls = 0
+        self.list_calls = 0
+        self.put_calls = 0
 
     def _ensure_bucket(self, bucket):
         self._objects.setdefault(bucket, {})
@@ -50,9 +54,12 @@ class FakeR2Client:
         if isinstance(Body, str):
             Body = Body.encode("utf-8")
         self._objects[Bucket][Key] = Body
+        self.put_calls += 1
+        return {"ETag": hashlib.md5(Body).hexdigest()}
 
     def get_object(self, *, Bucket, Key):
         self._ensure_bucket(Bucket)
+        self.get_calls += 1
         data = self._objects[Bucket].get(Key)
         if data is None:
             raise Exception(f"NoSuchKey: {Key}")
@@ -62,17 +69,35 @@ class FakeR2Client:
         assert method == "list_objects_v2"
         return _FakePaginator(self)
 
+    def list_objects_v2(self, *, Bucket, Prefix, MaxKeys=None):
+        self.list_calls += 1
+        self._ensure_bucket(Bucket)
+        contents = []
+        for key, body in sorted(self._objects[Bucket].items()):
+            if key.startswith(Prefix):
+                contents.append({
+                    "Key": key,
+                    "ETag": hashlib.md5(body).hexdigest(),
+                })
+        if MaxKeys is not None:
+            contents = contents[:MaxKeys]
+        return {"Contents": contents}
+
 
 class _FakePaginator:
     def __init__(self, client: FakeR2Client):
         self._client = client
 
     def paginate(self, *, Bucket, Prefix):
+        self._client.list_calls += 1
         self._client._ensure_bucket(Bucket)
         contents = []
-        for key in sorted(self._client._objects[Bucket]):
+        for key, body in sorted(self._client._objects[Bucket].items()):
             if key.startswith(Prefix):
-                contents.append({"Key": key})
+                contents.append({
+                    "Key": key,
+                    "ETag": hashlib.md5(body).hexdigest(),
+                })
         yield {"Contents": contents}
 
 
@@ -87,6 +112,34 @@ class FakeR2PublishJobStore:
     def __init__(self):
         self._jobs: dict[str, dict] = {}
         self._results: dict[str, dict] = {}
+        self.load_job_calls = 0
+        self.load_result_calls = 0
+        self.list_calls = 0
+
+    @staticmethod
+    def _etag(data: dict) -> str:
+        payload = json.dumps(data, sort_keys=True).encode("utf-8")
+        return hashlib.md5(payload).hexdigest()
+
+    def list_job_objects(self) -> list[dict]:
+        self.list_calls += 1
+        return [
+            {
+                "Key": f"publish-jobs/{job_id}.json",
+                "ETag": self._etag(self._jobs[job_id]),
+            }
+            for job_id in sorted(self._jobs)
+        ]
+
+    def list_result_objects(self) -> list[dict]:
+        self.list_calls += 1
+        return [
+            {
+                "Key": f"publish-results/{job_id}.json",
+                "ETag": self._etag(self._results[job_id]),
+            }
+            for job_id in sorted(self._results)
+        ]
 
     def list_jobs(self) -> list[dict]:
         from scripts.publish_jobs import validate_job
@@ -106,6 +159,7 @@ class FakeR2PublishJobStore:
             raw = raw[:-5]
         if raw not in self._jobs:
             raise KeyError(f"publish job not found: {raw}")
+        self.load_job_calls += 1
         job = deepcopy(self._jobs[raw])
         validate_job(job)
         return job
@@ -121,6 +175,7 @@ class FakeR2PublishJobStore:
         return job_id
 
     def load_result(self, job_id) -> dict | None:
+        self.load_result_calls += 1
         r = self._results.get(job_id)
         if r is None:
             return None
@@ -605,6 +660,114 @@ class TestSyncCycle:
 
         data, _ = store.load_submission("submissions/stale.json")
         assert data["status"] == "draft_generated"
+
+    def test_second_noop_cycle_does_not_read_record_bodies(
+        self, store, client, r2_pub_store
+    ):
+        for suffix in ("one", "two"):
+            _put_json(client, BUCKET, f"submissions/{suffix}.json", {
+                "status": "submitted",
+                "updated_at": _ts(10),
+            })
+            job = make_job_record(
+                draft_key=f"drafts/2026/03/{suffix}.mp3",
+                job_id=f"pub_{suffix}",
+            )
+            job["updated_at"] = _ts(10)
+            r2_pub_store.save_job(job)
+            r2_pub_store.save_result(f"pub_{suffix}", {
+                "job_id": f"pub_{suffix}",
+                "ok": True,
+                "updated_at": _ts(10),
+            })
+
+        sync_down(
+            store, bucket=BUCKET, client=client,
+            r2_publish_store=r2_pub_store,
+        )
+        sync_up(
+            store, bucket=BUCKET, client=client,
+            r2_publish_store=r2_pub_store,
+        )
+
+        client.get_calls = 0
+        client.put_calls = 0
+        client.list_calls = 0
+        r2_pub_store.load_job_calls = 0
+        r2_pub_store.load_result_calls = 0
+        r2_pub_store.list_calls = 0
+
+        down = sync_down(
+            store, bucket=BUCKET, client=client,
+            r2_publish_store=r2_pub_store,
+        )
+        up = sync_up(
+            store, bucket=BUCKET, client=client,
+            r2_publish_store=r2_pub_store,
+        )
+
+        assert client.get_calls == 0
+        assert client.put_calls == 0
+        assert client.list_calls == 1
+        assert r2_pub_store.load_job_calls == 0
+        assert r2_pub_store.load_result_calls == 0
+        assert r2_pub_store.list_calls == 2
+        assert down["submissions"]["read"] == 0
+        assert down["publish_jobs"]["read"] == 0
+        assert down["publish_results"]["read"] == 0
+        assert up["submissions"]["read"] == 0
+        assert up["publish_jobs"]["read"] == 0
+        assert up["publish_results"]["read"] == 0
+
+    def test_only_changed_remote_record_is_read(
+        self, store, client, r2_pub_store
+    ):
+        for suffix in ("one", "two"):
+            _put_json(client, BUCKET, f"submissions/{suffix}.json", {
+                "status": "submitted",
+                "updated_at": _ts(10),
+            })
+
+        sync_submissions_from_r2(store, bucket=BUCKET, client=client)
+        client.get_calls = 0
+
+        _put_json(client, BUCKET, "submissions/two.json", {
+            "status": "rejected",
+            "updated_at": _ts(0),
+        })
+        counts = sync_submissions_from_r2(
+            store, bucket=BUCKET, client=client
+        )
+
+        assert client.get_calls == 1
+        assert counts["read"] == 1
+        assert counts["imported"] == 1
+        assert counts["skipped"] == 1
+
+    def test_only_changed_local_record_is_checked_and_exported(
+        self, store, client, r2_pub_store
+    ):
+        for suffix in ("one", "two"):
+            _put_json(client, BUCKET, f"submissions/{suffix}.json", {
+                "status": "submitted",
+                "updated_at": _ts(10),
+            })
+
+        sync_submissions_from_r2(store, bucket=BUCKET, client=client)
+        store.update_submission("submissions/two.json", {
+            "status": "generation_running",
+        })
+        client.get_calls = 0
+        client.put_calls = 0
+
+        counts = sync_submissions_to_r2(
+            store, bucket=BUCKET, client=client
+        )
+
+        assert client.get_calls == 1
+        assert client.put_calls == 1
+        assert counts["read"] == 1
+        assert counts["exported"] == 1
 
 
 # ---------------------------------------------------------------------------

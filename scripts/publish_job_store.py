@@ -138,27 +138,37 @@ class R2PublishJobStore:
                 return None
             raise
 
-    def list_results(self) -> list[dict]:
+    def _list_objects(self, prefix: str) -> list[dict]:
+        """List object metadata without reading every JSON body."""
         paginator = self.client.get_paginator("list_objects_v2")
+        objects = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            objects.extend(page.get("Contents", []))
+        return sorted(objects, key=lambda item: item["Key"])
+
+    def list_result_objects(self) -> list[dict]:
+        return self._list_objects(self.results_prefix)
+
+    def list_job_objects(self) -> list[dict]:
+        return self._list_objects(self.jobs_prefix)
+
+    def list_results(self) -> list[dict]:
         records = []
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.results_prefix):
-            for obj in sorted(page.get("Contents", []), key=lambda item: item["Key"]):
-                key = obj["Key"]
-                data = self._read_json(key)
-                # Derive job_id from key if not embedded
-                stem = key[len(self.results_prefix):]
-                if stem.endswith(".json"):
-                    stem = stem[:-5]
-                data.setdefault("job_id", stem)
-                records.append(data)
+        for obj in self.list_result_objects():
+            key = obj["Key"]
+            data = self._read_json(key)
+            # Derive job_id from key if not embedded
+            stem = key[len(self.results_prefix):]
+            if stem.endswith(".json"):
+                stem = stem[:-5]
+            data.setdefault("job_id", stem)
+            records.append(data)
         return records
 
     def list_jobs(self) -> list[dict]:
-        paginator = self.client.get_paginator("list_objects_v2")
         records = []
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.jobs_prefix):
-            for obj in sorted(page.get("Contents", []), key=lambda item: item["Key"]):
-                records.append(self.load_job(obj["Key"]))
+        for obj in self.list_job_objects():
+            records.append(self.load_job(obj["Key"]))
         return records
 
 

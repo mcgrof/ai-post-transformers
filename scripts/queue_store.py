@@ -108,10 +108,63 @@ class SQLiteQueueStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_queue_history_record
                     ON queue_history(table_name, record_key);
+
+                CREATE TABLE IF NOT EXISTS bridge_sync_state (
+                    record_type TEXT NOT NULL,
+                    record_key TEXT NOT NULL,
+                    remote_etag TEXT,
+                    remote_hash TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (record_type, record_key)
+                );
             """)
 
     def describe(self) -> str:
         return f"sqlite:{self.path}"
+
+    # ------------------------------------------------------------------
+    # R2 bridge state
+    # ------------------------------------------------------------------
+
+    def list_bridge_states(self, record_type: str) -> dict[str, dict]:
+        """Return cached remote identity for one bridge record type."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT record_key, remote_etag, remote_hash, updated_at "
+                "FROM bridge_sync_state WHERE record_type = ?",
+                (record_type,),
+            ).fetchall()
+        return {
+            row[0]: {
+                "remote_etag": row[1],
+                "remote_hash": row[2],
+                "updated_at": row[3],
+            }
+            for row in rows
+        }
+
+    def save_bridge_state(
+        self,
+        record_type: str,
+        record_key: str,
+        *,
+        remote_etag: str | None,
+        remote_hash: str,
+    ) -> None:
+        """Remember the remote version consumed or produced by the bridge."""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO bridge_sync_state "
+                "(record_type, record_key, remote_etag, remote_hash, "
+                "updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(record_type, record_key) DO UPDATE SET "
+                "remote_etag = excluded.remote_etag, "
+                "remote_hash = excluded.remote_hash, "
+                "updated_at = excluded.updated_at",
+                (record_type, record_key, remote_etag, remote_hash,
+                 self._now_iso()),
+            )
+            conn.commit()
 
     # ------------------------------------------------------------------
     # History
@@ -608,9 +661,31 @@ class InMemoryQueueStore:
         self._publish_jobs: dict[str, tuple[dict, int]] = {}
         self._publish_results: dict[str, dict] = {}
         self._history: list[dict] = []
+        self._bridge_sync_state: dict[tuple[str, str], dict] = {}
 
     def describe(self) -> str:
         return "memory"
+
+    def list_bridge_states(self, record_type: str) -> dict[str, dict]:
+        return {
+            key: deepcopy(value)
+            for (kind, key), value in self._bridge_sync_state.items()
+            if kind == record_type
+        }
+
+    def save_bridge_state(
+        self,
+        record_type: str,
+        record_key: str,
+        *,
+        remote_etag: str | None,
+        remote_hash: str,
+    ) -> None:
+        self._bridge_sync_state[(record_type, record_key)] = {
+            "remote_etag": remote_etag,
+            "remote_hash": remote_hash,
+            "updated_at": self._now_iso(),
+        }
 
     def _now_dt(self) -> datetime:
         if self._now:
