@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import worker, {
   isAllowedPath, CANONICAL_HOST, WORKERS_DEV_SUFFIX,
   DENIED_PREFIXES, ALLOWED_PREFIXES, ALLOWED_EXACT_FILES,
+  IMMUTABLE_CACHE_CONTROL,
 } from './worker.js';
 
 
@@ -12,6 +13,7 @@ class MockR2ObjectBody {
     this.body = body;
     this.size = size;
     this.httpMetadata = httpMetadata;
+    this.httpEtag = '"mock-etag"';
   }
 
   writeHttpMetadata(headers) {
@@ -25,6 +27,7 @@ class MockR2ObjectBody {
 class MockBucket {
   constructor(seed = {}) {
     this.objects = new Map();
+    this.getCalls = 0;
     for (const [key, value] of Object.entries(seed)) {
       const body = typeof value === 'string' ? value : JSON.stringify(value);
       this.objects.set(key, body);
@@ -32,6 +35,7 @@ class MockBucket {
   }
 
   async get(key, opts) {
+    this.getCalls += 1;
     if (!this.objects.has(key)) return null;
     const body = this.objects.get(key);
     const size = body.length;
@@ -47,8 +51,30 @@ class MockBucket {
 }
 
 
-function makeEnv(seed = {}) {
-  return { BUCKET: new MockBucket(seed) };
+class MockCache {
+  constructor() {
+    this.responses = new Map();
+    this.matchCalls = 0;
+    this.putCalls = 0;
+  }
+
+  async match(request) {
+    this.matchCalls += 1;
+    const response = this.responses.get(request.url);
+    return response ? response.clone() : undefined;
+  }
+
+  async put(request, response) {
+    this.putCalls += 1;
+    this.responses.set(request.url, response.clone());
+  }
+}
+
+
+function makeEnv(seed = {}, cache = null) {
+  const env = { BUCKET: new MockBucket(seed) };
+  if (cache) env.CACHE = cache;
+  return env;
 }
 
 function makeRequest(path, opts = {}) {
@@ -154,6 +180,42 @@ test('public episode audio is served', async () => {
   const req = makeRequest('/episodes/2026-03-30-test-abc123.mp3');
   const resp = await worker.fetch(req, env);
   assert.equal(resp.status, 200);
+  assert.equal(resp.headers.get('Cache-Control'), IMMUTABLE_CACHE_CONTROL);
+  assert.equal(resp.headers.get('ETag'), '"mock-etag"');
+  assert.equal(resp.headers.get('X-Podcast-Cache'), 'MISS');
+});
+
+test('full audio responses populate edge cache', async () => {
+  const cache = new MockCache();
+  const env = makeEnv({ 'episodes/cached.mp3': 'audio-data' }, cache);
+  const waits = [];
+  const ctx = { waitUntil: promise => waits.push(promise) };
+  const req = makeRequest('/episodes/cached.mp3');
+
+  const resp = await worker.fetch(req, env, ctx);
+  await Promise.all(waits);
+
+  assert.equal(resp.status, 200);
+  assert.equal(cache.putCalls, 1);
+  assert.equal(env.BUCKET.getCalls, 1);
+});
+
+test('cached audio bypasses R2', async () => {
+  const cache = new MockCache();
+  const req = makeRequest('/episodes/cached.mp3');
+  await cache.put(req, new Response('cached-audio', {
+    headers: {
+      'Cache-Control': IMMUTABLE_CACHE_CONTROL,
+      'Content-Length': '12',
+    },
+  }));
+  const env = makeEnv({ 'episodes/cached.mp3': 'origin-audio' }, cache);
+
+  const resp = await worker.fetch(req, env);
+
+  assert.equal(await resp.text(), 'cached-audio');
+  assert.equal(resp.headers.get('X-Podcast-Cache'), 'HIT');
+  assert.equal(env.BUCKET.getCalls, 0);
 });
 
 test('viz files are served', async () => {
