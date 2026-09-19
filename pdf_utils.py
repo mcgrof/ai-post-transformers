@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -31,6 +32,13 @@ _OPENREVIEW_FORUM_RE = re.compile(
 _GITHUB_BLOB_RE = re.compile(
     r"https?://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/(.+)$"
 )
+
+# Some public article sites place a JavaScript Cloudflare challenge in front
+# of normal server-side HTTP clients. Keep the reader fallback deliberately
+# narrow: only known-public article paths, without credentials or query
+# strings that could leak secrets to the proxy.
+_READER_FALLBACK_HOSTS = {"openai.com", "www.openai.com"}
+_READER_FALLBACK_BASE = "https://r.jina.ai/"
 
 
 def _normalize_pdf_url(url):
@@ -285,6 +293,69 @@ def _extract_html_main_text(html_bytes, *, source_url=""):
     return extracted
 
 
+def _reader_fallback_url(url):
+    """Return a safe reader-proxy URL for an allowlisted public article."""
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or hostname not in _READER_FALLBACK_HOSTS
+        or not parsed.path.startswith("/index/")
+        or parsed.username
+        or parsed.password
+        or parsed.query
+    ):
+        return None
+    source_url = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        "",
+        "",
+    ))
+    return f"{_READER_FALLBACK_BASE}{source_url}"
+
+
+def _download_reader_text(url, timeout=60):
+    """Fetch Markdown through the scoped reader fallback."""
+    reader_url = _reader_fallback_url(url)
+    if reader_url is None:
+        raise ValueError(f"Reader fallback is not allowed for URL: {url}")
+
+    print(
+        f"[HTML] Direct fetch challenged; using reader fallback for {url}",
+        file=sys.stderr,
+    )
+    resp = requests.get(
+        reader_url,
+        timeout=timeout,
+        # Jina challenges spoofed browser UAs but accepts ordinary HTTP
+        # clients. Do not reuse the direct-site browser profile here.
+        headers={"Accept": "text/plain,*/*"},
+    )
+    resp.raise_for_status()
+    content_type = (resp.headers.get("content-type") or "").lower()
+    if content_type and "text/plain" not in content_type:
+        raise ValueError(
+            f"Reader fallback did not return text: {url} "
+            f"(content-type: {content_type})"
+        )
+
+    text = sanitize_text(resp.text)
+    marker = "Markdown Content:"
+    if marker in text:
+        text = text.split(marker, 1)[1].lstrip()
+    if len(text.strip()) < 500:
+        raise ValueError(
+            f"Reader fallback returned too little article text: {url}"
+        )
+    print(
+        f"[HTML] Reader extracted {len(text)} chars from {url}",
+        file=sys.stderr,
+    )
+    return text
+
+
 def download_html_text(url, timeout=60):
     """Download an HTML page and return its main article text.
 
@@ -298,7 +369,15 @@ def download_html_text(url, timeout=60):
         "Accept": "text/html,application/xhtml+xml,*/*",
     }
     resp = requests.get(resolved_url, timeout=timeout, headers=headers)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        if (
+            resp.status_code in {403, 429}
+            and _reader_fallback_url(resolved_url) is not None
+        ):
+            return _download_reader_text(resolved_url, timeout=timeout)
+        raise
     content_type = (resp.headers.get("content-type") or "").lower()
     if "html" not in content_type and "xml" not in content_type:
         raise ValueError(
@@ -334,6 +413,19 @@ def download_and_extract(url):
         return extract_text(local)
     try:
         pdf_path = download_pdf(url)
+    except requests.exceptions.HTTPError as exc:
+        # A PDF-flavored Accept header can itself trigger a publisher's
+        # bot policy. Retry once through the HTML path. If that request is
+        # also challenged, download_html_text may use its scoped reader.
+        status = getattr(exc.response, "status_code", None)
+        if status not in {403, 406, 429}:
+            raise
+        text = download_html_text(url)
+        if not text.strip():
+            raise ValueError(
+                f"URL returned no extractable article text: {url}"
+            ) from exc
+        return text
     except ValueError as exc:
         if "did not return a PDF" not in str(exc):
             raise

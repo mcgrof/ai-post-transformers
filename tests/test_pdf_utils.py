@@ -1,19 +1,33 @@
 from pathlib import Path
 
 import pytest
+import requests
 
 from pdf_utils import _normalize_pdf_url, download_and_extract, download_pdf
 from podcast import generate_podcast_from_urls
 
 
 class DummyResponse:
-    def __init__(self, url, body, content_type="application/pdf"):
+    def __init__(
+        self, url, body, content_type="application/pdf", status_code=200,
+    ):
         self.url = url
         self._body = body
         self.content = body
         self.headers = {"content-type": content_type}
+        self.status_code = status_code
+
+    @property
+    def text(self):
+        return self._body.decode("utf-8")
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            error = requests.exceptions.HTTPError(
+                f"{self.status_code} Client Error for url: {self.url}"
+            )
+            error.response = self
+            raise error
         return None
 
     def iter_content(self, chunk_size=8192):
@@ -173,6 +187,83 @@ def test_download_and_extract_raises_on_html_with_no_extractable_text(
 
     with pytest.raises(ValueError, match="no extractable article text"):
         download_and_extract("https://www.example.com/empty")
+
+
+def test_download_and_extract_retries_html_after_pdf_request_is_forbidden(
+    monkeypatch,
+):
+    """A server may reject a PDF Accept header but allow normal HTML."""
+    calls = []
+    html_body = (
+        b"<html><article><h1>Public article</h1>"
+        b"<p>The normal HTML request succeeded.</p></article></html>"
+    )
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs.get("headers") or {})
+        if len(calls) == 1:
+            return DummyResponse(
+                url, b"forbidden", "text/html", status_code=403,
+            )
+        return DummyResponse(url, html_body, "text/html; charset=utf-8")
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    text = download_and_extract("https://www.example.com/research/post")
+
+    assert len(calls) == 2
+    assert "application/pdf" in calls[0]["Accept"]
+    assert "text/html" in calls[1]["Accept"]
+    assert "The normal HTML request succeeded." in text
+
+
+def test_openai_challenge_uses_scoped_reader_fallback(monkeypatch):
+    """OpenAI article pages challenge direct clients via Cloudflare."""
+    source_url = "https://openai.com/index/an-alien-mind/"
+    article = "A public article paragraph with useful detail. " * 20
+    reader_body = (
+        "Title: An Alien Mind\n\n"
+        f"URL Source: {source_url}\n\n"
+        f"Markdown Content:\n{article}"
+    ).encode()
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if url.startswith("https://r.jina.ai/"):
+            return DummyResponse(url, reader_body, "text/plain; charset=utf-8")
+        return DummyResponse(
+            url, b"challenge", "text/html", status_code=403,
+        )
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    text = download_and_extract(source_url)
+
+    assert calls == [source_url, source_url, f"https://r.jina.ai/{source_url}"]
+    assert text.startswith("A public article paragraph")
+    assert "URL Source:" not in text
+    assert len(text) >= 500
+
+
+def test_reader_fallback_rejects_query_secrets(monkeypatch):
+    """Never disclose tokenized or otherwise secret URLs to a proxy."""
+    source_url = "https://openai.com/index/private-preview/?token=secret"
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return DummyResponse(
+            url, b"challenge", "text/html", status_code=403,
+        )
+
+    monkeypatch.setattr("pdf_utils.requests.get", fake_get)
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        download_and_extract(source_url)
+
+    assert calls == [source_url, source_url]
+    assert all("r.jina.ai" not in url for url in calls)
 
 
 def test_generate_podcast_from_urls_reports_extract_failures_cleanly(
