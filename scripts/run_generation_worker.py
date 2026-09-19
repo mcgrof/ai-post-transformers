@@ -647,7 +647,7 @@ def _publish_draft_metadata(draft_stem: str) -> None:
         # Find episode by matching audio_file path precisely.
         # Use exact path match instead of filename-only LIKE to avoid
         # finding stale episodes with same filename from different paths.
-        audio_file_abs = str(Path(draft_stem).with_suffix(".mp3"))
+        audio_file_abs = str(local_stem.with_suffix(".mp3"))
         rows = conn.execute(
             "SELECT * FROM podcasts WHERE audio_file = ? "
             "ORDER BY id DESC LIMIT 1",

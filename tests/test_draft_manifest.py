@@ -442,8 +442,10 @@ class TestPublishDraftMetadata:
 
         from scripts.run_generation_worker import _publish_draft_metadata
 
+        # The generation parser returns a repository-relative draft stem,
+        # while podcasts.audio_file stores the absolute local path.
         _publish_draft_metadata(
-            str(tmp_path / "drafts" / "2026" / "03" / "2026-03-29-test-gen-aabbcc")
+            "drafts/2026/03/2026-03-29-test-gen-aabbcc"
         )
 
         # Verify manifest was updated
