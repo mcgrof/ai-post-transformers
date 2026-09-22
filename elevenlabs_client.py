@@ -143,6 +143,70 @@ def _load_host_soul_profiles():
     return profiles
 
 
+def podcast_work_dir():
+    """Scratch space for generation: per-segment audio, Kokoro scripts and
+    wavs, the podcast_* assembly directory.
+
+    Not /tmp. On the generation host /tmp is a small tmpfs shared with
+    every other job on the box, and it has filled up under unrelated work
+    while an episode was rendering: Kokoro then died with ENOSPC on its wav,
+    and the fallback made things worse. A directory on the home filesystem
+    has hundreds of gigabytes to spare. Override with PODCAST_WORK_DIR.
+    """
+    path = os.environ.get("PODCAST_WORK_DIR") or os.path.expanduser(
+        "~/.cache/ai-post-transformers/work")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _require_free_space(path, min_bytes, what):
+    """Fail early and clearly instead of letting a backend die mid-write."""
+    import shutil
+    free = shutil.disk_usage(path).free
+    if free < min_bytes:
+        raise RuntimeError(
+            f"{what}: only {free / 2**20:.0f} MB free under {path}; "
+            f"need {min_bytes / 2**20:.0f} MB")
+
+
+_PIPER_COMMAND = None
+
+
+def _piper_command():
+    """The command that runs Piper, resolved once.
+
+    The `piper` wrapper on PATH runs whatever `python3` is, and the piper_tts
+    package is installed for one specific interpreter; after a system Python
+    upgrade the wrapper imports nothing and every episode that reached the
+    Piper fallback died with ModuleNotFoundError. Prefer an interpreter that
+    can actually import the module, and say what was tried when none can.
+    """
+    global _PIPER_COMMAND
+    if _PIPER_COMMAND is not None:
+        return _PIPER_COMMAND
+    import shutil, subprocess
+    tried = []
+    candidates = []
+    if os.environ.get("PIPER_PYTHON"):
+        candidates.append(os.environ["PIPER_PYTHON"])
+    candidates += [sys.executable, "python3.13", "python3.12", "python3"]
+    for python in candidates:
+        exe = shutil.which(python) if not os.path.isabs(python) else python
+        if not exe or not os.path.exists(exe):
+            tried.append(f"{python}: not found")
+            continue
+        probe = subprocess.run([exe, "-c", "import piper"], capture_output=True, text=True)
+        if probe.returncode == 0:
+            _PIPER_COMMAND = [exe, "-m", "piper"]
+            return _PIPER_COMMAND
+        tried.append(f"{exe}: no piper module")
+    if shutil.which("piper"):
+        # Last resort: the wrapper, which may or may not import.
+        _PIPER_COMMAND = ["piper"]
+        return _PIPER_COMMAND
+    raise RuntimeError("no interpreter can import piper (" + "; ".join(tried) + ")")
+
+
 def tts_segment(text, voice_id, output_path, config=None):
     """Generate speech using configured TTS backend with fallback chain.
 
@@ -235,7 +299,7 @@ def _tts_piper(text, voice_id, output_path):
     wav_path = output_path + ".wav"
     try:
         proc = subprocess.run(
-            ["piper", "--model", model, "--output_file", wav_path],
+            _piper_command() + ["--model", model, "--output_file", wav_path],
             input=text, capture_output=True, text=True, timeout=120
         )
         if proc.returncode != 0:
@@ -254,7 +318,7 @@ def _tts_piper(text, voice_id, output_path):
                 pass
 
 
-def sweep_stale_podcast_tmp(max_age_hours=2, tmp_dir="/tmp"):
+def sweep_stale_podcast_tmp(max_age_hours=2, tmp_dir=None):
     """Delete stale podcast artifacts from crashed/killed runs.
 
     Removes:
@@ -262,12 +326,18 @@ def sweep_stale_podcast_tmp(max_age_hours=2, tmp_dir="/tmp"):
       - {tmp_dir}/kokoro_tts_*.py and kokoro_out_*.wav older than max_age_hours
 
     Called at the start of generation so a prior failed run can't
-    leave /tmp full.  Best-effort: failures are logged and ignored.
+    leave the scratch space full.  Best-effort: failures are logged
+    and ignored.  With tmp_dir unset it sweeps the work directory and
+    /tmp, where earlier versions of this pipeline left their files.
 
     The tmp_dir parameter exists so tests can target a pytest-provided
     directory without monkey-patching glob.
     """
     import glob, shutil, time
+
+    if tmp_dir is None:
+        return sum(sweep_stale_podcast_tmp(max_age_hours, d)
+                   for d in (podcast_work_dir(), "/tmp"))
 
     cutoff = time.time() - (max_age_hours * 3600)
     removed = 0
@@ -341,10 +411,14 @@ def _tts_kokoro(text, voice_id, output_path):
     else:
         kokoro_voice = "bm_george"  # Default to male
 
-    # Create unique temp paths
+    # Unique scratch paths under the work directory, which the container
+    # sees at the same path. A minute of 24 kHz float audio is about 6 MB;
+    # ask for a comfortable margin before starting a 2 GB container.
+    work = podcast_work_dir()
+    _require_free_space(work, 256 * 2**20, "Kokoro TTS")
     script_id = uuid.uuid4().hex[:8]
-    script_path = f"/tmp/kokoro_tts_{script_id}.py"
-    wav_path = f"/tmp/kokoro_out_{script_id}.wav"
+    script_path = os.path.join(work, f"kokoro_tts_{script_id}.py")
+    wav_path = os.path.join(work, f"kokoro_out_{script_id}.wav")
 
     # Write the Python script for Kokoro
     # Escape backslashes first, then quotes, to avoid double-escaping
@@ -369,15 +443,15 @@ print(f"Wrote {{len(full_audio)}} samples to {{output_path}}")
 '''
 
     try:
-        # Write script to /tmp (shared with container)
+        # Write the script where the container will read it.
         with open(script_path, "w") as f:
             f.write(script_content)
 
-        # Run Kokoro via Docker
-        # sg docker -c 'docker run --rm -v /tmp:/tmp kokoro-tts python /tmp/script.py'
+        # Run Kokoro via Docker, with the work directory bind-mounted at
+        # the same path so the script's paths hold inside the container.
         proc = subprocess.run(
             ["sg", "docker", "-c",
-             f"docker run --rm --entrypoint python3 -v /tmp:/tmp kokoro-tts {script_path}"],
+             f"docker run --rm --entrypoint python3 -v {work}:{work} kokoro-tts {script_path}"],
             capture_output=True, text=True, timeout=300
         )
 
@@ -2452,10 +2526,10 @@ def create_podcast(text, config, covered_topics=None, opening_reason=None):
           f"{interrupt_segs} interrupts", file=sys.stderr)
 
     # Generate TTS for each segment.
-    # Sweep stale /tmp artifacts from prior crashed runs before we
-    # start adding more — prevents /tmp from filling up indefinitely.
+    # Sweep stale artifacts from prior crashed runs before we start
+    # adding more, then assemble under the work directory, not /tmp.
     sweep_stale_podcast_tmp()
-    tmpdir = tempfile.mkdtemp(prefix="podcast_")
+    tmpdir = tempfile.mkdtemp(prefix="podcast_", dir=podcast_work_dir())
     segment_files = []
 
     # --- Generate countdown + theme song intro ---
@@ -2929,7 +3003,7 @@ def _estimate_intro_duration(list_file):
 
 
 def cleanup_podcast_tmpdir(tmpdir):
-    """Remove a /tmp/podcast_* directory after all artifacts are used.
+    """Remove a podcast_* assembly directory after all artifacts are used.
 
     Must be called by the caller AFTER finalize_podcast, save_transcript,
     and generate_srt have run — those read per-segment audio files
