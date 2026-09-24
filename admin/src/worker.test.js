@@ -248,6 +248,43 @@ test('POST /api/review approve creates durable publish job record', async () => 
 });
 
 
+test('POST /api/review resolves submission fallback to generated draft', async () => {
+  const submissionKey = 'submissions/2026-09-19T16-46-05-248Z.json';
+  const draftStem = 'drafts/2026/09/redwood-698afe';
+  const env = makeEnv({
+    admin: {
+      [submissionKey]: {
+        status: 'draft_generated',
+        draft_stem: draftStem,
+        urls: ['https://arxiv.org/pdf/2608.26418'],
+        status_history: [],
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request('https://admin.test/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: submissionKey,
+        action: 'approve',
+      }),
+    }),
+    env,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.success, true);
+  assert.equal(body.key, `${draftStem}.mp3`);
+  assert.equal(body.publish_job.draft_key, `${draftStem}.mp3`);
+  assert.equal(body.publish_job.draft_stem, draftStem);
+  const submission = JSON.parse(env.ADMIN_BUCKET.objects.get(submissionKey));
+  assert.equal(submission.status, 'approved_for_publish');
+});
+
+
 test('GET /api/drafts includes latest publish job status summary', async () => {
   const env = makeEnv({
     admin: {
@@ -4955,6 +4992,14 @@ test('Drafts page filters submission cards whose draft is already published', as
     'submission whose draft_stem matches a published episode must be filtered');
   assert.ok(html.includes('real-pending'),
     'genuinely pending submission must still appear');
+  assert.ok(
+    html.includes("approveDraft('drafts/2026/05/real-pending.mp3')"),
+    'submission fallback must approve the generated MP3, not its JSON record',
+  );
+  assert.ok(
+    !html.includes("approveDraft('submissions/real.json')"),
+    'submission JSON keys must never become publish-job draft keys',
+  );
 });
 
 test('draftVersionTag shows the numeric id and version hash for admins', () => {

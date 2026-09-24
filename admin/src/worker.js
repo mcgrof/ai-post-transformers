@@ -1615,7 +1615,7 @@ function draftsPageWithData(data, subsData) {
       const manifestDescription = bucketDraft && bucketDraft.description;
       const _diagBase = `[card-diag stem=${stemBase} bucketDraft=${bucketDraft ? 'found' : 'MISSING'} manifestTitle=${manifestTitle ? 'set' : 'MISSING'} bucketByStemSize=${bucketDraftByStem.size} all_drafts=${(data.all_drafts||[]).length} drafts=${(data.drafts||[]).length} err=${data.error ? data.error.slice(0,80) : 'none'}]`;
       return {
-        key: s.key || s.draft_stem,
+        key: s.draft_stem ? `${s.draft_stem}.mp3` : s.key,
         title: manifestTitle || displayTitle(s),
         date: s.timestamp ? s.timestamp.substring(0, 10) : 'Unknown',
         duration: 'Unknown',
@@ -5196,6 +5196,21 @@ async function updateSubmissionStatus(request, env) {
 }
 
 // Review draft (approve/reject)
+async function resolveGeneratedDraftKey(env, key) {
+  if (!key || !key.startsWith('submissions/')) return key;
+
+  const object = await env.ADMIN_BUCKET.get(key);
+  if (!object) {
+    throw new Error(`Submission not found: ${key}`);
+  }
+  const submission = await object.json();
+  const draftStem = submission.draft_stem;
+  if (!draftStem) {
+    throw new Error(`Submission has no generated draft: ${key}`);
+  }
+  return draftStem.endsWith('.mp3') ? draftStem : `${draftStem}.mp3`;
+}
+
 async function reviewDraft(request, env) {
   try {
     const body = await request.json();
@@ -5236,21 +5251,22 @@ async function reviewDraft(request, env) {
       if (!key) {
         return { error: 'Missing draft key' };
       }
+      const draftKey = await resolveGeneratedDraftKey(env, key);
       const job = await createOrUpdatePublishJob(env, {
-        key,
+        key: draftKey,
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
       // Advance linked submissions so they leave draft_generated and
       // stop resurfacing as draft cards on the Drafts page.
-      await advanceLinkedSubmissions(env, key, 'approved_for_publish', {
+      await advanceLinkedSubmissions(env, draftKey, 'approved_for_publish', {
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });
       return {
         success: true,
         action,
-        key,
+        key: draftKey,
         publish_job: job,
       };
     }
@@ -5292,8 +5308,9 @@ async function reviewDraft(request, env) {
       if (!key) {
         return { error: 'Missing draft key' };
       }
+      const draftKey = await resolveGeneratedDraftKey(env, key);
       const job = await createOrUpdatePublishJob(env, {
-        key,
+        key: draftKey,
         adminId: effectiveAdminId,
         adminName: effectiveAdminName,
       });

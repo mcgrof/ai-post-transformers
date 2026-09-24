@@ -1,1 +1,1 @@
-export const ADMIN_RELEASE_TAG = 'admin-v2026.07.21.1-draft-ids';
+export const ADMIN_RELEASE_TAG = 'admin-v2026.09.23.1-failed-retries';
