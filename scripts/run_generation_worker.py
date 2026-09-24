@@ -790,7 +790,11 @@ def _process_submission_store(sub, admin_id, *, store):
             })
             print(f"[gen-worker] No draft stem in output for {key}")
             return False
-        updates = {"status": "draft_generated", "draft_stem": result}
+        updates = {
+            "status": "draft_generated",
+            "draft_stem": result,
+            "error": None,
+        }
         upload_ok, upload_details = _upload_draft_artifacts(result)
         if not store.verify_claim_token(key, claim_token):
             print(
@@ -893,7 +897,11 @@ def process_submission(sub, admin_id, *, bucket=None, client=None,
             })
             print(f"[gen-worker] No draft stem in output for {key}")
             return False
-        updates = {"status": "draft_generated", "draft_stem": result}
+        updates = {
+            "status": "draft_generated",
+            "draft_stem": result,
+            "error": None,
+        }
         upload_ok, upload_details = _upload_draft_artifacts(result)
         if not _verify_claim_token(bucket, client, key, claim_token):
             print(

@@ -535,6 +535,12 @@ class TestProcessSubmission:
     def test_success_path_writes_draft_generated(self):
         client = FakeR2()
         _make_submission(client)
+        _update_submission(
+            BUCKET,
+            client,
+            "submissions/test-sub.json",
+            {"error": "previous generation failed"},
+        )
         sub = _read_submission(BUCKET, client, "submissions/test-sub.json")
 
         with patch(
@@ -553,6 +559,7 @@ class TestProcessSubmission:
         assert final["status"] == "draft_generated"
         assert final["draft_stem"] == "drafts/2026/03/good-draft"
         assert final["draft_artifacts"]["mp3"].endswith("good-draft.mp3")
+        assert final["error"] is None
 
     def test_failure_path_writes_generation_failed(self):
         client = FakeR2()
@@ -765,6 +772,7 @@ class TestPrivateSubmissionAutoPublish:
         store = self._make_store_with_submission(tmp_path, {
             "urls": ["https://arxiv.org/pdf/2401.88888"],
             "status": "submitted",
+            "error": "previous generation failed",
             "timestamp": "2026-04-20T10:00:00Z",
         })
         sub = {"_key": "submissions/priv.json",
@@ -797,6 +805,7 @@ class TestPrivateSubmissionAutoPublish:
             "public submission must stay at draft_generated for normal "
             "editorial review"
         )
+        assert final["error"] is None
 
     def test_auto_publish_failure_does_not_break_generation(self, tmp_path):
         """If creating the publish job fails, generation still succeeds.
