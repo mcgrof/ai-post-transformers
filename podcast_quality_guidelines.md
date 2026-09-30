@@ -8,6 +8,42 @@ They should be fed into every podcast generation pass as additional context.
 - **Multi-paper (4-8 papers): ~30 minutes** max.
 - 54-minute draft was rejected as "too fucking long" — respect the limits.
 - Don't pad with filler. If the paper doesn't warrant 20 min, make it 15.
+- Let important comparisons land at a conversational pace. Cut excess figures
+  rather than rushing through them. Short questions and answers need no padding.
+
+## Benchmarks People Can Remember
+- **Meaning first, evidence second.** Explain what the test measures, then the
+  finding, a useful comparison, and the limit on that conclusion.
+- Choose the few results that matter to the paper's argument. Summarize patterns
+  across tables; include important regressions and trade-offs. Never tour every
+  row, read a leaderboard, or trade lists of scores between hosts.
+- Usually one comparison and one or two numeric anchors per exchange are enough.
+  Follow with interpretation or a real question before introducing more numbers.
+- Prefer human-scale expressions grounded in the measurement: "about half the
+  wait" or "roughly four more correct answers out of every hundred." Round only
+  when the small difference is not itself the point. Keep the exact evidence in
+  the planning notes and source paper, rather than reading all of it aloud.
+- Keep the baseline, metric, conditions, and caveat clear. Percentage points are
+  not relative percentages; throughput is not latency. Do not turn memory savings
+  into a claim about GPU count or cost without evidence. Do not call a small gap
+  a tie or a decisive win without support for that interpretation.
+- Reactions should respond to the finding. No stock amazement, mandatory jokes,
+  forced analogies, or repeated catchphrases. Vary the exchange naturally.
+
+Illustrative examples only — these are fictional measurements, not paper results
+or dialogue templates to copy into episodes:
+
+- **Table reading:** "On tasks A, B, and C the baseline accuracy percentages
+  are 71.2, 74.6, and 69.8; the new model scores 75.3, 78.5, and 73.7."
+  **Spoken takeaway:** Ada: "On these three accuracy tests, it gets roughly four
+  more answers right out of every hundred than the baseline." Hal: "Does that
+  gain hold up across runs?" Ada: "They don't report that uncertainty, so we
+  can't tell how repeatable the gain is." The caveat assumes that omission in
+  this fictional source; use the actual paper's evidence in real episodes.
+- **Table reading:** "Latency is 820 milliseconds versus 410 milliseconds."
+  **Spoken takeaway:** Ada: "In their tested setup, the same request takes about
+  half the wait — under half a second." Hal: "And under heavier load?"
+  The reply must follow what the paper tested, without guessing.
 
 ## Tone & Style
 - **Conference bar conversation**, not a lecture or news broadcast.

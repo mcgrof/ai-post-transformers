@@ -1289,6 +1289,39 @@ Only output the JSON array."""
     return segments or []
 
 
+# Shared by planning, every script part (including closing repair), and
+# editing so a later pass cannot turn a spoken takeaway into a table tour.
+_BENCHMARK_NARRATION_RULES = """BENCHMARK NARRATION — WRITE FOR THE EAR:
+- Lead with what the result means. Explain what an unfamiliar benchmark tests
+  and whether higher or lower is better before asking listeners to interpret it.
+- Select the few findings that answer the research question, not one finding
+  per table. Summarize the overall pattern and keep any important loss, exception,
+  or trade-off that changes the verdict. Do not cherry-pick the best row.
+- Never read tables row by row, recite a leaderboard, or stack benchmark names
+  and decimal scores. Usually one comparison and one or two numeric anchors
+  are enough for an exchange. Add detail only when it changes the interpretation.
+- Prefer a grounded, memorable comparison: a fraction of the wait, how many
+  more answers out of a hundred, or the same measured quality with less memory.
+  Use only comparisons supported by the source's metric and setup. Check the
+  arithmetic; retain the baseline, units, direction, and relevant conditions.
+  Distinguish percentage points from relative percent, throughput from latency,
+  and measured results from extrapolation. Never invent cost, hardware capacity,
+  deployment impact, or statistical significance from a score alone.
+- Round for speech only when the conclusion survives rounding. Preserve exact
+  values when a small gap or threshold matters. A small reported difference is
+  not proof of a tie or a reliable win; say when uncertainty is not reported.
+- Let the other host react to the consequence, test the comparison, or ask what
+  the result leaves out. Short questions and answers are welcome. Use natural
+  expressions tied to this finding, not stock amazement, forced metaphors,
+  canned catchphrases, or a ritual question after every result.
+- Give a comparison room to land: short sentences, natural punctuation, then
+  interpretation or a useful hand-off before the next result. Cut excess figures
+  to fit the time budget; never squeeze them into a rapid-fire monologue.
+- The listener should remember the finding and its limit without taking notes.
+  Leave the full table in the paper; do not promise unprovided show notes.
+"""
+
+
 def generate_podcast_script(text, config, covered_topics=None, opening_reason=None, primary_host="Ada"):
     """Multi-pass podcast script generation with topic awareness and critical review.
 
@@ -1699,11 +1732,14 @@ point, use NONE. Do NOT force irrelevant facts into the conversation:
 
     print(f"[Podcast]   Complexity: {complexity:.1f} (topics={num_topics}, questions={num_questions}, refs={num_refs}, len={paper_len}) → {num_parts} parts, {quarter_words} words/part, {max_words} total", file=sys.stderr)
 
-    common_style = f"""Each speaker turn should be 80-200 words — like a real conversation
-paragraph, NOT a one-liner. Write substantial, detailed dialogue. If a turn is under
-50 words, it's too short — expand it with examples, analogies, or follow-up thoughts.
+    common_style = f"""Vary turn length with the thought. A short question, reaction,
+or answer can stand on its own; there is no minimum word count per turn. Give
+technical explanations enough depth, but hand off before they become monologues.
+Do not pad a useful short turn or split a table readout across alternating hosts.
 Generate APPROXIMATELY {quarter_words} words for this part (hard maximum: {int(quarter_words * 1.3)}).
 Do NOT pad. If you've covered the material, stop. Shorter is better than repetitive.
+
+{_BENCHMARK_NARRATION_RULES}
 
 IMPORTANT — SEAMLESS TRANSITIONS: This is ONE continuous conversation. Do NOT include
 any "welcome back", "in this segment", "moving on to part two", or any language that
@@ -1772,12 +1808,27 @@ Key topics: {topic_list}
 Critical questions to address: {questions_text[:1000]}
 Additional references: {extra_refs_text[:1000]}
 
+{_BENCHMARK_NARRATION_RULES}
+
+Plan a small set of benchmark takeaways, usually one to three per paper, selected
+for the episode's argument rather than table order. Include a material counterexample
+or regression if present. Assign each takeaway to one part so later parts do not
+repeat the scores. Keep exact evidence in the plan for verification; the spoken
+version should carry the meaning. If the source has no benchmarks, use an empty
+benchmark_takeaways array. Do not invent results to fill it.
+
 Output as JSON:
 {{
   "paper_citation": "Title, first author et al. (N co-authors), institution(s), year — say ONLY in Part 1. NEVER list all authors.",
   "core_research_question": "One sentence — state ONLY in Part 1",
   "key_definitions": [
     {{"term": "...", "define_in_part": 1, "brief": "..."}}
+  ],
+  "benchmark_takeaways": [
+    {{"cover_in_part": 2, "finding": "...",
+      "source_evidence": "Source/table, metric, exact values, baseline, units, setup; unknowns marked missing",
+      "spoken_comparison": "One memorable, source-supported comparison; verify any arithmetic",
+      "why_it_matters": "...", "limitation_or_tradeoff": "..."}}
   ],
 {part_allocation}
 }}
@@ -1931,7 +1982,8 @@ Topics discussed:
     if num_parts == 2:
         p2_label = "Deep Dive + Critical Analysis + Conclusion"
         p2_content = f"""PART 2 COVERS — DEEP DIVE, CRITICAL ANALYSIS, AND CONCLUSION (FINAL PART):
-1. Walk through the key findings, methods, or arguments. Core contribution and main results.
+1. Explain the core contribution and selected findings. Lead with their meaning,
+   then a memorable comparison and its limit; do not walk through result tables.
 2. Technical concepts the audience needs, with analogies.{source_guidance}
 3. Critical analysis: address these questions naturally:
 {questions_text}
@@ -1943,8 +1995,9 @@ Topics discussed:
     else:
         p2_label = "Deep dive into content"
         p2_content = f"""PART 2 COVERS — DEEP DIVE INTO THE CONTENT (only items from part_2_must_cover):
-1. Walk through the key findings, methods, or arguments presented in this work.
-   What's the core contribution? What are the main data points or results?
+1. Explain the core contribution and selected findings presented in this work.
+   What should listeners remember, and which comparison makes that clear?
+   Summarize patterns across benchmarks instead of touring tables or scores.
 2. Explain any technical concepts that the audience needs to understand.
    Use analogies and comparisons to make complex ideas accessible.
 3. Reference related works that provide context — cite by name, author,
@@ -2129,8 +2182,8 @@ Source content:
       all_scripts.extend(p4_script)
       part_seg_counts.append(len(p4_script))
 
-    # --- EDITORIAL PASS: Review full script for repetitions and flow ---
-    print("[Podcast]   Editorial pass: reviewing full script for repetitions...", file=sys.stderr)
+    # --- EDITORIAL PASS: Review repetition, flow, and spoken results ---
+    print("[Podcast]   Editorial pass: reviewing repetition, flow, and benchmark narration...", file=sys.stderr)
     full_transcript = "\n".join([f'{i+1}. {s["speaker"]}: {s["text"]}' for i, s in enumerate(all_scripts)])
     edit_prompt = f"""You are a podcast script editor. Review this full transcript and fix it.
 
@@ -2145,9 +2198,24 @@ RULES:
    followed by repeating what was just said).
 5. Ensure smooth transitions — if you remove a segment, adjust the surrounding segments so
    the conversation flows naturally.
-6. Do NOT add new content or change the meaning. Only cut redundancy and smooth transitions.
+6. Do NOT add new factual claims or change the meaning. You may round numbers and
+   derive simple comparisons from verified evidence to make existing results speakable.
+   Preserve the metric, baseline, conditions, uncertainty, and material caveats.
 7. Keep the conversation feeling natural — some acknowledgment between speakers is fine,
    but it should lead to NEW information, not rehashing.
+8. REWRITE dense benchmark readouts, including lists spread across alternating hosts.
+   Keep the finding, one useful comparison, and its limit. Shorten within turns and
+   preserve useful back-and-forth; do not just delete whole exchanges. Do not force
+   short reactions or questions to become long speeches. Keep essential contrary results.
+
+{_BENCHMARK_NARRATION_RULES}
+
+EPISODE BIBLE (evidence for checking existing claims, not a list to read aloud):
+{bible_text}
+
+Source content (read from file to verify existing claims and comparison arithmetic;
+do not import additional results into the transcript):
+{bible_file}
 
 Output the EDITED script as a JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Include the "interrupt": true field on any segment that had it in the original.
