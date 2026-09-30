@@ -1278,6 +1278,7 @@ CLOSING REQUIREMENTS:
 - Resolve — do NOT ask a new question, do NOT tease a future episode,
   do NOT introduce a new topic. End on a complete statement.
 - Continue the exact conversation in progress; no re-introductions.
+- Keep the closing calm: do not add jokes, disagreements, or interrupt flags.
 
 {common_style}
 
@@ -1290,7 +1291,37 @@ Only output the JSON array."""
 
 
 # Shared by planning, every script part (including closing repair), and
-# editing so a later pass cannot turn a spoken takeaway into a table tour.
+# editing so later passes preserve both conversational flow and clear results.
+_DIALOGUE_QUALITY_RULES = """DIALOGUE QUALITY — A CONVERSATION THAT GOES SOMEWHERE:
+- Answer the question just asked before changing subjects. If the source cannot
+  answer it, say what is unknown rather than substituting a different question.
+  Follow-ups should test the answer, resolve a specific confusion, or explore its
+  consequence. Do not use a generic question merely to introduce the next lecture.
+- Both hosts can reason, notice something, and revise an interpretation. Hal is
+  curious, not a permanently confused prop; Ada is an expert, not an infallible
+  lecturer. Do not fabricate personal experience, experiments, or past opinions.
+- Explain the mechanism as a causal chain: what changes, why that changes the
+  behavior, and where it stops helping. Introduce needed terms just before using
+  them. Do not assume a listener heard an earlier episode, even for familiar topics.
+- Use a concrete example when abstraction obscures the idea. Keep an analogy's
+  mapping clear and mention its boundary when it could mislead; an analogy is not
+  evidence. Do not force a fresh metaphor into every turn.
+- Let character come through in the choice of question and judgment. Humor,
+  surprise, praise, disagreement, and interruptions are optional, never quotas.
+  Disagree over a specific claim and the evidence that would settle it; agreement
+  is fine when earned. Do not manufacture tension or falsely balance the evidence.
+- Prefer speakable sentences and one main thought at a time. Cut ceremonial
+  praise, repeated names, stacked rhetorical questions, and repeated generic
+  warnings. Keep qualifications that materially change the claim next to it.
+  Style and character profiles must never override factual accuracy or clarity.
+- Give each source its full known citation at first mention, then use an
+  unambiguous short reference. Omit unknown citation details rather than inventing
+  them. Explain why a reference matters instead of reciting a bibliography.
+- End with what this work establishes and the important boundary on that finding,
+  in plain language. Do not replay the episode outline or list every result again.
+"""
+
+
 _BENCHMARK_NARRATION_RULES = """BENCHMARK NARRATION — WRITE FOR THE EAR:
 - Lead with what the result means. Explain what an unfamiliar benchmark tests
   and whether higher or lower is better before asking listeners to interpret it.
@@ -1320,6 +1351,28 @@ _BENCHMARK_NARRATION_RULES = """BENCHMARK NARRATION — WRITE FOR THE EAR:
 - The listener should remember the finding and its limit without taking notes.
   Leave the full table in the paper; do not promise unprovided show notes.
 """
+
+
+def _limit_interrupts(script, limit):
+    """Keep at most limit usable audio overlaps without changing dialogue.
+
+    The mixer consumes an overlap as a pair, so adjacent overlap markers
+    cannot both be honored. Apply after editing and closing repair, too.
+    """
+    result = []
+    remaining = max(0, limit)
+    for segment in script:
+        segment = dict(segment)
+        if segment.get("interrupt"):
+            usable = (remaining > 0 and result
+                      and result[-1].get("speaker") != segment.get("speaker")
+                      and not result[-1].get("interrupt"))
+            if usable:
+                remaining -= 1
+            else:
+                segment.pop("interrupt", None)
+        result.append(segment)
+    return result
 
 
 def generate_podcast_script(text, config, covered_topics=None, opening_reason=None, primary_host="Ada"):
@@ -1368,23 +1421,14 @@ def generate_podcast_script(text, config, covered_topics=None, opening_reason=No
         print("[Podcast]   No fun facts available (run: python fun_facts.py collect)",
               file=sys.stderr)
 
-    # Episode dynamics — interruptions, disagreements, joke discipline
+    # These are ceilings, not performance quotas. Old configs may still
+    # contain disagreement_every_n; disagreement now follows the evidence.
     dynamics = podcast_config.get("dynamics", {})
-    interrupt_count = dynamics.get("interrupt_per_episode", 1)
-    disagreement_every = dynamics.get("disagreement_every_n", 2)
-    max_jokes = dynamics.get("max_jokes_per_episode", 2)
+    interrupt_count = max(0, int(dynamics.get("interrupt_per_episode", 1)))
+    max_jokes = max(0, int(dynamics.get("max_jokes_per_episode", 2)))
 
-    # Check episode count for disagreement trigger
-    conn_ep = get_connection()
-    init_db(conn_ep)
-    from db import get_episode_count
-    ep_count = get_episode_count(conn_ep)
-    conn_ep.close()
-    do_disagreement = (ep_count % disagreement_every == 0)
-
-    print(f"[Podcast]   Episode #{ep_count + 1}: "
-          f"interrupts={interrupt_count}, "
-          f"disagreement={'YES' if do_disagreement else 'no'}, "
+    print(f"[Podcast]   Optional episode dynamics: "
+          f"max_interrupts={interrupt_count}, "
           f"max_jokes={max_jokes}", file=sys.stderr)
 
     # Pass 0: Topic classification
@@ -1628,12 +1672,12 @@ and callbacks to previous episodes where appropriate."""
 
     host_block += f"""
 CITATION REQUIREMENTS:
-When referencing ANY paper, ALWAYS include: paper title, first author, institution/lab,
-year of publication. Example: "That reminds me of the Random Features paper by Rahimi
-and Recht out of UC Berkeley back in 2007"
+At the FIRST mention of a paper, give its title, first author, institution/lab,
+and year when known. Later references use a short, unambiguous name. Explain
+why the work matters here; never invent missing attribution details.
 
 STYLE:
-- Use the hosts' names naturally: "Great point, Ada" or "So Hal, here's the thing..."
+- Use the hosts' names sparingly, when addressing each other serves the exchange.
 - Conversational, not lecture-style — these two have chemistry and banter
 - Be honest about hype vs substance
 {instructions}"""
@@ -1651,25 +1695,19 @@ thoroughly. Compare to familiar concepts (transformers, SGD, neural nets).
     dynamics_text = f"""
 CONVERSATION DYNAMICS — Make this sound like a REAL podcast:
 
-INTERRUPTIONS: Include exactly {interrupt_count} moment(s) in this part where one host
-cuts in mid-thought. Mark these segments with "interrupt": true in the JSON. The
-interrupting host should start talking as if they couldn't wait — e.g., "Oh wait wait
-wait—" or "Sorry to cut you off but—" or "Hold on, that's actually—". This creates
-energy and feels natural. Only in ONE segment per part.
+INTERRUPTIONS: At most {interrupt_count} across the ENTIRE episode, not per part.
+Zero is fine. Only cut in for a useful clarification or a reaction to the actual
+point. Mark that segment with "interrupt": true. Do not interrupt a key definition,
+numerical comparison, or qualification the listener needs to hear clearly.
 
 JOKE DISCIPLINE: Maximum {max_jokes} jokes across the ENTIRE episode (not per part).
 ONLY situational humor is allowed — jokes that arise from the irony or absurdity of what's
 being discussed. NO generic jokes, puns, or formulaic quips. If the material isn't naturally
 funny, use ZERO jokes. Forced humor is worse than no humor.
-"""
 
-    if do_disagreement:
-        dynamics_text += """
-HEATED DISAGREEMENT: In this episode, include ONE moment where the hosts genuinely
-disagree about an interpretation or conclusion. Not hostile — passionate and intellectual.
-One host should push back firmly: "I actually disagree with you there, Hal..." or
-"No no no, that's not how I read it at all..." Let the disagreement play out for 2-3
-exchanges before they find common ground or agree to disagree. This adds authenticity.
+DISAGREEMENT: Only where the evidence supports different interpretations. State
+the disputed claim and what would resolve it. Neither argument nor consensus
+needs to be staged for entertainment. Do not schedule a fight or a reconciliation.
 """
 
     # common_style is built after num_parts / quarter_words are set below.
@@ -1739,32 +1777,39 @@ Do not pad a useful short turn or split a table readout across alternating hosts
 Generate APPROXIMATELY {quarter_words} words for this part (hard maximum: {int(quarter_words * 1.3)}).
 Do NOT pad. If you've covered the material, stop. Shorter is better than repetitive.
 
+{_DIALOGUE_QUALITY_RULES}
+
 {_BENCHMARK_NARRATION_RULES}
 
 IMPORTANT — SEAMLESS TRANSITIONS: This is ONE continuous conversation. Do NOT include
 any "welcome back", "in this segment", "moving on to part two", or any language that
 suggests a break or section change. The listener hears this as one unbroken audio stream.
-Transition naturally — e.g., "That actually ties into something else I found interesting..."
-or "So given all that, Ada, what do you think about..." — just flow naturally.
+Let the preceding answer or unresolved consequence motivate the next turn.
 {dynamics_text}
 
 OUTPUT FORMAT: JSON array of objects. Each object has "speaker" (A or B) and "text".
 Optionally include "interrupt": true on segments where the speaker is cutting in
 mid-sentence of the other host."""
 
+    def part_style():
+        used = sum(bool(s.get("interrupt"))
+                   for s in _limit_interrupts(all_scripts, interrupt_count))
+        return (common_style + f"\nInterruptions remaining for the rest of the "
+                f"episode: {interrupt_count - used}. This is a ceiling, not a target.")
+
     # --- EPISODE BIBLE: Plan content allocation to prevent cross-part repetition ---
     print("[Podcast]   Generating episode bible...", file=sys.stderr)
 
     if num_parts == 2:
         bible_structure = """Create an EPISODE_BIBLE that allocates content across 2 parts.
-Part 1: Intro + Background + Methods (the WHAT and HOW)
-Part 2: Critical Analysis + Impact + Conclusion (the SO WHAT)
+Part 1: Intro + Background Foundations
+Part 2: Methods + Selected Results + Critical Analysis + Impact + Conclusion
 Keep it tight — this is a straightforward paper that doesn't need 4 parts."""
         part_allocation = """
-  "part_1_must_cover": ["intro + authors", "background", "methods", "key results"],
-  "part_1_do_not_cover": ["limitations deep dive", "future speculation"],
-  "part_2_must_cover": ["critical analysis", "practical implications", "limitations", "closing"],
-  "part_2_do_not_cover": ["re-introduce authors/title", "re-explain methods"]"""
+  "part_1_must_cover": ["intro + authors", "background", "key definitions"],
+  "part_1_do_not_cover": ["detailed methods/results", "limitations deep dive", "future speculation"],
+  "part_2_must_cover": ["core methods", "selected results", "critical analysis", "practical implications", "limitations", "closing"],
+  "part_2_do_not_cover": ["re-introduce authors/title", "repeat background"]"""
     elif num_parts == 3:
         bible_structure = """Create an EPISODE_BIBLE that allocates content across 3 parts.
 Part 1: Intro + Background Foundations
@@ -1808,6 +1853,8 @@ Key topics: {topic_list}
 Critical questions to address: {questions_text[:1000]}
 Additional references: {extra_refs_text[:1000]}
 
+{_DIALOGUE_QUALITY_RULES}
+
 {_BENCHMARK_NARRATION_RULES}
 
 Plan a small set of benchmark takeaways, usually one to three per paper, selected
@@ -1819,7 +1866,7 @@ benchmark_takeaways array. Do not invent results to fill it.
 
 Output as JSON:
 {{
-  "paper_citation": "Title, first author et al. (N co-authors), institution(s), year — say ONLY in Part 1. NEVER list all authors.",
+  "paper_citation": "Title, first author et al., institution(s), year when known — say ONLY in Part 1. NEVER list all authors.",
   "core_research_question": "One sentence — state ONLY in Part 1",
   "key_definitions": [
     {{"term": "...", "define_in_part": 1, "brief": "..."}}
@@ -1859,13 +1906,16 @@ Source content (read from file):
     no_repeat_rules = """
 ANTI-REPETITION RULES (STRICT — VIOLATION = FAILURE):
 - Do NOT re-introduce the paper title, authors, or institution — they were already introduced.
-- Do NOT re-define any term that was already defined in a previous part.
-- Do NOT re-ask any question listed in the COVERAGE MEMO, even rephrased differently.
-  Example: if Part 1 asked "how does X work?", Part 3 CANNOT ask "how does X achieve Y?" — same question.
-- Do NOT re-explain any concept or mechanism already covered. The listener ALREADY HEARD IT.
+- Do not repeat a complete definition already given. Briefly clarify a term if
+  the next step exposes an ambiguity or misconception.
+- Do NOT re-ask a question already answered in the COVERAGE MEMO just to repeat
+  the answer. A specific follow-up that resolves confusion, tests the answer, or
+  addresses an unanswered part is useful; make that new purpose clear.
+- Do not replay a mechanism explanation; revisit only the specific step that
+  needs clarification or correction.
 - If you must reference something from a previous part, use a callback of 12 words MAX
   (e.g., "As we discussed earlier..." or "Building on that point...").
-- Each part must contain ONLY NEW information, NEW questions, and NEW insights.
+- Each part must advance understanding rather than restart the discussion.
 """
 
     # PART 1: Intro + Background Foundations
@@ -1893,13 +1943,13 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
    "{intro}"
    Then Hal introduces today's material with these REQUIRED details:
    - Title: {paper_title}
-   - Authors: {', '.join(paper_authors)} (total: {len(paper_authors)} authors)
+   - Authors: {', '.join(paper_authors)}
    - Institution(s): {', '.join(paper_institutions) if paper_institutions else '(not specified)'}
    - Publication date: state it from the paper itself (e.g. the arXiv
      submission date printed on the PDF). If the paper does not state a
      date, omit it — do NOT guess a date or a publication venue.
-   Hal should say "First Author et al." with the total co-author count, and mention
-   the institution(s). Then move straight into the substance: the hosts react to
+   Name the first author and colleagues, with the institution(s) when known;
+   do not recite an author list or count. Move straight into the substance: the hosts react to
    THIS paper's specific claim, result, or tension in their own words.
    BANNED opening move: do NOT have any host announce a personal reason they
    like the paper. In particular NEVER open with "what sold me / what drew me /
@@ -1913,11 +1963,12 @@ PART 1 COVERS — INTRO AND BACKGROUND FOUNDATIONS:
 
 2. FOUNDATIONAL BACKGROUND: The key topics are: {topic_list}.
    For any topic that's new to the audience, explain it thoroughly. Compare with more
-   familiar concepts. Reference foundational works by name, author, institution, year.
+   familiar concepts. Give foundational works their known citation details on
+   first mention; later references use a short name.
 {new_topic_bg}{source_guidance}
 {color_facts_text}
 
-{common_style}
+{part_style()}
 
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
@@ -1961,13 +2012,12 @@ Source paper (read from file):
     # Build coverage memo from Part 1
     p1_questions = _extract_questions(p1_script)
     p1_topics = _extract_topics_discussed(p1_script)
-    coverage_memo = f"""COVERAGE MEMO — What Part 1 already covered (DO NOT REPEAT):
-- Authors, title, institution, publication date — fully introduced
-- Core research question stated
-- Background on: {topic_list}
-- Terms defined in Part 1 (do not re-define)
+    coverage_memo = f"""COVERAGE MEMO — Questions and excerpts from Part 1:
+Use this partial record to avoid repeated answers, not as proof that every
+planned concept was explained or understood. Useful clarifying follow-ups are
+allowed. Do not repeat the opening citation or restart the background.
 
-QUESTIONS ALREADY ASKED IN PART 1 (DO NOT re-ask these or rephrase them):
+QUESTIONS ASKED IN PART 1 (avoid duplicate answers; address unresolved details):
 {chr(10).join('- ' + q for q in p1_questions) if p1_questions else '- (none)'}
 
 Topics discussed:
@@ -1982,7 +2032,7 @@ Topics discussed:
     if num_parts == 2:
         p2_label = "Deep Dive + Critical Analysis + Conclusion"
         p2_content = f"""PART 2 COVERS — DEEP DIVE, CRITICAL ANALYSIS, AND CONCLUSION (FINAL PART):
-1. Explain the core contribution and selected findings. Lead with their meaning,
+1. Explain the core method, contribution, and selected findings. Lead with their meaning,
    then a memorable comparison and its limit; do not walk through result tables.
 2. Technical concepts the audience needs, with analogies.{source_guidance}
 3. Critical analysis: address these questions naturally:
@@ -1995,13 +2045,13 @@ Topics discussed:
     else:
         p2_label = "Deep dive into content"
         p2_content = f"""PART 2 COVERS — DEEP DIVE INTO THE CONTENT (only items from part_2_must_cover):
-1. Explain the core contribution and selected findings presented in this work.
+1. Explain the core method, contribution, and selected findings presented in this work.
    What should listeners remember, and which comparison makes that clear?
    Summarize patterns across benchmarks instead of touring tables or scores.
 2. Explain any technical concepts that the audience needs to understand.
    Use analogies and comparisons to make complex ideas accessible.
-3. Reference related works that provide context — cite by name, author,
-   institution, and year."""
+3. Reference related works that provide context — give known citation details
+   on first mention, then use a short unambiguous name."""
 
     print(f"[Podcast]   Part 2/{num_parts}: {p2_label}...", file=sys.stderr)
 
@@ -2035,7 +2085,7 @@ The ONLY acceptable humor is SITUATIONAL — arising naturally from the material
 If nothing is genuinely funny in context, use ZERO jokes.
 {color_facts_text}
 
-{common_style}
+{part_style()}
 
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
@@ -2054,11 +2104,7 @@ Source content (read from file):
     p2_questions = _extract_questions(p2_script)
     p2_topics = _extract_topics_discussed(p2_script)
     coverage_memo += f"""
-What Part 2 additionally covered (DO NOT REPEAT):
-- Core methods and technical details explained
-- Key results and data points presented
-
-QUESTIONS ALREADY ASKED IN PART 2 (DO NOT re-ask or rephrase):
+QUESTIONS ASKED IN PART 2 (avoid duplicate answers; address unresolved details):
 {chr(10).join('- ' + q for q in p2_questions) if p2_questions else '- (none)'}
 
 Topics discussed in Part 2:
@@ -2095,7 +2141,8 @@ PART 3 COVERS — CRITICAL ANALYSIS (only items from part_3_must_cover):
 1. Address these critical questions naturally:
 {questions_text}
 
-2. Discuss these additional references, citing by name, author, institution, year:
+2. Discuss relevant additional references. Give known citation details on first
+   mention only, and explain why each matters here:
 {extra_refs_text}
 
 3. What's genuinely novel vs incremental? What are the limitations or blind spots?
@@ -2112,7 +2159,7 @@ The ONLY acceptable humor is SITUATIONAL — arising naturally from the material
 If nothing is genuinely funny in context, use ZERO jokes.
 {color_facts_text}
 
-{common_style}
+{part_style()}
 
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
@@ -2130,12 +2177,7 @@ Source content (read from file):
       # Update coverage memo
       p3_questions = _extract_questions(p3_script)
       coverage_memo += f"""
-What Part 3 additionally covered (DO NOT REPEAT):
-- Critical analysis and limitations discussed
-- Additional references cited
-- Novelty vs incremental assessment made
-
-QUESTIONS ALREADY ASKED IN PARTS 1-3 (DO NOT re-ask or rephrase):
+QUESTIONS ASKED IN PARTS 1-3 (avoid duplicate answers; address unresolved details):
 {chr(10).join('- ' + q for q in (p1_questions + p2_questions + p3_questions)) if (p1_questions + p2_questions + p3_questions) else '- (none)'}
 """
 
@@ -2167,7 +2209,7 @@ PART 4 COVERS — REAL-WORLD IMPACT AND CONCLUSION (only items from part_4_must_
    subjects. Just say goodbye naturally.
 {color_facts_text}
 
-{common_style}
+{part_style()}
 
 Output as JSON array: [{{"speaker": "A", "text": "..."}}, ...]
 Only output the JSON array.
@@ -2188,12 +2230,14 @@ Source content:
     edit_prompt = f"""You are a podcast script editor. Review this full transcript and fix it.
 
 RULES:
-1. REMOVE or REWRITE any segment where a question is asked that was already asked earlier
-   (even if phrased differently). The FIRST occurrence stays; later duplicates get rewritten
-   to ask something NEW and relevant, or removed if nothing new to add.
-2. REMOVE or REWRITE any segment that re-explains a concept already explained earlier.
-   Brief callbacks (≤12 words like "as we discussed") are fine; full re-explanations are not.
-3. REMOVE any segment that re-introduces authors, paper title, or institution after the intro.
+1. REMOVE or REWRITE questions that merely repeat an already answered question.
+   Keep follow-ups that resolve a specific confusion, test an answer, or address
+   something still unanswered. Do not replace repetition with invented discussion.
+2. REMOVE repeated explanations of settled points. Keep brief callbacks and
+   clarification or correction of a specific misunderstood step.
+3. REMOVE repeated full citations, including re-introductions of the primary
+   paper after the intro. Preserve the first citation of each related work,
+   even when it appears later in the episode.
 4. REMOVE filler/padding segments that add no new information (e.g., "That's a great point" 
    followed by repeating what was just said).
 5. Ensure smooth transitions — if you remove a segment, adjust the surrounding segments so
@@ -2202,11 +2246,21 @@ RULES:
    derive simple comparisons from verified evidence to make existing results speakable.
    Preserve the metric, baseline, conditions, uncertainty, and material caveats.
 7. Keep the conversation feeling natural — some acknowledgment between speakers is fine,
-   but it should lead to NEW information, not rehashing.
+   but it should advance understanding, not rehash a settled point.
 8. REWRITE dense benchmark readouts, including lists spread across alternating hosts.
    Keep the finding, one useful comparison, and its limit. Shorten within turns and
    preserve useful back-and-forth; do not just delete whole exchanges. Do not force
    short reactions or questions to become long speeches. Keep essential contrary results.
+9. Repair question-answer mismatches and abrupt changes of subject using the
+   existing evidence. If the source leaves a question open, acknowledge that.
+   Trim repeated praise, names, citation details, and generic hedges; preserve
+   necessary attribution and every qualification that changes the conclusion.
+10. Rewrite forced cut-ins and staged arguments as ordinary exchanges. Removing
+    an interrupt flag alone does not fix repetitive "wait, wait" dialogue.
+
+{_DIALOGUE_QUALITY_RULES}
+
+{dynamics_text}
 
 {_BENCHMARK_NARRATION_RULES}
 
@@ -2218,7 +2272,7 @@ do not import additional results into the transcript):
 {bible_file}
 
 Output the EDITED script as a JSON array: [{{"speaker": "A", "text": "..."}}, ...]
-Include the "interrupt": true field on any segment that had it in the original.
+Preserve useful existing interrupt flags within the episode limit; do not add new ones.
 Only output the JSON array.
 
 FULL TRANSCRIPT:
@@ -2270,6 +2324,10 @@ FULL TRANSCRIPT:
             all_scripts = script
             print(f"[Podcast]   Appended {len(closing)}-segment closing",
                   file=sys.stderr)
+
+    # LLMs may exceed prompt budgets, including during editing/repair.
+    # Enforce the episode-wide ceiling before the TTS mixer sees flags.
+    script = _limit_interrupts(script, interrupt_count)
 
     total_words = sum(len(s["text"].split()) for s in script)
     print(f"[Podcast]   Total: {len(script)} segments, {total_words} words (~{total_words/150:.0f} min)", file=sys.stderr)

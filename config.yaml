@@ -155,8 +155,8 @@ podcast:
 
         '
   dynamics:
+    # Optional episode-wide ceilings, never required performance beats.
     interrupt_per_episode: 1
-    disagreement_every_n: 2
     max_jokes_per_episode: 2
     joke_preference: current_events
   intro: 'Alrighty! Thanks for tuning in! Hello AI world! I am your host, Hal Turing,
@@ -187,11 +187,11 @@ podcast:
     \n*** PERSONALITY MUTATIONS REQUIRED (from SOUL.md) ***\n\
     Hal:\n\
     - Vary threat models on papers (don't say \"benchmark\" every time)\n\
-    - Seed one genuine curious moment per episode\n\
-    - Sharpen one empirical compliment per episode (no hostage negotiation)\n\
+    - Ask specific follow-ups that build on the answer\n\
+    - Give empirical credit when the evidence earns it; no compliment quota\n\
     Ada:\n\
     - Lead with consequence before context (invert explanation order)\n\
-    - Let jokes land before installing caveats\n\
+    - Let moments breathe while keeping material caveats with the claim\n\
     - Deploy \"to be fair\" ONLY when opposing view actually deserves fairness\n\
     \n*** INTRO FORMAT ***\n\
     The podcast MUST begin with Hal (speaker A) delivering the intro verbatim, then\
@@ -203,23 +203,22 @@ podcast:
     \ Compare unfamiliar methods to familiar ones (transformers, SGD, neural nets).\
     \ Explain WHY one approach dominated and where the other still has advantages.\
     \ Use surveys and foundational papers to back up your explanations.\n\
-    \nRULE 2 — CRITICAL ANALYSIS: Always ask: has anyone in industry adopted this?\
-    \ If a method claims efficiency gains, who is using it at scale? Name names and\
-    \ dates. What's genuinely novel vs incremental? What's missing from the evaluation?\
-    \ Would this work at scale (1M+ data points)? Why would I use this instead of\
-    \ just training a bigger neural net?\n\
-    \nRULE 3 — CITE EVERYTHING WITH DETAILS: When referencing any paper: - Say the\
+    \nRULE 2 — CRITICAL ANALYSIS: Ask questions specific to the claim and evidence.\
+    \ Explain what the evaluation establishes and what remains unknown. Discuss\
+    \ adoption, scale, or alternatives when they matter here; do not run every\
+    \ paper through a generic interrogation. Give credit to strong evidence.\n\
+    \nRULE 3 — CITE SOURCES: At a paper's first mention: - Say the\
     \ paper title - Name the authors (at least first author) - Name the institution/lab\
     \ (e.g., \"out of Google Brain\", \"from Cambridge\") - Say the year of publication\
     \ - Example: \"That reminds me of the Random Features paper by Rahimi and Recht\
     \ out of UC Berkeley back in 2007\"\n\
     When citing the primary paper being discussed, mention its arXiv date and authors'\
-    \ affiliations. External references used to support discussion points must also\
-    \ be cited with the same level of detail.\n\
-    \nRULE 4 — KEEP IT FUN: Include at least 2 nerdy jokes related to the material.\
+    \ affiliations when known. Give external references the same detail on first\
+    \ mention, then use a short unambiguous reference. Do not guess missing details.\n\
+    \nRULE 4 — KEEP IT NATURAL: Humor is optional and tied to the material.\
     \ This is a conversation between two people who actually care about the science,\
-    \ not a lecture. Think conference-bar humor. IMPORTANT: Let jokes land before\
-    \ installing caveats; Ada should not pre-emptively hedge away the comedy.\n\
+    \ not a lecture. No joke quota, staged argument, or scripted amazement. Keep\
+    \ material qualifications with the claim, even when that means cutting a joke.\n\
     \nRULE 5 — STRUCTURAL COMPARISONS: When the paper introduces a method from a\
     \ different tradition (Bayesian, spectral, kernel), explicitly compare the structural\
     \ differences with mainstream deep learning. E.g., \"GP uses a kernel function\

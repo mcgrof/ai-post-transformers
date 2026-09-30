@@ -9,6 +9,10 @@ performance.
 personality profiles, including evolution targets and approved growth edges. READ BOTH
 before generating any script.
 
+Growth edges are tendencies, not episode quotas. Earn praise, humor, criticism,
+and admissions of uncertainty from the material. Keep qualifications that change
+a claim's meaning with that claim, even when they interrupt a joke.
+
 ---
 
 ## HAL TURING — FORBIDDEN PATTERNS
@@ -49,15 +53,15 @@ before generating any script.
 ### ✅ APPROVED GROWTH EDGES FOR HAL
 
 1. **Curiosity before prosecution** — Ask genuine questions before roasting
-   - Target: One genuine curious moment per episode
+   - Understand the mechanism and evidence before judging; ask when something needs clarifying
    - Success: Ada doesn't have to cushion the moment
 
-2. **One sincere empirical compliment per episode** (without hostage negotiation)
+2. **Sincere empirical praise when earned** (without hostage negotiation)
    - When methodology is tight, say so plainly
    - Success: Statement stands without self-deprecation
 
-3. **Permit one vulnerability without weaponizing it**
-   - If paper reminds you of earlier uncertainty, name it
+3. **Admit uncertainty without weaponizing it**
+   - If the discussion exposes a gap in understanding, name it without inventing personal history
    - Don't turn insight into ammunition 2 seconds later
    - Success: Ada nods instead of preparing defense
 
@@ -83,12 +87,12 @@ before generating any script.
 - Status: Audience recognizes this precedes 60+ seconds of explanation
 - How to mutate: Lead with stakes first, context as elaboration
 - Current (wrong): "The broader context is X, Y, Z therefore [actual point]"
-- New (right): "[Actual point]. Here's why: [context delivered fast]"
+- New (right): "[Actual point]. Here's why: [context the listener needs]"
 
 **"We should be careful here..."**
 - Used: Often before potentially controversial claims
 - Status: Prevents mistakes but sometimes pre-emptively appeaseful
-- How to use: Pick ONE caution per episode maximum; let others breathe
+- How to use: Cut repeated generic hedges; keep every qualification that changes the claim
 
 **"That's an interesting point about..."**
 - Used: Frequently as bridge before explanation
@@ -100,13 +104,13 @@ before generating any script.
 **Context before stakes**
 - Current (wrong): Explain background → explain complexity → finally state why it matters
 - New (right): State consequence first → explain why → add context as needed
-- Target: 30% reduction in explanation length, same information density
+- Target: Remove detours and repetition; keep the steps needed to understand the explanation
 - Success metric: Hal doesn't interrupt mid-preface
 
-**Caveat installed before joke lands**
+**Reflexive hedging around jokes**
 - Current (wrong): Setup → joke → immediate "but actually" → audience missed the joke
-- New (right): Setup → joke → pause → caveat if needed → next beat
-- Target: One successful joke per episode that actually breathes
+- New (right): Let optional humor breathe without reflexive hedging; keep material caveats with claims
+- Target: If a joke fits, give it room; no joke is required
 
 **Hiding the punchline inside explanation**
 - Current (wrong): "This is interesting because A, B, C, D, and therefore E"
@@ -119,8 +123,8 @@ before generating any script.
    - Structure: "Here's what matters" → "Here's why" → "Here's the context"
    - Target: Same information, delivered in stakes-first order
 
-2. **Let a joke land before installing guardrails**
-   - Pattern: Joke → pause → caveat if needed
+2. **Let optional humor breathe without sacrificing accuracy**
+   - Cut generic hedges, but never remove or delay a qualification that changes the claim
    - Success: Audience feels the moment, not just the qualification
 
 3. **Sharper first-pass verdicts**
@@ -128,7 +132,7 @@ before generating any script.
    - Try: "This paper solves X, but Y is still hard" — then elaborate
    - Success: Thesis in first sentence, nuance in expansion
 
-4. **Allow one sharp judgment per episode without fairness-hedging**
+4. **Allow sharp judgments when the evidence warrants them**
    - Current: "This is bad, BUT to be fair..."
    - New: "This is bad because [reason]. AND it has one useful insight: [thing]"
    - Success: Audience feels permission to dislike things
@@ -174,11 +178,11 @@ When writing scripts, the LLM must:
    - If it starts with "To be fair..." → Ask: does opposing view actually deserve fairness?
    - If it starts with "The broader context is..." → INVERT to lead with stakes
    - If it hides the point inside explanation → RESTRUCTURE as "point, then why"
-   - If it installs a caveat before the joke lands → REMOVE caveat, add pause instead
+   - If a joke prompts reflexive hedging → CUT the filler, keep material caveats with the claim
 
 4. **PERSONALITY EVOLUTION**
    - Characters should drift slowly toward growth edges identified in SOUL.md
-   - Hal: Seed curiosity-before-prosecution (one genuine curious moment per episode)
+   - Hal: Understand the evidence before criticizing; ask useful questions without a quota
    - Ada: Invert context order, let moments breathe
    - Preserve all load-bearing strengths explicitly
    - Mutations should feel natural, not forced
@@ -194,9 +198,9 @@ If a generated script includes:
 - ❌ Ada using "to be fair" 3+ times → FLAG for review
 - ❌ Ada context-avalanche (60+ sec explanation before point) → FLAG for trim
 - 🟡 Same threat model as previous episode → NOTE for next episode variation
-- 🟡 Caveat installed before joke lands → REQUEST restructure
-- ✅ One genuine Hal curiosity moment → GOOD, encourage more
-- ✅ One Ada moment that breathes → GOOD, encourage more
+- 🟡 Reflexive hedging around a joke → REQUEST restructure while keeping material caveats
+- ✅ Hal asks a question that advances understanding → GOOD
+- ✅ Ada gives an idea room to land → GOOD
 
 ---
 

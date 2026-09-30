@@ -4,10 +4,10 @@ These guidelines are accumulated from all user feedback across draft reviews.
 They should be fed into every podcast generation pass as additional context.
 
 ## Length & Pacing
-- **Single paper: 15-23 minutes** (~3800 words). NEVER exceed 23 min.
-- **Multi-paper (4-8 papers): ~30 minutes** max.
+- Follow the generation run's word budget; it accounts for single vs multi-paper
+  episodes. The budget is a ceiling to work within, not a reason to pad.
 - 54-minute draft was rejected as "too fucking long" — respect the limits.
-- Don't pad with filler. If the paper doesn't warrant 20 min, make it 15.
+- If the material needs less time, finish sooner. Keep needed explanations.
 - Let important comparisons land at a conversational pace. Cut excess figures
   rather than rushing through them. Short questions and answers need no padding.
 
@@ -53,14 +53,35 @@ or dialogue templates to copy into episodes:
 - **No "AIs talking about AI" meta-commentary** — avoid self-referential AI jokes.
 - Max 2 jokes per episode, prefer current events/tech culture references.
 
+## Exchanges That Build Understanding
+- Answer the question just asked. The next turn should respond to that answer,
+  test it, or explore its consequence. Skip generic interview questions that only
+  introduce another prepared speech. Say when the paper cannot answer a question.
+- Both hosts should contribute observations and reasoning. Hal need not play dumb
+  to make Ada explain; Ada can acknowledge uncertainty or revise an interpretation.
+  Do not invent personal experience or previous beliefs to dramatize learning.
+- Teach the mechanism: what changes, why it affects the outcome, and its limits.
+  Define unfamiliar terms when needed, with enough context for a first-time
+  listener. A topic's presence in an earlier episode does not establish familiarity.
+- Use concrete examples and apt analogies, with their limits when needed. Avoid
+  changing metaphors every turn or treating an analogy as proof.
+- Allow brief clarifications and useful callbacks. Remove repeated explanations,
+  not follow-ups that resolve something the first explanation left unclear.
+- Keep material caveats beside the claim they qualify. Cut repeated generic
+  hedges, ceremonial praise, and constant name-addressing instead.
+- Character traits guide tone; they are not a checklist of jokes, compliments,
+  vulnerable moments, arguments, or emotional reactions to perform.
+
 ## Structure
 - Must sound like **one continuous conversation** — no "welcome back" or section breaks.
 - No fake "next episode" teasers — just a simple farewell.
-- Mandatory intro: leading "..." for 1s audio buffer, then countdown 3-2-1, dual-voice "Welcome to AI Post Transformers!", then Hal's intro.
+- Begin the dialogue with Hal's configured intro. The audio pipeline handles
+  the countdown and theme; do not add production cues or a second opening.
 - **No "welcome back from break"** or any implication of commercial breaks.
 
 ## Citations & Attribution
-- ALL cited papers must include: **title, authors, institution/lab, year**.
+- At first mention, cite **title, first author, institution/lab, year** when known.
+  Later mentions use a clear short name. Never invent missing citation details.
 - Example: "That's from the Flash Attention paper by Tri Dao out of Stanford, 2022"
 - Don't just name-drop — explain WHY you're referencing that work.
 - **Never use unpublished drafts, private/internal episodes, local-only artifacts, or operator research notes as sources or callbacks.** Prior-episode references are allowed only for already published public podcast episodes.
@@ -75,9 +96,11 @@ or dialogue templates to copy into episodes:
 ## Host Dynamics
 - Host A = "Hal Turing" (male, curious interviewer, warm, asks clarifying questions)
 - Host B = "Dr. Ada Shannon" (female, expert co-host, sharp, direct, dry wit)
-- Rare voice overlaps/interruptions (1 per episode) — make them feel spontaneous.
-- Occasional heated disagreements (every 2nd episode) — genuine intellectual tension.
-- Hosts should NOT agree on everything. Ada should push back on hype.
+- Interruptions are optional, subject to the configured episode-wide maximum.
+  Keep definitions, comparisons, and important qualifications audible.
+- Disagree only over a specific claim where different readings are supported;
+  explain the evidence that would settle it. Agreement is fine when earned.
+- Push back on hype without inventing conflict or forcing a reconciliation.
 
 ## What to Avoid
 - ❌ Removing host names from audio (verbal intros are fine)
@@ -89,10 +112,10 @@ or dialogue templates to copy into episodes:
 
 ## Quality Benchmarks — Reference Episodes
 When generating new drafts, these published episodes represent the quality bar:
-- **ID 37: "Why CARTRIDGE Works"** — Good technical depth, proper citations
-- **ID 34: "Structured State Space Duality"** — Strong background explanation
-- **ID 46: "Gradient Descent at Inference Time"** — Good critical analysis
-- **ID 38: "Systematic LLM Inference Characterization"** — Good industry context
+- **"Why CARTRIDGE Works"** — Good technical depth, proper citations
+- **"Structured State Space Duality"** — Strong background explanation
+- **"Gradient Descent at Inference Time"** — Good critical analysis
+- **"Systematic LLM Inference Characterization"** — Good industry context
 
 ## Pre-Generation Checklist
 Before generating, the pipeline should:
