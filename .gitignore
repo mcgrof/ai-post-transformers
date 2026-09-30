@@ -26,6 +26,12 @@ legacy_manifest.json
 .cache/
 papers.db-shm
 papers.db-wal
+papers.db.backup.*
+manifest.json.r2backup.*
+
+# Periodic monitoring output is local runtime state.
+logs/regression-check.txt
+logs/weekly-suggestions.txt
 
 # Session debugging artifacts (do not commit).
 ADMIN_SYNC_STATUS.md
