@@ -1831,6 +1831,11 @@ test('POST /api/submissions/status resets failed submission to submitted for ret
         timestamp: '2026-03-27T10:00:00.000Z',
         status: 'generation_failed',
         error: 'PDF extraction failed',
+        claimed_by: 'worker-1',
+        claim_token: 'stale-token',
+        lease_expires_at: '2026-03-27T10:35:00.000Z',
+        last_heartbeat_at: '2026-03-27T10:05:00.000Z',
+        draft_stem: 'drafts/partial',
         status_history: [
           { status: 'submitted', at: '2026-03-27T10:00:00.000Z' },
           { status: 'generation_failed', at: '2026-03-27T10:05:00.000Z' },
@@ -1857,6 +1862,12 @@ test('POST /api/submissions/status resets failed submission to submitted for ret
 
   const stored = JSON.parse(env.ADMIN_BUCKET.objects.get('submissions/failed.json'));
   assert.equal(stored.status, 'submitted');
+  assert.equal(stored.error, null);
+  assert.equal(stored.claimed_by, null);
+  assert.equal(stored.claim_token, null);
+  assert.equal(stored.lease_expires_at, null);
+  assert.equal(stored.last_heartbeat_at, null);
+  assert.equal(stored.draft_stem, undefined);
   assert.equal(stored.status_history.length, 3, 'retry adds new history entry');
   assert.equal(stored.status_history[2].status, 'submitted');
 });

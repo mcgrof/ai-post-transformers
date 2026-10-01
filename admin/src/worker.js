@@ -5177,9 +5177,19 @@ async function updateSubmissionStatus(request, env) {
 
     const sub = await existing.json();
     const now = new Date().toISOString();
+    const isGenerationRetry = sub.status === 'generation_failed'
+      && status === 'submitted';
 
     sub.status = status;
     sub.updated_at = now;
+    if (isGenerationRetry) {
+      sub.error = null;
+      sub.claimed_by = null;
+      sub.claim_token = null;
+      sub.lease_expires_at = null;
+      sub.last_heartbeat_at = null;
+      delete sub.draft_stem;
+    }
     if (claimed_by) sub.claimed_by = claimed_by;
     if (errorMsg) sub.error = errorMsg;
     if (draft_stem) sub.draft_stem = draft_stem;
