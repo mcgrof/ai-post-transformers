@@ -313,11 +313,16 @@ def _call_claude_cli(model, prompt, max_tokens, use_tools=True):
     # ("The Write tool call needs approval") instead of the HTML — which
     # then got saved as a broken viz page. With tools disabled and a
     # single turn it just emits the requested text.
+    # These are unattended model calls, so project/local Claude permission
+    # rules must not be able to prevent generation from starting. User-level
+    # settings retain subscription authentication while avoiding stale rules
+    # in a checkout's .claude/settings*.json files.
     if use_tools:
         cmd = ["claude", "-p",
                "--output-format", "text",
                "--model", model,
-               "--max-turns", "25"]
+               "--max-turns", "25",
+               "--setting-sources", "user"]
     else:
         # No tools at all, but allow 2 turns: a long HTML document can
         # need more than a single inference pass to finish, which showed
@@ -328,7 +333,8 @@ def _call_claude_cli(model, prompt, max_tokens, use_tools=True):
                "--output-format", "text",
                "--model", model,
                "--max-turns", "2",
-               "--allowedTools", ""]
+               "--allowedTools", "",
+               "--setting-sources", "user"]
     env = {**os.environ}
     env.pop("CLAUDECODE", None)  # avoid nested session blocker
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # also blocks nested sessions

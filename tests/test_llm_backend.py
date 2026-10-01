@@ -3,7 +3,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_backend import _call_codex, _call_openai, _parse_json, get_llm_backend
+from llm_backend import (
+    _call_claude_cli,
+    _call_codex,
+    _call_openai,
+    _parse_json,
+    get_llm_backend,
+)
 
 
 class _FakeOpenAIClient:
@@ -247,6 +253,30 @@ def test_call_codex_surfaces_useful_stderr_tail(monkeypatch):
     assert "Codex CLI error" in msg
     assert "You've hit your usage limit" in msg
     assert "sandbox: read-only" in msg
+
+
+@pytest.mark.parametrize("use_tools", [True, False])
+def test_call_claude_cli_ignores_project_permission_settings(
+        monkeypatch, use_tools):
+    calls = []
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            self.pid = 1234
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            return "OK", ""
+
+    monkeypatch.setattr("llm_backend.subprocess.Popen", _FakePopen)
+
+    assert _call_claude_cli(
+        "sonnet", "Reply only with OK", 100, use_tools=use_tools,
+    ) == "OK"
+    cmd, _kwargs = calls[0]
+    sources_index = cmd.index("--setting-sources")
+    assert cmd[sources_index + 1] == "user"
 
 
 def test_call_openai_none_content_gives_clear_error():
